@@ -56,29 +56,113 @@ HeatStreetEPC/
 - pip package manager
 - (Optional) PostgreSQL for large datasets
 
-### Setup
+### Quick Setup
 
-1. **Clone the repository**:
+#### 🪟 Windows Users (Automated)
+
+**Recommended**: Use the automated setup script in PowerShell:
+
+```powershell
+# Clone the repository
+git clone https://github.com/pipnic1234/HeatStreetEPC.git
+cd HeatStreetEPC
+
+# Run automated setup
+.\setup.ps1
+```
+
+This automatically handles virtual environment creation, dependency installation, and verification.
+
+**See detailed Windows guide**: [docs/QUICKSTART_WINDOWS.md](docs/QUICKSTART_WINDOWS.md)
+
+#### 🐧 Linux / 🍎 Mac (Manual)
+
+```bash
+# Clone the repository
+git clone https://github.com/pipnic1234/HeatStreetEPC.git
+cd HeatStreetEPC
+
+# Create and activate virtual environment
+python -m venv venv
+source venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Verify installation
+python -c "from config.config import load_config; print('✓ Installation successful!')"
+```
+
+### Manual Setup (All Platforms)
+
+<details>
+<summary>Click to expand manual setup instructions</summary>
+
+#### Step 1: Clone the repository
+
+**Windows (PowerShell)**:
+```powershell
+git clone https://github.com/pipnic1234/HeatStreetEPC.git
+cd HeatStreetEPC
+```
+
+**Linux/Mac**:
 ```bash
 git clone https://github.com/pipnic1234/HeatStreetEPC.git
 cd HeatStreetEPC
 ```
 
-2. **Create a virtual environment**:
+#### Step 2: Create virtual environment
+
+**All platforms**:
 ```bash
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
 ```
 
-3. **Install dependencies**:
+#### Step 3: Activate virtual environment
+
+**Windows PowerShell**:
+```powershell
+.\venv\Scripts\Activate.ps1
+```
+
+**Windows Command Prompt**:
+```cmd
+venv\Scripts\activate.bat
+```
+
+**Linux/Mac**:
+```bash
+source venv/bin/activate
+```
+
+#### Step 4: Install dependencies
+
+**All platforms**:
 ```bash
 pip install -r requirements.txt
 ```
 
-4. **Verify installation**:
+#### Step 5: Verify installation
+
+**All platforms**:
 ```bash
 python -c "from config.config import load_config; print('✓ Installation successful!')"
 ```
+
+</details>
+
+### Troubleshooting
+
+**Windows: "cannot be loaded because running scripts is disabled"**
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+
+**Any platform: "python is not recognized"**
+- Ensure Python is in your PATH
+- Try using `python3` instead of `python`
+- Reinstall Python and check "Add to PATH" during installation
 
 ## Data Acquisition
 
