@@ -22,6 +22,7 @@ from config.config import (
     DATA_OUTPUTS_DIR
 )
 from src.acquisition.london_gis_downloader import LondonGISDownloader
+from src.spatial.postcode_geocoder import PostcodeGeocoder
 
 
 class HeatNetworkAnalyzer:
@@ -34,6 +35,10 @@ class HeatNetworkAnalyzer:
         self.config = load_config()
         self.heat_network_tiers = self.config['analysis']['heat_network_tiers']
         self.gis_downloader = LondonGISDownloader()
+
+        # Initialize postcode geocoder with caching
+        cache_file = DATA_PROCESSED_DIR / "geocoding_cache.csv"
+        self.geocoder = PostcodeGeocoder(cache_file=cache_file)
 
         logger.info("Initialized Heat Network Analyzer")
 
@@ -151,28 +156,53 @@ class HeatNetworkAnalyzer:
             return gdf
 
         else:
-            logger.warning("❌ No coordinate columns found in EPC data")
-            logger.info(f"   Available columns: {', '.join(df.columns[:15].tolist())}...")
-            logger.info("")
-            logger.warning("ℹ️  Spatial analysis requires property coordinates")
-            logger.info("")
-            logger.info("   The UK EPC Register API doesn't provide lat/lon coordinates.")
-            logger.info("   To enable spatial analysis, you need to:")
-            logger.info("")
-            logger.info("   Option 1: Use external geocoding service for postcodes")
-            logger.info("      - UK Postcode API: https://postcodes.io/")
-            logger.info("      - Nominatim: https://nominatim.openstreetmap.org/")
-            logger.info("")
-            logger.info("   Option 2: Use OS AddressBase data (if available)")
-            logger.info("      - Contains precise coordinates for all UK addresses")
-            logger.info("")
-            logger.info("   Option 3: Use UK Postcode centroid database")
-            logger.info("      - Free download: https://www.freemaptools.com/download-uk-postcode-lat-lng.htm")
-            logger.info("")
-            logger.warning("   Skipping spatial analysis (other analyses will continue)...")
+            # No lat/lon columns - try geocoding from postcodes
+            logger.info("No coordinate columns found - will geocode from postcodes")
 
-            # Return None to indicate geocoding not possible
-            return None
+            # Check for postcode column
+            postcode_col = None
+            for col in df.columns:
+                if 'postcode' in col.lower():
+                    postcode_col = col
+                    break
+
+            if not postcode_col:
+                logger.error("❌ No postcode column found in EPC data")
+                logger.info(f"   Available columns: {', '.join(df.columns[:15].tolist())}...")
+                logger.info("")
+                logger.warning("   Cannot geocode without postcodes. Skipping spatial analysis...")
+                return None
+
+            logger.info(f"Found postcode column: {postcode_col}")
+            logger.info("🌐 Geocoding postcodes using free UK Postcode API (postcodes.io)")
+            logger.info("   This may take a few minutes for large datasets...")
+            logger.info("   Results will be cached for faster subsequent runs")
+            logger.info("")
+
+            try:
+                # Geocode using postcodes
+                gdf = self.geocoder.geocode_dataframe(
+                    df,
+                    postcode_column=postcode_col,
+                    batch_mode=True
+                )
+
+                if gdf is None or len(gdf) == 0:
+                    logger.error("❌ Geocoding failed - no coordinates obtained")
+                    return None
+
+                logger.info("✓ Geocoding complete!")
+                return gdf
+
+            except Exception as e:
+                logger.error(f"❌ Error during geocoding: {e}")
+                logger.info("")
+                logger.info("   Alternative options:")
+                logger.info("   1. Check your internet connection (API requires network access)")
+                logger.info("   2. Try again later (API may be temporarily unavailable)")
+                logger.info("   3. Download UK postcode centroids: https://www.freemaptools.com/download-uk-postcode-lat-lng.htm")
+                logger.info("")
+                return None
 
     def classify_heat_network_tiers(
         self,

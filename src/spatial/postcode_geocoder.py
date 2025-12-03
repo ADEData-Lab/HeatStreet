@@ -1,0 +1,312 @@
+"""
+UK Postcode Geocoding Module
+
+Converts UK postcodes to latitude/longitude coordinates using free APIs.
+Supports multiple geocoding providers with fallback options.
+"""
+
+import pandas as pd
+import requests
+import time
+from pathlib import Path
+from typing import Optional, Tuple, List
+from loguru import logger
+from tqdm import tqdm
+import geopandas as gpd
+from shapely.geometry import Point
+
+
+class PostcodeGeocoder:
+    """
+    Geocodes UK postcodes to latitude/longitude coordinates.
+
+    Uses free UK postcode APIs with rate limiting and caching.
+    """
+
+    # Free UK Postcode API (no authentication required)
+    POSTCODES_IO_URL = "https://api.postcodes.io/postcodes"
+
+    def __init__(self, cache_file: Optional[Path] = None):
+        """
+        Initialize postcode geocoder.
+
+        Args:
+            cache_file: Optional path to cache geocoded results
+        """
+        self.cache_file = cache_file
+        self.cache = {}
+
+        if cache_file and cache_file.exists():
+            logger.info(f"Loading geocoding cache from {cache_file}")
+            cache_df = pd.read_csv(cache_file)
+            self.cache = dict(zip(cache_df['postcode'],
+                                 zip(cache_df['latitude'], cache_df['longitude'])))
+            logger.info(f"Loaded {len(self.cache):,} cached postcodes")
+
+    def clean_postcode(self, postcode: str) -> str:
+        """
+        Clean and standardize UK postcode format.
+
+        Args:
+            postcode: Raw postcode string
+
+        Returns:
+            Cleaned postcode (uppercase, single space)
+        """
+        if pd.isna(postcode):
+            return None
+
+        # Remove extra whitespace and convert to uppercase
+        postcode = str(postcode).strip().upper()
+
+        # Remove all spaces
+        postcode = postcode.replace(' ', '')
+
+        # Add space before last 3 characters (standard UK format)
+        if len(postcode) >= 5:
+            postcode = postcode[:-3] + ' ' + postcode[-3:]
+
+        return postcode
+
+    def geocode_single(self, postcode: str, use_cache: bool = True) -> Optional[Tuple[float, float]]:
+        """
+        Geocode a single postcode.
+
+        Args:
+            postcode: UK postcode to geocode
+            use_cache: Use cached results if available
+
+        Returns:
+            Tuple of (latitude, longitude) or None if failed
+        """
+        # Clean postcode
+        postcode = self.clean_postcode(postcode)
+
+        if not postcode:
+            return None
+
+        # Check cache
+        if use_cache and postcode in self.cache:
+            return self.cache[postcode]
+
+        try:
+            # Call postcodes.io API
+            response = requests.get(f"{self.POSTCODES_IO_URL}/{postcode}", timeout=5)
+
+            if response.status_code == 200:
+                data = response.json()
+
+                if data['status'] == 200 and data['result']:
+                    lat = data['result']['latitude']
+                    lon = data['result']['longitude']
+
+                    # Cache result
+                    self.cache[postcode] = (lat, lon)
+
+                    return (lat, lon)
+
+            return None
+
+        except Exception as e:
+            logger.debug(f"Error geocoding {postcode}: {e}")
+            return None
+
+    def geocode_batch(self, postcodes: List[str], batch_size: int = 100) -> dict:
+        """
+        Geocode multiple postcodes using batch API.
+
+        Args:
+            postcodes: List of UK postcodes
+            batch_size: Number of postcodes per batch (max 100)
+
+        Returns:
+            Dictionary mapping postcode to (lat, lon) tuple
+        """
+        results = {}
+
+        # Clean postcodes
+        postcodes = [self.clean_postcode(pc) for pc in postcodes if pd.notna(pc)]
+        postcodes = [pc for pc in postcodes if pc]  # Remove None values
+
+        # Check cache first
+        uncached = []
+        for pc in postcodes:
+            if pc in self.cache:
+                results[pc] = self.cache[pc]
+            else:
+                uncached.append(pc)
+
+        if not uncached:
+            return results
+
+        logger.info(f"Geocoding {len(uncached):,} postcodes (batch mode)...")
+
+        # Process in batches
+        for i in tqdm(range(0, len(uncached), batch_size), desc="Geocoding batches"):
+            batch = uncached[i:i+batch_size]
+
+            try:
+                # Call batch API
+                response = requests.post(
+                    self.POSTCODES_IO_URL,
+                    json={"postcodes": batch},
+                    timeout=10
+                )
+
+                if response.status_code == 200:
+                    data = response.json()
+
+                    if data['status'] == 200:
+                        for item in data['result']:
+                            if item['result']:
+                                postcode = item['query']
+                                lat = item['result']['latitude']
+                                lon = item['result']['longitude']
+
+                                results[postcode] = (lat, lon)
+                                self.cache[postcode] = (lat, lon)
+
+                # Rate limiting - be nice to free API
+                time.sleep(0.1)
+
+            except Exception as e:
+                logger.warning(f"Error geocoding batch: {e}")
+                continue
+
+        # Save cache
+        if self.cache_file:
+            self._save_cache()
+
+        return results
+
+    def geocode_dataframe(self,
+                         df: pd.DataFrame,
+                         postcode_column: str = 'POSTCODE',
+                         batch_mode: bool = True) -> gpd.GeoDataFrame:
+        """
+        Geocode all postcodes in a DataFrame.
+
+        Args:
+            df: DataFrame with postcode column
+            postcode_column: Name of postcode column
+            batch_mode: Use batch API (much faster)
+
+        Returns:
+            GeoDataFrame with geometry column
+        """
+        logger.info(f"Geocoding {len(df):,} properties from postcode column: {postcode_column}")
+
+        if postcode_column not in df.columns:
+            logger.error(f"Column '{postcode_column}' not found in DataFrame")
+            available = ', '.join(df.columns[:10].tolist())
+            logger.error(f"Available columns: {available}...")
+            return None
+
+        # Get unique postcodes
+        unique_postcodes = df[postcode_column].unique()
+        logger.info(f"Found {len(unique_postcodes):,} unique postcodes")
+
+        # Geocode
+        if batch_mode:
+            coords_map = self.geocode_batch(unique_postcodes)
+        else:
+            coords_map = {}
+            for pc in tqdm(unique_postcodes, desc="Geocoding"):
+                result = self.geocode_single(pc)
+                if result:
+                    coords_map[self.clean_postcode(pc)] = result
+                time.sleep(0.05)  # Rate limiting
+
+        logger.info(f"Successfully geocoded {len(coords_map):,} postcodes ({len(coords_map)/len(unique_postcodes)*100:.1f}%)")
+
+        # Add coordinates to dataframe
+        df_copy = df.copy()
+        df_copy['POSTCODE_CLEAN'] = df_copy[postcode_column].apply(self.clean_postcode)
+
+        def get_coords(pc):
+            return coords_map.get(pc, (None, None))
+
+        coords = df_copy['POSTCODE_CLEAN'].apply(get_coords)
+        df_copy['LATITUDE'] = coords.apply(lambda x: x[0] if x else None)
+        df_copy['LONGITUDE'] = coords.apply(lambda x: x[1] if x else None)
+
+        # Create geometry
+        geometry = [
+            Point(lon, lat) if pd.notna(lon) and pd.notna(lat) else None
+            for lon, lat in zip(df_copy['LONGITUDE'], df_copy['LATITUDE'])
+        ]
+
+        gdf = gpd.GeoDataFrame(df_copy, geometry=geometry, crs='EPSG:4326')
+
+        # Remove properties without coordinates
+        initial_count = len(gdf)
+        gdf = gdf[gdf.geometry.notna()].copy()
+
+        success_rate = len(gdf) / initial_count * 100
+        logger.info(f"✓ Geocoded {len(gdf):,} of {initial_count:,} properties ({success_rate:.1f}%)")
+
+        return gdf
+
+    def _save_cache(self):
+        """Save geocoding cache to file."""
+        if not self.cache_file:
+            return
+
+        cache_df = pd.DataFrame([
+            {'postcode': pc, 'latitude': lat, 'longitude': lon}
+            for pc, (lat, lon) in self.cache.items()
+        ])
+
+        self.cache_file.parent.mkdir(parents=True, exist_ok=True)
+        cache_df.to_csv(self.cache_file, index=False)
+        logger.debug(f"Saved {len(cache_df):,} postcodes to cache")
+
+
+def geocode_uk_postcodes(df: pd.DataFrame,
+                        postcode_column: str = 'POSTCODE',
+                        cache_file: Optional[Path] = None) -> gpd.GeoDataFrame:
+    """
+    Convenience function to geocode UK postcodes in a DataFrame.
+
+    Args:
+        df: DataFrame with postcode column
+        postcode_column: Name of postcode column (default: 'POSTCODE')
+        cache_file: Optional path to cache file (speeds up repeated runs)
+
+    Returns:
+        GeoDataFrame with geometry column
+
+    Example:
+        >>> df = pd.read_csv('epc_data.csv')
+        >>> gdf = geocode_uk_postcodes(df, postcode_column='POSTCODE')
+        >>> gdf.to_file('properties.geojson', driver='GeoJSON')
+    """
+    geocoder = PostcodeGeocoder(cache_file=cache_file)
+    return geocoder.geocode_dataframe(df, postcode_column=postcode_column)
+
+
+if __name__ == "__main__":
+    # Example usage
+    import sys
+    sys.path.append(str(Path(__file__).parent.parent.parent))
+    from config.config import DATA_RAW_DIR
+
+    # Test with sample postcodes
+    test_postcodes = [
+        "SW1A 1AA",  # 10 Downing Street
+        "EC4M 7RF",  # St Paul's Cathedral
+        "WC2N 5DU",  # Trafalgar Square
+        "N1 9AG",    # Islington
+    ]
+
+    geocoder = PostcodeGeocoder()
+
+    print("\nTesting single geocoding:")
+    for pc in test_postcodes:
+        coords = geocoder.geocode_single(pc)
+        print(f"{pc}: {coords}")
+
+    print("\nTesting batch geocoding:")
+    results = geocoder.geocode_batch(test_postcodes)
+    for pc, coords in results.items():
+        print(f"{pc}: {coords}")
