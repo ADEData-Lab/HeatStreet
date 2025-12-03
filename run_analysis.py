@@ -298,7 +298,7 @@ def analyze_archetype(df):
     console.print(f"[green]✓[/green] Archetype analysis complete")
 
     # Show key findings
-    if 'epc_bands' in results:
+    if 'epc_bands' in results and results['epc_bands'] and 'frequency' in results['epc_bands']:
         console.print()
         console.print("[cyan]EPC Band Distribution:[/cyan]")
         for band in ['D', 'E', 'F', 'G']:
@@ -306,6 +306,9 @@ def analyze_archetype(df):
                 count = results['epc_bands']['frequency'][band]
                 pct = results['epc_bands']['percentage'][band]
                 console.print(f"    Band {band}: {count:,} ({pct:.1f}%)")
+    else:
+        console.print()
+        console.print("[yellow]Note: EPC band distribution analysis could not be completed (missing required columns)[/yellow]")
 
     return results
 
@@ -326,8 +329,14 @@ def model_scenarios(df):
     # Show summary
     console.print()
     console.print("[cyan]Scenario Summary:[/cyan]")
-    for scenario, results in scenario_results.items():
-        console.print(f"    {scenario}: £{results['capital_cost_per_property']:,.0f} per property")
+    if scenario_results:
+        for scenario, results in scenario_results.items():
+            if 'capital_cost_per_property' in results:
+                console.print(f"    {scenario}: £{results['capital_cost_per_property']:,.0f} per property")
+            else:
+                console.print(f"    {scenario}: Analysis incomplete (missing required data)")
+    else:
+        console.print("[yellow]Note: Scenario modeling could not be completed (missing required columns)[/yellow]")
 
     # Subsidy analysis
     console.print()
