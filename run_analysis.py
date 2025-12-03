@@ -643,6 +643,80 @@ def generate_reports(archetype_results, scenario_results, subsidy_results=None, 
     return True
 
 
+def check_existing_data():
+    """Check if previously downloaded data exists."""
+    raw_csv = DATA_RAW_DIR / "epc_london_raw.csv"
+    filtered_csv = DATA_RAW_DIR / "epc_london_filtered.csv"
+
+    if raw_csv.exists() or filtered_csv.exists():
+        # Get file info
+        if filtered_csv.exists():
+            import os
+            file_size = os.path.getsize(filtered_csv) / (1024 * 1024)  # MB
+            mod_time = os.path.getmtime(filtered_csv)
+            from datetime import datetime
+            mod_date = datetime.fromtimestamp(mod_time).strftime('%Y-%m-%d %H:%M')
+
+            # Quick count of records
+            import pandas as pd
+            try:
+                df = pd.read_csv(filtered_csv, nrows=0)
+                line_count = sum(1 for _ in open(filtered_csv)) - 1  # Subtract header
+
+                console.print()
+                console.print(Panel(
+                    f"[bold cyan]Existing Data Found[/bold cyan]\n\n"
+                    f"File: epc_london_filtered.csv\n"
+                    f"Size: {file_size:.1f} MB\n"
+                    f"Records: ~{line_count:,}\n"
+                    f"Last modified: {mod_date}",
+                    border_style="green"
+                ))
+                console.print()
+
+                return True, filtered_csv, line_count
+            except Exception as e:
+                logger.debug(f"Could not read existing data: {e}")
+                return False, None, 0
+
+        elif raw_csv.exists():
+            import os
+            file_size = os.path.getsize(raw_csv) / (1024 * 1024)
+            mod_time = os.path.getmtime(raw_csv)
+            from datetime import datetime
+            mod_date = datetime.fromtimestamp(mod_time).strftime('%Y-%m-%d %H:%M')
+
+            console.print()
+            console.print(Panel(
+                f"[bold cyan]Existing Data Found[/bold cyan]\n\n"
+                f"File: epc_london_raw.csv\n"
+                f"Size: {file_size:.1f} MB\n"
+                f"Last modified: {mod_date}",
+                border_style="green"
+            ))
+            console.print()
+
+            return True, raw_csv, 0
+
+    return False, None, 0
+
+
+def load_existing_data(file_path):
+    """Load previously downloaded data from file."""
+    console.print()
+    console.print(Panel("[bold]Phase 1: Loading Existing Data[/bold]", border_style="blue"))
+    console.print()
+
+    console.print(f"[cyan]Loading data from {file_path.name}...[/cyan]")
+
+    import pandas as pd
+    df = pd.read_csv(file_path)
+
+    console.print(f"[green]✓[/green] Loaded {len(df):,} records")
+
+    return df
+
+
 def main():
     """Main execution function."""
     print_header()
@@ -661,37 +735,62 @@ def main():
     # Ask about GIS data download
     ask_gis_download()
 
-    # Ask what to download
-    scope = ask_download_scope()
+    # Check for existing data
+    has_existing, existing_file, record_count = check_existing_data()
 
-    # Show summary
-    console.print()
-    console.print(Panel(
-        f"[bold]Analysis Configuration[/bold]\n\n"
-        f"Mode: {scope['mode']}\n"
-        f"From year: {scope['from_year']}\n"
-        f"Boroughs: {len(scope['boroughs']) if scope['boroughs'] else 'All (33)'}",
-        border_style="cyan"
-    ))
-    console.print()
+    df = None
 
-    proceed = questionary.confirm(
-        "Start analysis?",
-        default=True
-    ).ask()
+    if has_existing:
+        use_existing = questionary.confirm(
+            "Use existing downloaded data?",
+            default=True
+        ).ask()
 
-    if not proceed:
-        console.print("[yellow]Analysis cancelled[/yellow]")
-        return
+        if use_existing:
+            df = load_existing_data(existing_file)
+        else:
+            console.print()
+            console.print("[yellow]Downloading new data (existing data will be overwritten)...[/yellow]")
+            console.print()
 
-    # Run pipeline
-    start_time = time.time()
-
-    # Phase 1: Download
-    df = download_data(scope)
+    # If not using existing data, download new
     if df is None or df.empty:
-        console.print("[red]✗ Analysis stopped - no data available[/red]")
-        return
+        # Ask what to download
+        scope = ask_download_scope()
+
+        # Show summary
+        console.print()
+        console.print(Panel(
+            f"[bold]Analysis Configuration[/bold]\n\n"
+            f"Mode: {scope['mode']}\n"
+            f"From year: {scope['from_year']}\n"
+            f"Boroughs: {len(scope['boroughs']) if scope['boroughs'] else 'All (33)'}",
+            border_style="cyan"
+        ))
+        console.print()
+
+        proceed = questionary.confirm(
+            "Start download?",
+            default=True
+        ).ask()
+
+        if not proceed:
+            console.print("[yellow]Analysis cancelled[/yellow]")
+            return
+
+        # Run pipeline
+        start_time = time.time()
+
+        # Phase 1: Download
+        df = download_data(scope)
+        if df is None or df.empty:
+            console.print("[red]✗ Analysis stopped - no data available[/red]")
+            return
+    else:
+        start_time = time.time()
+        console.print()
+        console.print("[cyan]Proceeding with existing data...[/cyan]")
+        console.print()
 
     # Phase 2: Validate
     df_validated = validate_data(df)
