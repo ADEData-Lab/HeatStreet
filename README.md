@@ -52,46 +52,78 @@ HeatStreetEPC/
 
 ### Prerequisites
 
-- Python 3.9 or higher
+**Core Requirements**:
+- Python 3.11 or higher
 - pip package manager
-- (Optional) PostgreSQL for large datasets
 
-### Quick Setup
+**For Spatial Analysis (Heat Network Tiers)**:
+- **Option A (Recommended)**: Miniconda/Anaconda - handles GDAL automatically
+- **Option B**: Manual GDAL installation (complex on Windows)
+- **Option C**: Skip spatial analysis - 85% of functionality still works!
 
-#### 🪟 Windows Users (Automated)
+### 🚀 Quick Start (Recommended Methods)
 
-**Recommended**: Use the automated setup script in PowerShell:
+#### Method 1: Conda Launcher (Best for Windows + Spatial Analysis)
 
-```powershell
-# Clone the repository
+**Recommended if you want heat network tier analysis on Windows!**
+
+This method automatically installs GDAL/geopandas via Conda, avoiding Windows installation issues.
+
+**Step 1**: Install Miniconda (if not already installed)
+- Download: https://docs.conda.io/en/latest/miniconda.html
+- Run installer with default settings
+- Restart your terminal
+
+**Step 2**: Clone and run
+```bash
 git clone https://github.com/pipnic1234/HeatStreetEPC.git
 cd HeatStreetEPC
 
-# Run automated setup
-.\setup.ps1
+# Windows Command Prompt
+run-conda.bat
+
+# OR Windows PowerShell
+.\run-conda.ps1
 ```
 
-This automatically handles virtual environment creation, dependency installation, and verification.
+This single command:
+- Creates conda environment with Python 3.11
+- Installs geopandas + GDAL automatically
+- Installs all other dependencies
+- Runs the interactive analysis
+- **Everything works, including spatial analysis!**
 
-**See detailed Windows guide**: [docs/QUICKSTART_WINDOWS.md](docs/QUICKSTART_WINDOWS.md)
+#### Method 2: Standard Launcher (Core Analysis Only)
 
-#### 🐧 Linux / 🍎 Mac (Manual)
+**Use this if you don't need spatial analysis or have GDAL issues.**
+
+Works perfectly for EPC analysis, scenarios, charts, and reports (85% of functionality).
 
 ```bash
-# Clone the repository
 git clone https://github.com/pipnic1234/HeatStreetEPC.git
 cd HeatStreetEPC
 
-# Create and activate virtual environment
-python -m venv venv
-source venv/bin/activate
+# Windows Command Prompt
+run.bat
 
-# Install dependencies
-pip install -r requirements.txt
+# OR Windows PowerShell
+.\run.ps1
 
-# Verify installation
-python -c "from config.config import load_config; print('✓ Installation successful!')"
+# OR Linux/Mac
+./run.sh
 ```
+
+This automatically:
+- Creates virtual environment
+- Installs all core dependencies
+- Optionally attempts spatial dependencies (may fail on Windows)
+- Runs the interactive analysis
+
+**The analysis works even if spatial dependencies fail!**
+
+#### Method 3: Manual Setup (Advanced Users)
+
+See [Manual Setup](#manual-setup-all-platforms) section below.
 
 ### Manual Setup (All Platforms)
 
@@ -154,6 +186,8 @@ python -c "from config.config import load_config; print('✓ Installation succes
 
 ### Troubleshooting
 
+#### Common Issues
+
 **Windows: "cannot be loaded because running scripts is disabled"**
 ```powershell
 Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
@@ -163,6 +197,32 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 - Ensure Python is in your PATH
 - Try using `python3` instead of `python`
 - Reinstall Python and check "Add to PATH" during installation
+
+**Conda: "conda is not recognized"**
+- Install Miniconda: https://docs.conda.io/en/latest/miniconda.html
+- Restart your terminal after installation
+- Use `run-conda.bat` or `run-conda.ps1` (not `run.bat`)
+
+**GDAL/Geopandas installation fails with run.bat**
+- This is normal on Windows!
+- The core analysis still works (85% of functionality)
+- For spatial analysis, use `run-conda.bat` instead
+- See [docs/SPATIAL_SETUP.md](docs/SPATIAL_SETUP.md) for detailed guide
+
+**"No module named 'osgeo'" during spatial analysis**
+- GDAL not installed
+- Use `run-conda.bat` for automatic installation
+- Or skip spatial analysis (analysis works without it)
+
+#### Which Run Script Should I Use?
+
+| Script | Best For | Spatial Analysis? |
+|--------|----------|-------------------|
+| `run-conda.bat/ps1` | **Windows users wanting heat network tiers** | ✅ Yes (auto-installs GDAL) |
+| `run.bat/ps1` | Quick start, core analysis only | ⚠️ Attempts install (may fail) |
+| `setup.bat/ps1` | First-time setup only | ❌ No (run separately) |
+
+**Recommendation**: Use `run-conda.bat` if you want the complete analysis with spatial features on Windows!
 
 ## Data Acquisition
 
@@ -193,50 +253,86 @@ This creates detailed download instructions.
 
 ## Usage
 
-### Running the Complete Pipeline
+### 🎯 Interactive Analysis (Recommended)
+
+The easiest way to run the complete analysis is using the interactive CLI:
 
 ```bash
-python main.py --phase all
+# If using Conda method
+run-conda.bat   # or run-conda.ps1 for PowerShell
+
+# If using standard method
+run.bat         # or run.ps1 for PowerShell
 ```
 
-This executes all phases:
-1. Data acquisition
-2. Data cleaning & validation
-3. Archetype characterization
-4. Scenario modeling
-5. Spatial analysis
-6. Report generation
+The interactive CLI will guide you through:
 
-### Running Individual Phases
+1. **EPC Data Download**
+   - Choose borough(s) to analyze
+   - Automatically downloads from EPC API
+   - Validates and cleans data
 
-**Data Cleaning Only**:
+2. **Archetype Characterization**
+   - Analyzes building fabric (walls, loft, floors, windows)
+   - Summarizes heating systems and fuel types
+   - Reports EPC band distribution
+   - Calculates energy consumption and CO₂ emissions
+
+3. **Scenario Modeling**
+   - Models 5 decarbonization pathways
+   - Calculates costs, savings, payback periods
+   - Estimates EPC band improvements
+   - Performs subsidy sensitivity analysis
+
+4. **Spatial Analysis** (if GDAL available)
+   - Auto-downloads London GIS data
+   - Classifies properties into heat network tiers
+   - Calculates heat density (GWh/km²)
+   - Generates interactive HTML maps
+   - Exports GeoJSON with tier classifications
+
+5. **Visualization & Reports**
+   - Creates charts (EPC bands, scenarios, subsidies)
+   - Generates formatted Excel workbook
+   - Produces executive summary report
+   - Saves all outputs to `data/outputs/`
+
+### 📊 Output Locations
+
+After running the analysis, find your results in:
+
+```
+data/outputs/
+├── figures/
+│   ├── epc_band_distribution.png
+│   ├── scenario_comparison.png
+│   ├── subsidy_sensitivity.png
+│   └── heat_network_tiers.png
+├── reports/
+│   └── executive_summary.txt
+├── maps/
+│   └── heat_network_tiers.html  (interactive map)
+├── analysis_results.xlsx         (comprehensive workbook)
+└── properties_with_tiers.geojson (spatial data)
+```
+
+### 🔧 Advanced: Command-Line Interface
+
+For automated workflows or specific phases:
+
 ```bash
-python main.py --phase clean
+# Activate environment first
+conda activate heatstreet  # if using Conda
+# OR
+.\venv\Scripts\activate    # if using venv
+
+# Run specific phases
+python run_analysis.py
 ```
 
-**Archetype Analysis Only**:
-```bash
-python main.py --phase analyze
-```
+### 🛠️ Advanced: Running Individual Modules
 
-**Scenario Modeling Only**:
-```bash
-python main.py --phase model
-```
-
-**Spatial Analysis Only**:
-```bash
-python main.py --phase spatial
-```
-
-**Report Generation Only**:
-```bash
-python main.py --phase report
-```
-
-### Running Individual Modules
-
-Each module can also be run independently:
+Each module can be run independently for testing:
 
 ```bash
 # Data acquisition
@@ -251,7 +347,7 @@ python src/analysis/archetype_analysis.py
 # Scenario modeling
 python src/modeling/scenario_model.py
 
-# Spatial analysis
+# Spatial analysis (requires GDAL)
 python src/spatial/heat_network_analysis.py
 ```
 
