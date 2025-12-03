@@ -315,8 +315,18 @@ def validate_data(df):
     output_file = DATA_PROCESSED_DIR / "epc_london_validated.csv"
     df_validated.to_csv(output_file, index=False)
 
-    parquet_file = output_file.with_suffix('.parquet')
-    df_validated.to_parquet(parquet_file, index=False)
+    # Try to save parquet (optional for performance)
+    try:
+        parquet_file = output_file.with_suffix('.parquet')
+        # Convert object columns to strings to avoid mixed-type issues
+        df_parquet = df_validated.copy()
+        for col in df_parquet.columns:
+            if df_parquet[col].dtype == 'object':
+                df_parquet[col] = df_parquet[col].astype(str)
+        df_parquet.to_parquet(parquet_file, index=False)
+    except Exception as e:
+        console.print(f"[yellow]Note: Could not save parquet format (CSV saved successfully)[/yellow]")
+        logger.debug(f"Parquet save failed: {e}")
 
     validator.save_validation_report()
 
