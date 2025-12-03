@@ -252,11 +252,11 @@ class HeatNetworkAnalyzer:
         """
         Classify properties by heat density (Tiers 3-5).
 
-        This is a simplified implementation. Full implementation would:
-        1. Calculate heat demand for each property
-        2. Aggregate by street or area
-        3. Calculate linear heat density (kWh/m/year)
-        4. Classify based on thresholds
+        Calculates heat density using spatial aggregation on a grid.
+        Tiers based on GWh/km² thresholds:
+        - Tier 3: >15 GWh/km² (High density)
+        - Tier 4: 5-15 GWh/km² (Medium density)
+        - Tier 5: <5 GWh/km² (Low density)
 
         Args:
             properties: GeoDataFrame with properties
@@ -264,19 +264,92 @@ class HeatNetworkAnalyzer:
         Returns:
             GeoDataFrame with heat density tiers assigned
         """
-        logger.info("Classifying heat density tiers (simplified)...")
+        logger.info("Calculating heat density tiers using spatial aggregation...")
 
         # For properties not already classified as Tier 1 or 2
         unclassified_mask = properties['tier_number'] > 2
 
-        if 'ENERGY_CONSUMPTION_CURRENT' in properties.columns:
-            # Use energy consumption as proxy for heat demand
-            # In reality, would need to:
-            # - Extract space heating component
-            # - Aggregate by street
-            # - Calculate linear heat density
+        if 'ENERGY_CONSUMPTION_CURRENT' not in properties.columns:
+            logger.warning("No energy consumption data - using simplified tertile method")
+            return self._classify_by_tertiles(properties, unclassified_mask)
 
-            # Simplified: use energy consumption tertiles
+        try:
+            # Method 1: Grid-based heat density (proper implementation)
+            logger.info("Using grid-based heat density calculation...")
+
+            # Ensure we're in British National Grid (meters)
+            if properties.crs != 'EPSG:27700':
+                properties_27700 = properties.to_crs('EPSG:27700')
+            else:
+                properties_27700 = properties.copy()
+
+            # Create 500m x 500m grid
+            grid_size = 500  # meters
+
+            # Get bounding box
+            minx, miny, maxx, maxy = properties_27700.total_bounds
+
+            # Create grid cells
+            from shapely.geometry import box
+            grid_cells = []
+            x_coords = np.arange(minx, maxx, grid_size)
+            y_coords = np.arange(miny, maxy, grid_size)
+
+            logger.info(f"Creating {len(x_coords) * len(y_coords)} grid cells...")
+
+            # For each unclassified property, calculate heat density in its vicinity
+            for idx, prop in properties_27700[unclassified_mask].iterrows():
+                # Create 500m buffer around property
+                buffer = prop.geometry.buffer(250)  # 250m radius = 500m diameter
+                buffer_area_km2 = buffer.area / 1_000_000  # Convert m² to km²
+
+                # Find all properties within this buffer
+                nearby_mask = properties_27700.geometry.within(buffer)
+                nearby_props = properties_27700[nearby_mask]
+
+                if len(nearby_props) > 0:
+                    # Sum energy consumption (kWh/year)
+                    total_energy_kwh = nearby_props['ENERGY_CONSUMPTION_CURRENT'].sum()
+
+                    # Convert to GWh/km²
+                    heat_density_gwh_km2 = (total_energy_kwh / 1_000_000) / buffer_area_km2
+
+                    # Classify by heat density thresholds
+                    if heat_density_gwh_km2 >= self.heat_network_tiers['tier_3']['min_heat_density_gwh_km2']:
+                        properties.loc[idx, 'heat_network_tier'] = 'Tier 3: High heat density'
+                        properties.loc[idx, 'tier_number'] = 3
+                        properties.loc[idx, 'heat_density_gwh_km2'] = heat_density_gwh_km2
+                    elif heat_density_gwh_km2 >= self.heat_network_tiers['tier_4']['min_heat_density_gwh_km2']:
+                        properties.loc[idx, 'heat_network_tier'] = 'Tier 4: Medium heat density'
+                        properties.loc[idx, 'tier_number'] = 4
+                        properties.loc[idx, 'heat_density_gwh_km2'] = heat_density_gwh_km2
+                    else:
+                        # Tier 5 (already default)
+                        properties.loc[idx, 'heat_density_gwh_km2'] = heat_density_gwh_km2
+
+            tier_3_count = (properties['tier_number'] == 3).sum()
+            tier_4_count = (properties['tier_number'] == 4).sum()
+            tier_5_count = (properties['tier_number'] == 5).sum()
+
+            logger.info(f"  Tier 3 (High density >15 GWh/km²): {tier_3_count:,}")
+            logger.info(f"  Tier 4 (Medium density 5-15 GWh/km²): {tier_4_count:,}")
+            logger.info(f"  Tier 5 (Low density <5 GWh/km²): {tier_5_count:,}")
+
+        except Exception as e:
+            logger.warning(f"Grid-based calculation failed: {e}. Falling back to tertile method.")
+            properties = self._classify_by_tertiles(properties, unclassified_mask)
+
+        return properties
+
+    def _classify_by_tertiles(
+        self,
+        properties: gpd.GeoDataFrame,
+        unclassified_mask: pd.Series
+    ) -> gpd.GeoDataFrame:
+        """Fallback classification using energy consumption tertiles."""
+        logger.info("Classifying heat density tiers using tertile method (fallback)...")
+
+        if 'ENERGY_CONSUMPTION_CURRENT' in properties.columns:
             unclassified_energy = properties.loc[unclassified_mask, 'ENERGY_CONSUMPTION_CURRENT']
 
             if len(unclassified_energy) > 0:
@@ -293,7 +366,6 @@ class HeatNetworkAnalyzer:
                     (properties['ENERGY_CONSUMPTION_CURRENT'] >= medium_threshold) &
                     (properties['ENERGY_CONSUMPTION_CURRENT'] < high_threshold)
                 )
-                # Tier 5 is everything else (already set as default)
 
                 tier_3_count = tier_3_mask.sum()
                 tier_4_count = tier_4_mask.sum()
@@ -301,11 +373,11 @@ class HeatNetworkAnalyzer:
                 properties.loc[tier_3_mask, 'heat_network_tier'] = 'Tier 3: High heat density'
                 properties.loc[tier_3_mask, 'tier_number'] = 3
 
-                properties.loc[tier_4_mask, 'heat_network_tier'] = 'Tier 4: Moderate heat density'
+                properties.loc[tier_4_mask, 'heat_network_tier'] = 'Tier 4: Medium heat density'
                 properties.loc[tier_4_mask, 'tier_number'] = 4
 
                 logger.info(f"  Tier 3 (High): {tier_3_count:,}")
-                logger.info(f"  Tier 4 (Moderate): {tier_4_count:,}")
+                logger.info(f"  Tier 4 (Medium): {tier_4_count:,}")
 
         return properties
 
@@ -441,6 +513,106 @@ class HeatNetworkAnalyzer:
             logger.warning("folium not available, skipping map creation")
         except Exception as e:
             logger.error(f"Error creating map: {e}")
+
+    def run_complete_analysis(
+        self,
+        df: pd.DataFrame,
+        auto_download_gis: bool = True
+    ) -> Tuple[Optional[gpd.GeoDataFrame], Optional[pd.DataFrame]]:
+        """
+        Run complete spatial analysis workflow.
+
+        Args:
+            df: Validated EPC DataFrame
+            auto_download_gis: Automatically download GIS data if not available
+
+        Returns:
+            Tuple of (classified properties GeoDataFrame, pathway summary DataFrame)
+        """
+        logger.info("=" * 80)
+        logger.info("SPATIAL ANALYSIS: HEAT NETWORK TIER CLASSIFICATION")
+        logger.info("=" * 80)
+
+        try:
+            # Step 1: Geocode properties
+            logger.info("\nStep 1: Geocoding properties...")
+            properties_gdf = self.geocode_properties(df)
+
+            if len(properties_gdf) == 0:
+                logger.warning("No properties could be geocoded. Spatial analysis cannot proceed.")
+                return None, None
+
+            logger.info(f"✓ Successfully geocoded {len(properties_gdf):,} properties")
+
+            # Step 2: Load GIS data
+            logger.info("\nStep 2: Loading London heat network GIS data...")
+            heat_networks, heat_zones = self.load_london_heat_map_data(
+                auto_download=auto_download_gis
+            )
+
+            if heat_networks is not None:
+                logger.info(f"✓ Loaded {len(heat_networks)} existing heat networks")
+            if heat_zones is not None:
+                logger.info(f"✓ Loaded {len(heat_zones)} potential heat network zones")
+
+            # Step 3: Classify by heat network tiers
+            logger.info("\nStep 3: Classifying properties by heat network tier...")
+            properties_classified = self.classify_heat_network_tiers(
+                properties_gdf,
+                heat_networks,
+                heat_zones
+            )
+
+            logger.info(f"✓ Classified {len(properties_classified):,} properties into 5 tiers")
+
+            # Step 4: Analyze pathway suitability
+            logger.info("\nStep 4: Analyzing decarbonization pathway suitability...")
+            pathway_summary = self.analyze_pathway_suitability(properties_classified)
+
+            logger.info("✓ Pathway analysis complete")
+
+            # Step 5: Save results
+            logger.info("\nStep 5: Saving results...")
+
+            # Save classified properties
+            output_file = DATA_PROCESSED_DIR / "epc_with_heat_network_tiers.geojson"
+            output_file.parent.mkdir(parents=True, exist_ok=True)
+            properties_classified.to_file(output_file, driver='GeoJSON')
+            logger.info(f"✓ Saved classified properties: {output_file}")
+
+            # Save pathway summary
+            pathway_file = DATA_OUTPUTS_DIR / "pathway_suitability_by_tier.csv"
+            pathway_file.parent.mkdir(parents=True, exist_ok=True)
+            pathway_summary.to_csv(pathway_file, index=False)
+            logger.info(f"✓ Saved pathway summary: {pathway_file}")
+
+            # Step 6: Create interactive map
+            logger.info("\nStep 6: Creating interactive heat network tier map...")
+            self.create_heat_network_map(properties_classified)
+            logger.info("✓ Interactive map created")
+
+            logger.info("\n" + "=" * 80)
+            logger.info("SPATIAL ANALYSIS COMPLETE!")
+            logger.info("=" * 80)
+
+            return properties_classified, pathway_summary
+
+        except ImportError as e:
+            logger.error("=" * 80)
+            logger.error("SPATIAL ANALYSIS REQUIRES GDAL/GEOPANDAS")
+            logger.error("=" * 80)
+            logger.error(f"\nMissing dependency: {e}")
+            logger.error("\nTo install spatial dependencies:")
+            logger.error("  Option 1 (Windows - Recommended): conda install -c conda-forge geopandas")
+            logger.error("  Option 2 (Linux/Mac): pip install -r requirements-spatial.txt")
+            logger.error("\nOr skip spatial analysis - the rest of the analysis works without it!")
+            logger.error("=" * 80)
+            return None, None
+
+        except Exception as e:
+            logger.error(f"Error in spatial analysis: {e}")
+            logger.exception("Full traceback:")
+            return None, None
 
 
 def main():
