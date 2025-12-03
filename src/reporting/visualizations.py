@@ -377,6 +377,189 @@ class ReportGenerator:
 
         logger.info(f"Summary report saved to: {output_path}")
 
+    def export_to_excel(
+        self,
+        archetype_results: Dict,
+        scenario_results: Dict,
+        subsidy_results: Optional[Dict] = None,
+        df_properties: Optional[pd.DataFrame] = None,
+        output_path: Optional[Path] = None
+    ):
+        """
+        Export all results to a formatted Excel workbook.
+
+        Args:
+            archetype_results: Results from archetype analysis
+            scenario_results: Results from scenario modeling
+            subsidy_results: Results from subsidy sensitivity analysis
+            df_properties: Property-level DataFrame
+            output_path: Path to save Excel file
+        """
+        logger.info("Exporting results to Excel...")
+
+        if output_path is None:
+            output_path = DATA_OUTPUTS_DIR / "heat_street_analysis_results.xlsx"
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        try:
+            import openpyxl
+            from openpyxl.styles import Font, Alignment, PatternFill
+            from openpyxl.utils.dataframe import dataframe_to_rows
+        except ImportError:
+            logger.warning("openpyxl not installed. Using basic Excel export...")
+            # Fallback to basic pandas export
+            with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
+                self._export_basic_excel(writer, archetype_results, scenario_results,
+                                        subsidy_results, df_properties)
+            logger.info(f"Basic Excel export saved to: {output_path}")
+            return
+
+        # Create workbook with formatted sheets
+        with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
+
+            # Sheet 1: Executive Summary
+            self._write_summary_sheet(writer, archetype_results, scenario_results)
+
+            # Sheet 2: EPC Band Distribution
+            if 'epc_bands' in archetype_results:
+                self._write_epc_bands_sheet(writer, archetype_results['epc_bands'])
+
+            # Sheet 3: Scenario Comparison
+            if scenario_results:
+                self._write_scenarios_sheet(writer, scenario_results)
+
+            # Sheet 4: Subsidy Sensitivity
+            if subsidy_results:
+                self._write_subsidy_sheet(writer, subsidy_results)
+
+            # Sheet 5: Property Details (sample)
+            if df_properties is not None and not df_properties.empty:
+                # Export first 1000 properties to avoid huge files
+                sample_df = df_properties.head(1000).copy()
+                sample_df.to_excel(writer, sheet_name='Property Sample', index=False)
+
+        logger.info(f"Excel workbook saved to: {output_path}")
+
+    def _write_summary_sheet(self, writer, archetype_results: Dict, scenario_results: Dict):
+        """Write executive summary sheet."""
+        summary_data = []
+
+        summary_data.append(['HEAT STREET PROJECT - EXECUTIVE SUMMARY'])
+        summary_data.append([''])
+        summary_data.append(['1. PROPERTY ARCHETYPE CHARACTERISTICS'])
+        summary_data.append([''])
+
+        # EPC Bands
+        if 'epc_bands' in archetype_results:
+            summary_data.append(['EPC Band Distribution:'])
+            for band in ['A', 'B', 'C', 'D', 'E', 'F', 'G']:
+                if band in archetype_results['epc_bands']['frequency']:
+                    count = archetype_results['epc_bands']['frequency'][band]
+                    pct = archetype_results['epc_bands']['percentage'][band]
+                    summary_data.append([f'Band {band}', count, f'{pct:.1f}%'])
+
+        # SAP Scores
+        if 'sap_scores' in archetype_results:
+            summary_data.append([''])
+            summary_data.append(['SAP Score Statistics:'])
+            summary_data.append(['Mean', archetype_results['sap_scores']['mean']])
+            summary_data.append(['Median', archetype_results['sap_scores']['median']])
+
+        # Wall Construction
+        if 'wall_construction' in archetype_results:
+            summary_data.append([''])
+            summary_data.append(['Wall Construction:'])
+            summary_data.append(['Insulation Rate (%)', archetype_results['wall_construction']['insulation_rate']])
+
+        summary_data.append([''])
+        summary_data.append(['2. SCENARIO ANALYSIS SUMMARY'])
+        summary_data.append([''])
+
+        # Scenarios
+        for scenario, results in scenario_results.items():
+            summary_data.append([f'{scenario.upper()}'])
+            summary_data.append(['Capital Cost (total)', f"£{results['capital_cost_total']:,.0f}"])
+            summary_data.append(['Cost per Property', f"£{results['capital_cost_per_property']:,.0f}"])
+            summary_data.append(['Annual CO2 Reduction (kg)', f"{results['annual_co2_reduction_kg']:,.0f}"])
+            summary_data.append(['Annual Bill Savings', f"£{results['annual_bill_savings']:,.0f}"])
+            if 'average_payback_years' in results:
+                summary_data.append(['Average Payback (years)', f"{results['average_payback_years']:.1f}"])
+            summary_data.append([''])
+
+        df_summary = pd.DataFrame(summary_data)
+        df_summary.to_excel(writer, sheet_name='Executive Summary', index=False, header=False)
+
+    def _write_epc_bands_sheet(self, writer, epc_data: Dict):
+        """Write EPC bands sheet."""
+        bands = ['A', 'B', 'C', 'D', 'E', 'F', 'G']
+        frequencies = [epc_data['frequency'].get(band, 0) for band in bands]
+        percentages = [epc_data['percentage'].get(band, 0) for band in bands]
+
+        df_epc = pd.DataFrame({
+            'EPC Band': bands,
+            'Number of Properties': frequencies,
+            'Percentage': [f'{p:.2f}%' for p in percentages]
+        })
+
+        df_epc.to_excel(writer, sheet_name='EPC Bands', index=False)
+
+    def _write_scenarios_sheet(self, writer, scenario_results: Dict):
+        """Write scenario comparison sheet."""
+        scenarios = []
+
+        for scenario_name, results in scenario_results.items():
+            scenarios.append({
+                'Scenario': scenario_name,
+                'Capital Cost (Total)': results['capital_cost_total'],
+                'Cost per Property': results['capital_cost_per_property'],
+                'Annual Energy Reduction (kWh)': results['annual_energy_reduction_kwh'],
+                'Annual CO2 Reduction (kg)': results['annual_co2_reduction_kg'],
+                'Annual Bill Savings (£)': results['annual_bill_savings'],
+                'Average Payback (years)': results.get('average_payback_years', 0),
+                'Median Payback (years)': results.get('median_payback_years', 0)
+            })
+
+        df_scenarios = pd.DataFrame(scenarios)
+        df_scenarios.to_excel(writer, sheet_name='Scenario Comparison', index=False)
+
+    def _write_subsidy_sheet(self, writer, subsidy_results: Dict):
+        """Write subsidy sensitivity sheet."""
+        subsidy_data = []
+
+        for level, data in subsidy_results.items():
+            subsidy_data.append({
+                'Subsidy Level (%)': data['subsidy_percentage'],
+                'Cost per Property (£)': data['capital_cost_per_property'],
+                'Payback (years)': data['payback_years'],
+                'Estimated Uptake (%)': data['estimated_uptake_rate'] * 100,
+                'Properties Upgraded': data['properties_upgraded'],
+                'Public Expenditure (£)': data['public_expenditure_total'],
+                'Carbon Abatement Cost (£/tCO2)': data['carbon_abatement_cost_per_tonne']
+            })
+
+        df_subsidy = pd.DataFrame(subsidy_data)
+        df_subsidy.to_excel(writer, sheet_name='Subsidy Sensitivity', index=False)
+
+    def _export_basic_excel(self, writer, archetype_results, scenario_results,
+                           subsidy_results, df_properties):
+        """Basic Excel export without openpyxl formatting."""
+        # Summary
+        pd.DataFrame([{'Analysis': 'Heat Street Project', 'Status': 'Complete'}]).to_excel(
+            writer, sheet_name='Summary', index=False
+        )
+
+        # Scenarios
+        if scenario_results:
+            scenarios = []
+            for name, results in scenario_results.items():
+                scenarios.append({
+                    'Scenario': name,
+                    'Cost': results['capital_cost_per_property'],
+                    'CO2 Reduction': results['annual_co2_reduction_kg']
+                })
+            pd.DataFrame(scenarios).to_excel(writer, sheet_name='Scenarios', index=False)
+
 
 def main():
     """Main execution for report generation."""
