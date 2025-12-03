@@ -21,6 +21,7 @@ sys.path.append(str(Path(__file__).parent))
 
 from config.config import load_config, ensure_directories, DATA_RAW_DIR, DATA_PROCESSED_DIR
 from src.acquisition.epc_api_downloader import EPCAPIDownloader
+from src.acquisition.london_gis_downloader import LondonGISDownloader
 from src.cleaning.data_validator import EPCDataValidator
 from src.analysis.archetype_analysis import ArchetypeAnalyzer
 from src.modeling.scenario_model import ScenarioModeler
@@ -177,6 +178,47 @@ def ask_download_scope():
             'from_year': int(from_year),
             'max_per_borough': max_per_borough
         }
+
+
+def ask_gis_download():
+    """Ask if user wants to download London GIS data for spatial analysis."""
+    console.print()
+    console.print("[cyan]London GIS Data (Optional)[/cyan]")
+    console.print()
+    console.print("This analysis can optionally use GIS data from London Datastore for:")
+    console.print("  • Existing district heating networks")
+    console.print("  • Potential heat network zones")
+    console.print("  • Heat load and supply data by borough")
+    console.print()
+
+    # Check if already downloaded
+    gis_downloader = LondonGISDownloader()
+    summary = gis_downloader.get_data_summary()
+
+    if summary['available']:
+        console.print("[green]✓[/green] GIS data already downloaded")
+        console.print(f"    Heat load files: {summary['heat_load_files']}")
+        console.print(f"    Network files: {summary['network_files']}")
+        console.print(f"    Heat supply files: {summary['heat_supply_files']}")
+        return True
+
+    download = questionary.confirm(
+        "Download London GIS data? (~2 MB, required for spatial analysis)",
+        default=True
+    ).ask()
+
+    if download:
+        console.print()
+        console.print("[cyan]Downloading London GIS data...[/cyan]")
+
+        if gis_downloader.download_and_prepare():
+            console.print("[green]✓[/green] GIS data downloaded and ready")
+            return True
+        else:
+            console.print("[yellow]⚠[/yellow] GIS data download failed (spatial analysis will be limited)")
+            return False
+
+    return False
 
 
 def download_data(scope):
@@ -349,27 +391,102 @@ def model_scenarios(df):
     return scenario_results, subsidy_results
 
 
-def generate_reports(archetype_results, scenario_results):
-    """Generate final reports."""
+def generate_reports(archetype_results, scenario_results, subsidy_results=None, df_validated=None):
+    """Generate final reports and visualizations."""
     console.print()
     console.print(Panel("[bold]Phase 5: Report Generation[/bold]", border_style="blue"))
     console.print()
 
-    console.print("[cyan]Generating reports and visualizations...[/cyan]")
+    console.print("[cyan]Generating comprehensive reports and visualizations...[/cyan]")
 
     from src.reporting.visualizations import ReportGenerator
 
     generator = ReportGenerator()
+    reports_created = []
 
-    # Generate visualizations
-    if archetype_results and 'epc_bands' in archetype_results:
-        generator.plot_epc_band_distribution(archetype_results['epc_bands'])
+    # 1. EPC Band Distribution
+    if archetype_results and 'epc_bands' in archetype_results and archetype_results['epc_bands']:
+        try:
+            generator.plot_epc_band_distribution(archetype_results['epc_bands'])
+            reports_created.append("✓ EPC band distribution chart")
+        except Exception as e:
+            console.print(f"[yellow]⚠ Could not generate EPC band chart: {e}[/yellow]")
 
-    if scenario_results:
-        generator.plot_scenario_comparison(scenario_results)
+    # 2. SAP Score Distribution
+    if df_validated is not None and 'CURRENT_ENERGY_EFFICIENCY' in df_validated.columns:
+        try:
+            import pandas as pd
+            sap_scores = df_validated['CURRENT_ENERGY_EFFICIENCY'].dropna()
+            if len(sap_scores) > 0:
+                generator.plot_sap_score_distribution(sap_scores)
+                reports_created.append("✓ SAP score distribution histogram")
+        except Exception as e:
+            console.print(f"[yellow]⚠ Could not generate SAP score chart: {e}[/yellow]")
 
-    console.print(f"[green]✓[/green] Reports generated")
-    console.print(f"    Location: data/outputs/")
+    # 3. Scenario Comparison
+    if scenario_results and len(scenario_results) > 0:
+        try:
+            generator.plot_scenario_comparison(scenario_results)
+            reports_created.append("✓ Scenario comparison charts")
+        except Exception as e:
+            console.print(f"[yellow]⚠ Could not generate scenario comparison: {e}[/yellow]")
+
+    # 4. Subsidy Sensitivity Analysis
+    if subsidy_results and len(subsidy_results) > 0:
+        try:
+            generator.plot_subsidy_sensitivity(subsidy_results)
+            reports_created.append("✓ Subsidy sensitivity analysis")
+        except Exception as e:
+            console.print(f"[yellow]⚠ Could not generate subsidy chart: {e}[/yellow]")
+
+    # 5. Text Summary Report
+    if archetype_results and scenario_results:
+        try:
+            # Create a simple tier summary for now (can be enhanced with spatial analysis later)
+            import pandas as pd
+            tier_summary = pd.DataFrame({
+                'Tier': ['Tier 1 (Adjacent to existing network)', 'Tier 2 (Within heat zone)',
+                        'Tier 3 (High density)', 'Tier 4 (Medium density)', 'Tier 5 (Low density)'],
+                'Property Count': [0, 0, 0, 0, len(df_validated) if df_validated is not None else 0],
+                'Percentage': [0, 0, 0, 0, 100],
+                'Recommended Pathway': ['Heat Network', 'Heat Network',
+                                       'Heat Pump or Network', 'Heat Pump', 'Heat Pump']
+            })
+
+            generator.generate_summary_report(archetype_results, scenario_results, tier_summary)
+            reports_created.append("✓ Executive summary report")
+        except Exception as e:
+            console.print(f"[yellow]⚠ Could not generate summary report: {e}[/yellow]")
+
+    # 6. Excel Export
+    if archetype_results and scenario_results:
+        try:
+            generator.export_to_excel(
+                archetype_results=archetype_results,
+                scenario_results=scenario_results,
+                subsidy_results=subsidy_results,
+                df_properties=df_validated
+            )
+            reports_created.append("✓ Excel workbook with all results")
+        except Exception as e:
+            console.print(f"[yellow]⚠ Could not generate Excel export: {e}[/yellow]")
+
+    console.print()
+    console.print(f"[green]✓[/green] Report generation complete!")
+    console.print()
+
+    if reports_created:
+        console.print("[cyan]Generated outputs:[/cyan]")
+        for report in reports_created:
+            console.print(f"    {report}")
+    else:
+        console.print("[yellow]No reports could be generated (missing data)[/yellow]")
+
+    console.print()
+    console.print(f"[cyan]📁 Output location:[/cyan] data/outputs/")
+    console.print(f"    • Figures: data/outputs/figures/")
+    console.print(f"    • Reports: data/outputs/reports/")
+    console.print(f"    • Results: data/outputs/*.txt")
 
     return True
 
@@ -388,6 +505,9 @@ def main():
 
     # Ensure directories exist
     ensure_directories()
+
+    # Ask about GIS data download
+    ask_gis_download()
 
     # Ask what to download
     scope = ask_download_scope()
@@ -434,7 +554,7 @@ def main():
     scenario_results, subsidy_results = model_scenarios(df_validated)
 
     # Phase 5: Report
-    generate_reports(archetype_results, scenario_results)
+    generate_reports(archetype_results, scenario_results, subsidy_results, df_validated)
 
     # Complete
     elapsed = time.time() - start_time

@@ -51,16 +51,22 @@ data/raw/*.shp
 data/raw/*.dbf
 data/raw/*.shx
 data/raw/*.prj
+data/raw/*.parquet
 data/processed/*.csv
 data/processed/*.xlsx
 data/processed/*.pickle
 data/processed/*.parquet
+
+# External GIS data (can be re-downloaded)
+data/external/GIS_All_Data/
+data/external/*.zip
 
 # Keep example/documentation files
 !data/raw/.gitkeep
 !data/processed/.gitkeep
 !data/supplementary/.gitkeep
 !data/outputs/.gitkeep
+!data/external/.gitkeep
 
 # Output files
 data/outputs/*.pdf
