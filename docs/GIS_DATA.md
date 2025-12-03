@@ -39,12 +39,42 @@ The GIS dataset from London Datastore contains:
 
 ## How to Download
 
-### Option 1: Automatic Download (Recommended)
+### Option 1: Manual Download (Most Reliable)
+
+**If automatic download fails, follow these steps:**
+
+1. **Download the ZIP file**:
+   - Visit: https://data.london.gov.uk/download/2ogw5/1c75726b-0b5e-4f2c-9fd6-25fc83b32454/GIS_All_Data.zip
+   - Or use browser/download manager to save `GIS_All_Data.zip`
+
+2. **Create the directory**:
+   ```bash
+   # Create directory if it doesn't exist
+   mkdir -p data/external
+   ```
+
+3. **Extract the ZIP file**:
+   - Extract `GIS_All_Data.zip` to: `data/external/`
+   - Result should be: `data/external/GIS_All_Data/` folder
+   - Inside should be: `Heat Loads/`, `Heat Supply/`, `Networks/` folders
+
+4. **Verify structure**:
+   ```
+   data/external/GIS_All_Data/
+   ├── Heat Loads/            (33 shapefiles, one per borough)
+   ├── Heat Supply/           (33 shapefiles)
+   ├── Networks/              (4 network shapefiles)
+   └── LDD 2010/              (Development database)
+   ```
+
+**✅ Once extracted to the correct location, the spatial analysis will automatically detect and use the data!**
+
+### Option 2: Automatic Download
 
 The interactive CLI will automatically prompt you to download GIS data:
 
 ```powershell
-.\run.ps1
+.\run-conda.ps1  # or run-conda.bat
 ```
 
 When prompted:
@@ -57,14 +87,6 @@ This analysis can optionally use GIS data from London Datastore for:
   • Heat load and supply data by borough
 
 ? Download London GIS data? (~2 MB, required for spatial analysis) (Y/n)
-```
-
-### Option 2: Standalone Download Script
-
-Download GIS data separately:
-
-```powershell
-.\download-gis-data.ps1
 ```
 
 ### Option 3: Python API
