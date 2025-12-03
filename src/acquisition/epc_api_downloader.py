@@ -354,15 +354,26 @@ class EPCAPIDownloader:
             df: DataFrame to save
             filename: Output filename
         """
-        # Save as CSV
+        # Save as CSV (always works)
         csv_path = DATA_RAW_DIR / filename
         df.to_csv(csv_path, index=False)
         logger.info(f"Saved {len(df):,} records to: {csv_path}")
 
-        # Also save as parquet for faster loading
-        parquet_path = csv_path.with_suffix('.parquet')
-        df.to_parquet(parquet_path, index=False)
-        logger.info(f"Also saved as parquet: {parquet_path}")
+        # Try to save as parquet for faster loading (optional)
+        try:
+            parquet_path = csv_path.with_suffix('.parquet')
+            # Convert problematic columns to strings to avoid type issues
+            df_parquet = df.copy()
+            for col in df_parquet.columns:
+                if df_parquet[col].dtype == 'object':
+                    # Convert mixed-type object columns to strings
+                    df_parquet[col] = df_parquet[col].astype(str)
+
+            df_parquet.to_parquet(parquet_path, index=False)
+            logger.info(f"Also saved as parquet: {parquet_path}")
+        except Exception as e:
+            logger.warning(f"Could not save as parquet (not critical): {e}")
+            logger.info("CSV file saved successfully - parquet is optional for performance only")
 
 
 def main():
