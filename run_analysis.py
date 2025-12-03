@@ -391,7 +391,82 @@ def model_scenarios(df):
     return scenario_results, subsidy_results
 
 
-def generate_reports(archetype_results, scenario_results, subsidy_results=None, df_validated=None):
+def run_spatial_analysis(df):
+    """Run spatial heat network tier analysis (optional - requires GDAL)."""
+    console.print()
+    console.print(Panel("[bold]Phase 4.5: Spatial Analysis (Optional)[/bold]", border_style="blue"))
+    console.print()
+
+    console.print("[cyan]Heat Network Tier Classification[/cyan]")
+    console.print()
+    console.print("This phase requires GDAL/geopandas for spatial analysis.")
+    console.print("If not installed, this phase will be skipped.")
+    console.print()
+
+    try:
+        from src.spatial.heat_network_analysis import HeatNetworkAnalyzer
+
+        analyzer = HeatNetworkAnalyzer()
+
+        console.print("[cyan]Running spatial analysis...[/cyan]")
+        console.print("  • Geocoding properties from lat/lon coordinates")
+        console.print("  • Loading London heat network GIS data")
+        console.print("  • Calculating heat density (GWh/km²)")
+        console.print("  • Classifying into 5 heat network tiers")
+        console.print()
+
+        properties_classified, pathway_summary = analyzer.run_complete_analysis(
+            df, auto_download_gis=True
+        )
+
+        if properties_classified is not None and pathway_summary is not None:
+            console.print(f"[green]✓[/green] Spatial analysis complete!")
+            console.print()
+            console.print("[cyan]Heat Network Tier Summary:[/cyan]")
+
+            # Show tier counts
+            for _, row in pathway_summary.iterrows():
+                tier_name = row['Tier']
+                count = row['Property Count']
+                pct = row['Percentage']
+                pathway = row['Recommended Pathway']
+                console.print(f"    {tier_name}: {count:,} ({pct:.1f}%) → {pathway}")
+
+            console.print()
+            console.print(f"[cyan]📁 Outputs:[/cyan]")
+            console.print(f"    • GeoJSON: data/processed/epc_with_heat_network_tiers.geojson")
+            console.print(f"    • CSV: data/outputs/pathway_suitability_by_tier.csv")
+            console.print(f"    • Interactive Map: data/outputs/maps/heat_network_tiers.html")
+
+            return pathway_summary
+        else:
+            console.print("[yellow]⚠ Spatial analysis could not complete[/yellow]")
+            return None
+
+    except ImportError as e:
+        console.print()
+        console.print("[yellow]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/yellow]")
+        console.print("[yellow]⚠ GDAL/geopandas not installed - Skipping spatial analysis[/yellow]")
+        console.print("[yellow]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/yellow]")
+        console.print()
+        console.print("[cyan]To enable spatial analysis:[/cyan]")
+        console.print("  [bold]Windows (Recommended):[/bold]")
+        console.print("    conda install -c conda-forge geopandas")
+        console.print()
+        console.print("  [bold]Linux/Mac:[/bold]")
+        console.print("    pip install -r requirements-spatial.txt")
+        console.print()
+        console.print("[cyan]The rest of the analysis will continue without spatial features.[/cyan]")
+        console.print()
+        return None
+
+    except Exception as e:
+        console.print(f"[yellow]⚠ Spatial analysis error: {e}[/yellow]")
+        console.print("[cyan]Continuing without spatial analysis...[/cyan]")
+        return None
+
+
+def generate_reports(archetype_results, scenario_results, subsidy_results=None, df_validated=None, pathway_summary=None):
     """Generate final reports and visualizations."""
     console.print()
     console.print(Panel("[bold]Phase 5: Report Generation[/bold]", border_style="blue"))
@@ -442,16 +517,21 @@ def generate_reports(archetype_results, scenario_results, subsidy_results=None, 
     # 5. Text Summary Report
     if archetype_results and scenario_results:
         try:
-            # Create a simple tier summary for now (can be enhanced with spatial analysis later)
+            # Use real pathway summary from spatial analysis if available
             import pandas as pd
-            tier_summary = pd.DataFrame({
-                'Tier': ['Tier 1 (Adjacent to existing network)', 'Tier 2 (Within heat zone)',
-                        'Tier 3 (High density)', 'Tier 4 (Medium density)', 'Tier 5 (Low density)'],
-                'Property Count': [0, 0, 0, 0, len(df_validated) if df_validated is not None else 0],
-                'Percentage': [0, 0, 0, 0, 100],
-                'Recommended Pathway': ['Heat Network', 'Heat Network',
-                                       'Heat Pump or Network', 'Heat Pump', 'Heat Pump']
-            })
+
+            if pathway_summary is not None and len(pathway_summary) > 0:
+                # Use actual spatial analysis results
+                tier_summary = pathway_summary
+                console.print("[cyan]Using real heat network tier data from spatial analysis[/cyan]")
+            else:
+                # Fallback: placeholder tier summary (if spatial analysis was skipped)
+                tier_summary = pd.DataFrame({
+                    'Tier': ['Tier 5 (All properties - spatial analysis not run)'],
+                    'Property Count': [len(df_validated) if df_validated is not None else 0],
+                    'Percentage': [100.0],
+                    'Recommended Pathway': ['Heat Pump (default recommendation)']
+                })
 
             generator.generate_summary_report(archetype_results, scenario_results, tier_summary)
             reports_created.append("✓ Executive summary report")
@@ -553,8 +633,11 @@ def main():
     # Phase 4: Model
     scenario_results, subsidy_results = model_scenarios(df_validated)
 
+    # Phase 4.5: Spatial Analysis (optional)
+    pathway_summary = run_spatial_analysis(df_validated)
+
     # Phase 5: Report
-    generate_reports(archetype_results, scenario_results, subsidy_results, df_validated)
+    generate_reports(archetype_results, scenario_results, subsidy_results, df_validated, pathway_summary)
 
     # Complete
     elapsed = time.time() - start_time
