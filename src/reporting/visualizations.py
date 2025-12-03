@@ -560,6 +560,264 @@ class ReportGenerator:
                 })
             pd.DataFrame(scenarios).to_excel(writer, sheet_name='Scenarios', index=False)
 
+    def plot_retrofit_readiness_dashboard(
+        self,
+        df_readiness: pd.DataFrame,
+        summary: Dict,
+        save_path: Optional[Path] = None
+    ):
+        """
+        Create comprehensive heat pump readiness dashboard.
+
+        Args:
+            df_readiness: DataFrame with readiness assessment
+            summary: Summary statistics dictionary
+            save_path: Path to save figure
+        """
+        fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(16, 12))
+        fig.suptitle('Heat Pump Retrofit Readiness Dashboard', fontsize=16, fontweight='bold')
+
+        # 1. Readiness Tier Distribution (top left)
+        tier_labels = [
+            'Tier 1\nReady Now',
+            'Tier 2\nMinor Work',
+            'Tier 3\nMajor Work',
+            'Tier 4\nChallenging',
+            'Tier 5\nNot Suitable'
+        ]
+        tier_counts = [summary['tier_distribution'].get(i, 0) for i in range(1, 6)]
+        tier_colors = ['#2ecc71', '#3498db', '#f39c12', '#e74c3c', '#95a5a6']
+
+        bars1 = ax1.bar(tier_labels, tier_counts, color=tier_colors, edgecolor='black', linewidth=1.5)
+        ax1.set_ylabel('Number of Properties', fontsize=12)
+        ax1.set_title('Heat Pump Readiness Distribution', fontsize=13, fontweight='bold')
+        ax1.grid(axis='y', alpha=0.3)
+
+        # Add value labels on bars
+        for bar in bars1:
+            height = bar.get_height()
+            ax1.text(bar.get_x() + bar.get_width()/2., height,
+                    f'{int(height):,}\n({height/sum(tier_counts)*100:.1f}%)',
+                    ha='center', va='bottom', fontsize=10)
+
+        # 2. Intervention Requirements (top right)
+        interventions = [
+            'Loft\nInsulation',
+            'Solid Wall\nInsulation',
+            'Cavity Wall\nInsulation',
+            'Glazing\nUpgrade',
+            'Radiator\nUpsizing'
+        ]
+        intervention_counts = [
+            summary['needs_loft_insulation'],
+            summary['needs_solid_wall_insulation'],
+            summary['needs_cavity_wall_insulation'],
+            summary['needs_glazing_upgrade'],
+            summary['needs_radiator_upsizing']
+        ]
+
+        bars2 = ax2.barh(interventions, intervention_counts, color='#e74c3c', edgecolor='black', linewidth=1.5)
+        ax2.set_xlabel('Number of Properties', fontsize=12)
+        ax2.set_title('Required Interventions Before Heat Pump', fontsize=13, fontweight='bold')
+        ax2.grid(axis='x', alpha=0.3)
+
+        # Add value labels
+        for i, (bar, count) in enumerate(zip(bars2, intervention_counts)):
+            width = bar.get_width()
+            pct = count / summary['total_properties'] * 100
+            ax2.text(width, bar.get_y() + bar.get_height()/2.,
+                    f' {int(count):,} ({pct:.0f}%)',
+                    ha='left', va='center', fontsize=10)
+
+        # 3. Cost Distribution by Tier (bottom left)
+        tiers = list(range(1, 6))
+        fabric_costs = [summary['fabric_cost_by_tier'].get(i, 0)/1000 for i in tiers]  # Convert to £k
+        total_costs = [summary['total_cost_by_tier'].get(i, 0)/1000 for i in tiers]
+
+        x = np.arange(len(tiers))
+        width = 0.35
+
+        bars3a = ax3.bar(x - width/2, fabric_costs, width, label='Fabric Pre-requisites',
+                        color='#3498db', edgecolor='black', linewidth=1.5)
+        bars3b = ax3.bar(x + width/2, total_costs, width, label='Total Retrofit Cost',
+                        color='#e67e22', edgecolor='black', linewidth=1.5)
+
+        ax3.set_xlabel('Readiness Tier', fontsize=12)
+        ax3.set_ylabel('Average Cost (£k)', fontsize=12)
+        ax3.set_title('Retrofit Costs by Readiness Tier', fontsize=13, fontweight='bold')
+        ax3.set_xticks(x)
+        ax3.set_xticklabels([f'Tier {i}' for i in tiers])
+        ax3.legend(fontsize=10)
+        ax3.grid(axis='y', alpha=0.3)
+
+        # 4. Heat Demand Before/After (bottom right)
+        demand_data = {
+            'Current': summary['mean_current_heat_demand'],
+            'After Fabric\nImprovements': summary['mean_post_fabric_heat_demand']
+        }
+
+        bars4 = ax4.bar(demand_data.keys(), demand_data.values(),
+                       color=['#e74c3c', '#2ecc71'], edgecolor='black', linewidth=1.5)
+        ax4.set_ylabel('Heat Demand (kWh/m²/year)', fontsize=12)
+        ax4.set_title('Mean Heat Demand Reduction', fontsize=13, fontweight='bold')
+        ax4.grid(axis='y', alpha=0.3)
+
+        # Add value labels and reduction %
+        for bar, (label, value) in zip(bars4, demand_data.items()):
+            height = bar.get_height()
+            ax4.text(bar.get_x() + bar.get_width()/2., height,
+                    f'{value:.0f}',
+                    ha='center', va='bottom', fontsize=11, fontweight='bold')
+
+        # Add reduction annotation
+        reduction = summary['heat_demand_reduction_percent']
+        ax4.text(0.5, summary['mean_current_heat_demand'] * 0.5,
+                f'{reduction:.0f}% reduction',
+                ha='center', va='center', fontsize=14, fontweight='bold',
+                bbox=dict(boxstyle='round', facecolor='white', edgecolor='black', linewidth=2))
+
+        plt.tight_layout()
+
+        if save_path is None:
+            save_path = self.output_dir / "retrofit_readiness_dashboard.png"
+
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        logger.info(f"✓ Saved retrofit readiness dashboard to {save_path}")
+        plt.close()
+
+    def plot_fabric_cost_distribution(
+        self,
+        df_readiness: pd.DataFrame,
+        save_path: Optional[Path] = None
+    ):
+        """
+        Create histogram of fabric pre-requisite costs.
+
+        Args:
+            df_readiness: DataFrame with readiness assessment
+            save_path: Path to save figure
+        """
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+        fig.suptitle('Fabric Pre-Requisite Cost Distribution', fontsize=14, fontweight='bold')
+
+        # Histogram of costs
+        costs = df_readiness['fabric_prerequisite_cost'] / 1000  # Convert to £k
+
+        ax1.hist(costs, bins=30, color='#3498db', edgecolor='black', alpha=0.7)
+        ax1.axvline(costs.median(), color='#e74c3c', linestyle='--', linewidth=2, label=f'Median: £{costs.median():.1f}k')
+        ax1.axvline(costs.mean(), color='#2ecc71', linestyle='--', linewidth=2, label=f'Mean: £{costs.mean():.1f}k')
+        ax1.set_xlabel('Fabric Pre-requisite Cost (£k)', fontsize=12)
+        ax1.set_ylabel('Number of Properties', fontsize=12)
+        ax1.set_title('Cost Distribution', fontsize=13)
+        ax1.legend(fontsize=11)
+        ax1.grid(axis='y', alpha=0.3)
+
+        # Cumulative distribution
+        sorted_costs = np.sort(costs)
+        cumulative = np.arange(1, len(sorted_costs) + 1) / len(sorted_costs) * 100
+
+        ax2.plot(sorted_costs, cumulative, color='#3498db', linewidth=2)
+        ax2.axhline(50, color='#e74c3c', linestyle='--', linewidth=1.5, label='50%')
+        ax2.axhline(80, color='#f39c12', linestyle='--', linewidth=1.5, label='80%')
+        ax2.set_xlabel('Fabric Pre-requisite Cost (£k)', fontsize=12)
+        ax2.set_ylabel('Cumulative Percentage (%)', fontsize=12)
+        ax2.set_title('Cumulative Distribution', fontsize=13)
+        ax2.legend(fontsize=11)
+        ax2.grid(True, alpha=0.3)
+
+        # Add cost thresholds
+        cost_5k = (costs <= 5).sum() / len(costs) * 100
+        cost_10k = (costs <= 10).sum() / len(costs) * 100
+        cost_15k = (costs <= 15).sum() / len(costs) * 100
+
+        textstr = f'Cost Thresholds:\n' \
+                 f'≤ £5k: {cost_5k:.0f}%\n' \
+                 f'≤ £10k: {cost_10k:.0f}%\n' \
+                 f'≤ £15k: {cost_15k:.0f}%'
+
+        ax2.text(0.98, 0.02, textstr, transform=ax2.transAxes,
+                fontsize=11, verticalalignment='bottom', horizontalalignment='right',
+                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+
+        plt.tight_layout()
+
+        if save_path is None:
+            save_path = self.output_dir / "fabric_cost_distribution.png"
+
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        logger.info(f"✓ Saved fabric cost distribution to {save_path}")
+        plt.close()
+
+    def plot_heat_demand_scatter(
+        self,
+        df_readiness: pd.DataFrame,
+        save_path: Optional[Path] = None
+    ):
+        """
+        Create scatter plot of current vs post-fabric heat demand.
+
+        Args:
+            df_readiness: DataFrame with readiness assessment
+            save_path: Path to save figure
+        """
+        fig, ax = plt.subplots(figsize=(12, 10))
+
+        # Create scatter plot colored by readiness tier
+        tier_colors = {
+            1: '#2ecc71',
+            2: '#3498db',
+            3: '#f39c12',
+            4: '#e74c3c',
+            5: '#95a5a6'
+        }
+
+        tier_labels = {
+            1: 'Tier 1: Ready Now',
+            2: 'Tier 2: Minor Work',
+            3: 'Tier 3: Major Work',
+            4: 'Tier 4: Challenging',
+            5: 'Tier 5: Not Suitable'
+        }
+
+        for tier in range(1, 6):
+            mask = df_readiness['hp_readiness_tier'] == tier
+            ax.scatter(
+                df_readiness.loc[mask, 'heat_demand_kwh_m2'],
+                df_readiness.loc[mask, 'heat_demand_after_fabric'],
+                c=tier_colors[tier],
+                label=tier_labels[tier],
+                alpha=0.6,
+                s=50,
+                edgecolors='black',
+                linewidth=0.5
+            )
+
+        # Add diagonal line (no improvement)
+        max_demand = max(df_readiness['heat_demand_kwh_m2'].max(),
+                        df_readiness['heat_demand_after_fabric'].max())
+        ax.plot([0, max_demand], [0, max_demand], 'k--', linewidth=1, alpha=0.5, label='No improvement')
+
+        # Add threshold lines
+        ax.axhline(100, color='#2ecc71', linestyle=':', linewidth=2, alpha=0.7, label='HP Ready (<100)')
+        ax.axhline(150, color='#f39c12', linestyle=':', linewidth=2, alpha=0.7, label='HP Viable (<150)')
+        ax.axvline(100, color='#2ecc71', linestyle=':', linewidth=2, alpha=0.7)
+        ax.axvline(150, color='#f39c12', linestyle=':', linewidth=2, alpha=0.7)
+
+        ax.set_xlabel('Current Heat Demand (kWh/m²/year)', fontsize=12)
+        ax.set_ylabel('Post-Fabric Heat Demand (kWh/m²/year)', fontsize=12)
+        ax.set_title('Heat Demand: Current vs After Fabric Improvements', fontsize=14, fontweight='bold')
+        ax.legend(fontsize=10, loc='upper left')
+        ax.grid(True, alpha=0.3)
+
+        plt.tight_layout()
+
+        if save_path is None:
+            save_path = self.output_dir / "heat_demand_scatter.png"
+
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        logger.info(f"✓ Saved heat demand scatter plot to {save_path}")
+        plt.close()
+
 
 def main():
     """Main execution for report generation."""

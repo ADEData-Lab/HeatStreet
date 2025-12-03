@@ -391,6 +391,68 @@ def model_scenarios(df):
     return scenario_results, subsidy_results
 
 
+def analyze_retrofit_readiness(df):
+    """Analyze heat pump retrofit readiness."""
+    console.print()
+    console.print(Panel("[bold]Phase 4.3: Retrofit Readiness Analysis[/bold]", border_style="blue"))
+    console.print()
+
+    console.print("[cyan]Assessing heat pump readiness and barriers...[/cyan]")
+    console.print()
+    console.print("This phase analyzes:")
+    console.print("  • Current heat pump suitability")
+    console.print("  • Required fabric pre-requisites")
+    console.print("  • Pre-retrofit cost barriers")
+    console.print("  • Heat demand before/after fabric improvements")
+    console.print()
+
+    try:
+        from src.analysis.retrofit_readiness import RetrofitReadinessAnalyzer
+
+        analyzer = RetrofitReadinessAnalyzer()
+
+        # Run readiness assessment
+        df_readiness = analyzer.assess_heat_pump_readiness(df)
+        summary = analyzer.generate_readiness_summary(df_readiness)
+
+        # Save results
+        analyzer.save_readiness_results(df_readiness, summary)
+
+        # Display key findings
+        console.print("[green]✓[/green] Retrofit readiness analysis complete")
+        console.print()
+        console.print("[cyan]Key Findings:[/cyan]")
+        console.print(f"  Tier 1 (Ready Now): {summary['tier_distribution'].get(1, 0):,} properties ({summary['tier_percentages'].get(1, 0):.1f}%)")
+        console.print(f"  Tier 2 (Minor Work): {summary['tier_distribution'].get(2, 0):,} properties ({summary['tier_percentages'].get(2, 0):.1f}%)")
+        console.print(f"  Tier 3 (Major Work): {summary['tier_distribution'].get(3, 0):,} properties ({summary['tier_percentages'].get(3, 0):.1f}%)")
+        console.print(f"  Tier 4 (Challenging): {summary['tier_distribution'].get(4, 0):,} properties ({summary['tier_percentages'].get(4, 0):.1f}%)")
+        console.print(f"  Tier 5 (Not Suitable): {summary['tier_distribution'].get(5, 0):,} properties ({summary['tier_percentages'].get(5, 0):.1f}%)")
+        console.print()
+        console.print(f"  Solid wall barrier: {summary['needs_solid_wall_insulation']:,} properties need SWI")
+        console.print(f"  Mean fabric cost: £{summary['mean_fabric_cost']:,.0f}")
+        console.print(f"  Total retrofit investment: £{summary['total_retrofit_cost']/1e6:.1f}M")
+        console.print()
+
+        # Generate visualizations
+        console.print("[cyan]Creating retrofit readiness visualizations...[/cyan]")
+
+        from src.reporting.visualizations import ReportGenerator
+        viz = ReportGenerator()
+
+        viz.plot_retrofit_readiness_dashboard(df_readiness, summary)
+        viz.plot_fabric_cost_distribution(df_readiness)
+        viz.plot_heat_demand_scatter(df_readiness)
+
+        console.print(f"[green]✓[/green] Visualizations saved to data/outputs/figures/")
+
+        return df_readiness, summary
+
+    except Exception as e:
+        console.print(f"[yellow]⚠ Retrofit readiness analysis failed: {e}[/yellow]")
+        logger.error(f"Retrofit readiness error: {e}")
+        return None, None
+
+
 def run_spatial_analysis(df):
     """Run spatial heat network tier analysis (optional - requires GDAL)."""
     console.print()
@@ -632,6 +694,9 @@ def main():
 
     # Phase 4: Model
     scenario_results, subsidy_results = model_scenarios(df_validated)
+
+    # Phase 4.3: Retrofit Readiness
+    df_readiness, readiness_summary = analyze_retrofit_readiness(df_validated)
 
     # Phase 4.5: Spatial Analysis (optional)
     pathway_summary = run_spatial_analysis(df_validated)
