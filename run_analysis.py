@@ -21,6 +21,7 @@ sys.path.append(str(Path(__file__).parent))
 
 from config.config import load_config, ensure_directories, DATA_RAW_DIR, DATA_PROCESSED_DIR
 from src.acquisition.epc_api_downloader import EPCAPIDownloader
+from src.acquisition.london_gis_downloader import LondonGISDownloader
 from src.cleaning.data_validator import EPCDataValidator
 from src.analysis.archetype_analysis import ArchetypeAnalyzer
 from src.modeling.scenario_model import ScenarioModeler
@@ -177,6 +178,47 @@ def ask_download_scope():
             'from_year': int(from_year),
             'max_per_borough': max_per_borough
         }
+
+
+def ask_gis_download():
+    """Ask if user wants to download London GIS data for spatial analysis."""
+    console.print()
+    console.print("[cyan]London GIS Data (Optional)[/cyan]")
+    console.print()
+    console.print("This analysis can optionally use GIS data from London Datastore for:")
+    console.print("  • Existing district heating networks")
+    console.print("  • Potential heat network zones")
+    console.print("  • Heat load and supply data by borough")
+    console.print()
+
+    # Check if already downloaded
+    gis_downloader = LondonGISDownloader()
+    summary = gis_downloader.get_data_summary()
+
+    if summary['available']:
+        console.print("[green]✓[/green] GIS data already downloaded")
+        console.print(f"    Heat load files: {summary['heat_load_files']}")
+        console.print(f"    Network files: {summary['network_files']}")
+        console.print(f"    Heat supply files: {summary['heat_supply_files']}")
+        return True
+
+    download = questionary.confirm(
+        "Download London GIS data? (~2 MB, required for spatial analysis)",
+        default=True
+    ).ask()
+
+    if download:
+        console.print()
+        console.print("[cyan]Downloading London GIS data...[/cyan]")
+
+        if gis_downloader.download_and_prepare():
+            console.print("[green]✓[/green] GIS data downloaded and ready")
+            return True
+        else:
+            console.print("[yellow]⚠[/yellow] GIS data download failed (spatial analysis will be limited)")
+            return False
+
+    return False
 
 
 def download_data(scope):
@@ -388,6 +430,9 @@ def main():
 
     # Ensure directories exist
     ensure_directories()
+
+    # Ask about GIS data download
+    ask_gis_download()
 
     # Ask what to download
     scope = ask_download_scope()

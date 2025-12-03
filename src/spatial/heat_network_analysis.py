@@ -21,6 +21,7 @@ from config.config import (
     DATA_SUPPLEMENTARY_DIR,
     DATA_OUTPUTS_DIR
 )
+from src.acquisition.london_gis_downloader import LondonGISDownloader
 
 
 class HeatNetworkAnalyzer:
@@ -32,20 +33,38 @@ class HeatNetworkAnalyzer:
         """Initialize the heat network analyzer."""
         self.config = load_config()
         self.heat_network_tiers = self.config['analysis']['heat_network_tiers']
+        self.gis_downloader = LondonGISDownloader()
 
         logger.info("Initialized Heat Network Analyzer")
+
+    def download_london_gis_data(self, force_redownload: bool = False) -> bool:
+        """
+        Download London GIS data from London Datastore.
+
+        Args:
+            force_redownload: If True, download even if data already exists
+
+        Returns:
+            True if successful, False otherwise
+        """
+        return self.gis_downloader.download_and_prepare(force_redownload=force_redownload)
 
     def load_london_heat_map_data(
         self,
         heat_networks_file: Optional[Path] = None,
-        heat_zones_file: Optional[Path] = None
+        heat_zones_file: Optional[Path] = None,
+        auto_download: bool = True
     ) -> Tuple[Optional[gpd.GeoDataFrame], Optional[gpd.GeoDataFrame]]:
         """
         Load London Heat Map data for heat networks and zones.
 
+        If files are not specified, automatically attempts to use downloaded
+        London Datastore GIS data.
+
         Args:
             heat_networks_file: Path to existing heat networks shapefile/geojson
             heat_zones_file: Path to Heat Network Zones shapefile/geojson
+            auto_download: If True, automatically download GIS data if not present
 
         Returns:
             Tuple of (heat networks GeoDataFrame, heat zones GeoDataFrame)
@@ -55,22 +74,44 @@ class HeatNetworkAnalyzer:
         heat_networks = None
         heat_zones = None
 
+        # If no files specified, try to use downloaded GIS data
+        if not heat_networks_file:
+            # Check if GIS data is available
+            summary = self.gis_downloader.get_data_summary()
+
+            if not summary['available'] and auto_download:
+                logger.info("GIS data not found. Downloading from London Datastore...")
+                if self.download_london_gis_data():
+                    summary = self.gis_downloader.get_data_summary()
+
+            if summary['available']:
+                # Get existing networks file
+                network_files = self.gis_downloader.get_network_files()
+                if 'existing' in network_files:
+                    heat_networks_file = network_files['existing']
+                    logger.info(f"Using downloaded heat networks: {heat_networks_file}")
+
+                # Also load potential networks as zones
+                if 'potential_networks' in network_files:
+                    heat_zones_file = network_files['potential_networks']
+                    logger.info(f"Using potential networks as zones: {heat_zones_file}")
+
         # Try to load heat networks
         if heat_networks_file and heat_networks_file.exists():
             try:
                 heat_networks = gpd.read_file(heat_networks_file)
-                logger.info(f"Loaded {len(heat_networks)} heat network features")
+                logger.info(f"✓ Loaded {len(heat_networks)} existing heat network features")
             except Exception as e:
                 logger.error(f"Error loading heat networks: {e}")
         else:
-            logger.warning("Heat networks file not found. Please download London Heat Map data.")
-            logger.info("Download from: https://www.london.gov.uk/programmes-strategies/environment-and-climate-change/energy/london-heat-map")
+            logger.warning("Heat networks file not found.")
+            logger.info("You can download from: https://data.london.gov.uk/dataset/london-heat-map")
 
         # Try to load heat network zones
         if heat_zones_file and heat_zones_file.exists():
             try:
                 heat_zones = gpd.read_file(heat_zones_file)
-                logger.info(f"Loaded {len(heat_zones)} heat network zone features")
+                logger.info(f"✓ Loaded {len(heat_zones)} heat network zone features")
             except Exception as e:
                 logger.error(f"Error loading heat zones: {e}")
         else:
