@@ -151,16 +151,28 @@ class HeatNetworkAnalyzer:
             return gdf
 
         else:
-            logger.warning("No coordinate columns found in EPC data")
-            logger.info("Would need to geocode from postcodes - requires external geocoding service")
+            logger.warning("❌ No coordinate columns found in EPC data")
+            logger.info(f"   Available columns: {', '.join(df.columns[:15].tolist())}...")
+            logger.info("")
+            logger.warning("ℹ️  Spatial analysis requires property coordinates")
+            logger.info("")
+            logger.info("   The UK EPC Register API doesn't provide lat/lon coordinates.")
+            logger.info("   To enable spatial analysis, you need to:")
+            logger.info("")
+            logger.info("   Option 1: Use external geocoding service for postcodes")
+            logger.info("      - UK Postcode API: https://postcodes.io/")
+            logger.info("      - Nominatim: https://nominatim.openstreetmap.org/")
+            logger.info("")
+            logger.info("   Option 2: Use OS AddressBase data (if available)")
+            logger.info("      - Contains precise coordinates for all UK addresses")
+            logger.info("")
+            logger.info("   Option 3: Use UK Postcode centroid database")
+            logger.info("      - Free download: https://www.freemaptools.com/download-uk-postcode-lat-lng.htm")
+            logger.info("")
+            logger.warning("   Skipping spatial analysis (other analyses will continue)...")
 
-            # Placeholder for geocoding logic
-            # In practice, would use:
-            # - UK postcode centroid database
-            # - Geocoding API (Google, Nominatim, etc.)
-            # - OS AddressBase data
-
-            return gpd.GeoDataFrame(df, geometry=[], crs='EPSG:4326')
+            # Return None to indicate geocoding not possible
+            return None
 
     def classify_heat_network_tiers(
         self,
@@ -538,8 +550,15 @@ class HeatNetworkAnalyzer:
             logger.info("\nStep 1: Geocoding properties...")
             properties_gdf = self.geocode_properties(df)
 
+            if properties_gdf is None:
+                logger.warning("❌ Geocoding not available. Spatial analysis cannot proceed.")
+                logger.info("")
+                logger.info("   Core analysis (archetype, scenarios, visualizations) completed successfully!")
+                logger.info("   Add coordinates to enable heat network tier classification.")
+                return None, None
+
             if len(properties_gdf) == 0:
-                logger.warning("No properties could be geocoded. Spatial analysis cannot proceed.")
+                logger.warning("❌ No properties could be geocoded. Spatial analysis cannot proceed.")
                 return None, None
 
             logger.info(f"✓ Successfully geocoded {len(properties_gdf):,} properties")
