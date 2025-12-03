@@ -10,7 +10,7 @@ Write-Host ""
 Write-Host "Checking Python installation..." -ForegroundColor Yellow
 try {
     $pythonVersion = python --version 2>&1
-    Write-Host "✓ Found: $pythonVersion" -ForegroundColor Green
+    Write-Host "[OK] Found: $pythonVersion" -ForegroundColor Green
 
     # Extract version number
     if ($pythonVersion -match "Python (\d+)\.(\d+)") {
@@ -18,27 +18,27 @@ try {
         $minor = [int]$matches[2]
 
         if ($major -lt 3 -or ($major -eq 3 -and $minor -lt 9)) {
-            Write-Host "✗ Python 3.9 or higher is required" -ForegroundColor Red
-            Write-Host "  Please install from: https://www.python.org/downloads/" -ForegroundColor Yellow
+            Write-Host "[X] Python 3.9 or higher is required" -ForegroundColor Red
+            Write-Host "    Please install from: https://www.python.org/downloads/" -ForegroundColor Yellow
             exit 1
         }
     }
 } catch {
-    Write-Host "✗ Python not found" -ForegroundColor Red
-    Write-Host "  Please install Python 3.9+ from: https://www.python.org/downloads/" -ForegroundColor Yellow
+    Write-Host "[X] Python not found" -ForegroundColor Red
+    Write-Host "    Please install Python 3.9+ from: https://www.python.org/downloads/" -ForegroundColor Yellow
     exit 1
 }
 
 # Check if virtual environment already exists
 if (Test-Path "venv") {
-    Write-Host "✓ Virtual environment already exists" -ForegroundColor Green
+    Write-Host "[OK] Virtual environment already exists" -ForegroundColor Green
 } else {
     Write-Host "Creating virtual environment..." -ForegroundColor Yellow
     python -m venv venv
     if ($LASTEXITCODE -eq 0) {
-        Write-Host "✓ Virtual environment created" -ForegroundColor Green
+        Write-Host "[OK] Virtual environment created" -ForegroundColor Green
     } else {
-        Write-Host "✗ Failed to create virtual environment" -ForegroundColor Red
+        Write-Host "[X] Failed to create virtual environment" -ForegroundColor Red
         exit 1
     }
 }
@@ -49,19 +49,19 @@ Write-Host "Checking PowerShell execution policy..." -ForegroundColor Yellow
 $policy = Get-ExecutionPolicy -Scope CurrentUser
 
 if ($policy -eq "Restricted" -or $policy -eq "Undefined") {
-    Write-Host "⚠ Execution policy needs to be updated" -ForegroundColor Yellow
-    Write-Host "  Setting execution policy to RemoteSigned for current user..." -ForegroundColor Yellow
+    Write-Host "[!] Execution policy needs to be updated" -ForegroundColor Yellow
+    Write-Host "    Setting execution policy to RemoteSigned for current user..." -ForegroundColor Yellow
 
     try {
         Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser -Force
-        Write-Host "✓ Execution policy updated" -ForegroundColor Green
+        Write-Host "[OK] Execution policy updated" -ForegroundColor Green
     } catch {
-        Write-Host "✗ Failed to update execution policy" -ForegroundColor Red
-        Write-Host "  Please run PowerShell as Administrator and try again" -ForegroundColor Yellow
+        Write-Host "[X] Failed to update execution policy" -ForegroundColor Red
+        Write-Host "    Please run PowerShell as Administrator and try again" -ForegroundColor Yellow
         exit 1
     }
 } else {
-    Write-Host "✓ Execution policy is compatible: $policy" -ForegroundColor Green
+    Write-Host "[OK] Execution policy is compatible: $policy" -ForegroundColor Green
 }
 
 # Activate virtual environment
@@ -69,10 +69,10 @@ Write-Host ""
 Write-Host "Activating virtual environment..." -ForegroundColor Yellow
 try {
     & .\venv\Scripts\Activate.ps1
-    Write-Host "✓ Virtual environment activated" -ForegroundColor Green
+    Write-Host "[OK] Virtual environment activated" -ForegroundColor Green
 } catch {
-    Write-Host "✗ Failed to activate virtual environment" -ForegroundColor Red
-    Write-Host "  Try running: .\venv\Scripts\Activate.ps1" -ForegroundColor Yellow
+    Write-Host "[X] Failed to activate virtual environment" -ForegroundColor Red
+    Write-Host "    Try running: .\venv\Scripts\Activate.ps1" -ForegroundColor Yellow
     exit 1
 }
 
@@ -80,7 +80,7 @@ try {
 Write-Host ""
 Write-Host "Upgrading pip..." -ForegroundColor Yellow
 python -m pip install --upgrade pip --quiet
-Write-Host "✓ pip upgraded" -ForegroundColor Green
+Write-Host "[OK] pip upgraded" -ForegroundColor Green
 
 # Install dependencies
 Write-Host ""
@@ -88,21 +88,23 @@ Write-Host "Installing dependencies (this may take a few minutes)..." -Foregroun
 pip install -r requirements.txt --quiet
 
 if ($LASTEXITCODE -eq 0) {
-    Write-Host "✓ Dependencies installed" -ForegroundColor Green
+    Write-Host "[OK] Dependencies installed" -ForegroundColor Green
 } else {
-    Write-Host "✗ Failed to install dependencies" -ForegroundColor Red
-    Write-Host "  Try running manually: pip install -r requirements.txt" -ForegroundColor Yellow
+    Write-Host "[X] Failed to install dependencies" -ForegroundColor Red
+    Write-Host "    Try running manually: pip install -r requirements.txt" -ForegroundColor Yellow
     exit 1
 }
 
 # Verify installation
 Write-Host ""
 Write-Host "Verifying installation..." -ForegroundColor Yellow
-try {
-    python -c "from config.config import load_config; print('✓ Installation verified')"
-    Write-Host "✓ All checks passed!" -ForegroundColor Green
-} catch {
-    Write-Host "✗ Verification failed" -ForegroundColor Red
+$verification = python -c "from config.config import load_config; print('OK')" 2>&1
+if ($LASTEXITCODE -eq 0) {
+    Write-Host "[OK] Installation verified" -ForegroundColor Green
+    Write-Host "[OK] All checks passed!" -ForegroundColor Green
+} else {
+    Write-Host "[X] Verification failed" -ForegroundColor Red
+    Write-Host $verification
     exit 1
 }
 
@@ -115,12 +117,12 @@ foreach ($dir in $directories) {
         New-Item -ItemType Directory -Path $dir -Force | Out-Null
     }
 }
-Write-Host "✓ Directory structure verified" -ForegroundColor Green
+Write-Host "[OK] Directory structure verified" -ForegroundColor Green
 
 # Success message
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Green
-Write-Host "✓ Setup Complete!" -ForegroundColor Green
+Write-Host "[OK] Setup Complete!" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "Next steps:" -ForegroundColor Cyan
