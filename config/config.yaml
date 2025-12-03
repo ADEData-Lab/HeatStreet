@@ -1,0 +1,189 @@
+# Heat Street EPC Analysis Configuration
+
+# Project Settings
+project:
+  name: "Heat Street EPC London Analysis"
+  version: "1.0.0"
+  author: "Heat Street Project Team"
+
+# Geographic Scope
+geography:
+  region: "London"
+  boroughs:
+    - "Barking and Dagenham"
+    - "Barnet"
+    - "Bexley"
+    - "Brent"
+    - "Bromley"
+    - "Camden"
+    - "City of London"
+    - "Croydon"
+    - "Ealing"
+    - "Enfield"
+    - "Greenwich"
+    - "Hackney"
+    - "Hammersmith and Fulham"
+    - "Haringey"
+    - "Harrow"
+    - "Havering"
+    - "Hillingdon"
+    - "Hounslow"
+    - "Islington"
+    - "Kensington and Chelsea"
+    - "Kingston upon Thames"
+    - "Lambeth"
+    - "Lewisham"
+    - "Merton"
+    - "Newham"
+    - "Redbridge"
+    - "Richmond upon Thames"
+    - "Southwark"
+    - "Sutton"
+    - "Tower Hamlets"
+    - "Waltham Forest"
+    - "Wandsworth"
+    - "Westminster"
+
+# Property Filters
+property_filters:
+  construction_period:
+    start_year: null  # Any pre-1930
+    end_year: 1930
+  property_types:
+    - "Mid-terrace"
+    - "End-terrace"
+    - "Terraced"
+  exclude_conversions: true
+  certificate_recency_years: 10
+
+# Data Quality Thresholds
+data_quality:
+  min_floor_area: 25  # m²
+  max_floor_area: 400  # m²
+  required_fields:
+    - "address"
+    - "postcode"
+    - "property_type"
+    - "built_form"
+    - "construction_age_band"
+    - "current_energy_rating"
+    - "walls_description"
+    - "heating_system"
+
+# Analysis Parameters
+analysis:
+  case_street: "Shakespeare Crescent"
+  epc_bands: ["A", "B", "C", "D", "E", "F", "G"]
+
+  # Heat Network Zone Tiers
+  heat_network_tiers:
+    tier_1:
+      name: "Adjacent to existing network"
+      distance_meters: 250
+    tier_2:
+      name: "Within planned HNZ"
+      criteria: "inside_hnz_boundary"
+    tier_3:
+      name: "High heat density"
+      threshold_kwh_per_m: 3000
+    tier_4:
+      name: "Moderate heat density"
+      threshold_kwh_per_m: 1500
+    tier_5:
+      name: "Low heat density"
+      threshold_kwh_per_m: 0
+
+# Scenario Modeling
+scenarios:
+  baseline:
+    name: "No intervention"
+    measures: []
+
+  fabric_only:
+    name: "Fabric improvements only"
+    measures:
+      - "loft_insulation_topup"
+      - "wall_insulation"
+      - "double_glazing"
+
+  heat_pump:
+    name: "Heat pump pathway"
+    measures:
+      - "loft_insulation_topup"
+      - "wall_insulation"
+      - "double_glazing"
+      - "ashp_installation"
+      - "emitter_upgrades"
+
+  heat_network:
+    name: "Heat network pathway"
+    measures:
+      - "modest_fabric_improvements"
+      - "district_heating_connection"
+
+  hybrid:
+    name: "Hybrid pathway"
+    measures:
+      - "fabric_improvements"
+      - "heat_network_where_available"
+      - "ashp_elsewhere"
+
+# Cost Assumptions (£)
+costs:
+  loft_insulation_per_m2: 30
+  cavity_wall_insulation: 2500
+  internal_wall_insulation_per_m2: 100
+  external_wall_insulation_per_m2: 150
+  double_glazing_per_m2: 400
+  ashp_installation: 12000
+  emitter_upgrade_per_radiator: 300
+  district_heating_connection: 5000
+
+# Subsidy Levels for Sensitivity Analysis (%)
+subsidy_levels: [0, 25, 50, 75, 100]
+
+# Energy Prices (£/kWh)
+energy_prices:
+  current:
+    gas: 0.10
+    electricity: 0.34
+  projected_2030:
+    gas: 0.12
+    electricity: 0.30
+  projected_2040:
+    gas: 0.15
+    electricity: 0.25
+
+# Carbon Factors (kgCO2/kWh)
+carbon_factors:
+  current:
+    gas: 0.210
+    electricity: 0.233
+  projected_2030:
+    gas: 0.210
+    electricity: 0.150
+  projected_2040:
+    gas: 0.210
+    electricity: 0.050
+
+# Heat Pump Parameters
+heat_pump:
+  scop: 3.0  # Seasonal Coefficient of Performance
+  design_flow_temps: [35, 45, 55, 65]  # °C
+
+# Output Settings
+output:
+  report_format: "pdf"
+  figure_dpi: 300
+  map_format: "html"
+  data_format: "csv"
+
+# File Paths
+paths:
+  data_raw: "data/raw"
+  data_processed: "data/processed"
+  data_supplementary: "data/supplementary"
+  outputs: "data/outputs"
+  figures: "data/outputs/figures"
+  reports: "data/outputs/reports"
+  maps: "data/outputs/maps"

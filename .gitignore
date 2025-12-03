@@ -1,0 +1,94 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Jupyter Notebooks
+.ipynb_checkpoints
+*.ipynb
+
+# Data files (raw data should not be committed due to size)
+data/raw/*.csv
+data/raw/*.xlsx
+data/raw/*.json
+data/raw/*.geojson
+data/raw/*.shp
+data/raw/*.dbf
+data/raw/*.shx
+data/raw/*.prj
+data/processed/*.csv
+data/processed/*.xlsx
+data/processed/*.pickle
+data/processed/*.parquet
+
+# Keep example/documentation files
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+!data/supplementary/.gitkeep
+!data/outputs/.gitkeep
+
+# Output files
+data/outputs/*.pdf
+data/outputs/*.png
+data/outputs/*.jpg
+data/outputs/*.html
+data/outputs/*.csv
+data/outputs/*.xlsx
+
+# Environment variables
+.env
+.env.local
+config/secrets.py
+
+# Logs
+*.log
+logs/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Documentation builds
+docs/_build/
+docs/_static/
+docs/_templates/
+
+# OS
+Thumbs.db

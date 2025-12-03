@@ -1,0 +1,472 @@
+"""
+Archetype Characterization Module
+
+Produces summary statistics and distributions for Edwardian terraced housing stock.
+Implements Section 3.1 of the project specification.
+"""
+
+import pandas as pd
+import numpy as np
+from pathlib import Path
+from typing import Dict, List, Optional
+import matplotlib.pyplot as plt
+import seaborn as sns
+from loguru import logger
+
+import sys
+sys.path.append(str(Path(__file__).parent.parent.parent))
+from config.config import (
+    load_config,
+    DATA_PROCESSED_DIR,
+    DATA_OUTPUTS_DIR
+)
+
+
+class ArchetypeAnalyzer:
+    """
+    Analyzes EPC data to characterize the Edwardian terraced housing archetype.
+    """
+
+    def __init__(self):
+        """Initialize the archetype analyzer."""
+        self.config = load_config()
+        self.results = {}
+
+        # Set visualization style
+        sns.set_style("whitegrid")
+        plt.rcParams['figure.figsize'] = (12, 8)
+
+        logger.info("Initialized Archetype Analyzer")
+
+    def analyze_archetype(self, df: pd.DataFrame) -> Dict:
+        """
+        Run complete archetype characterization analysis.
+
+        Args:
+            df: Validated EPC DataFrame
+
+        Returns:
+            Dictionary containing all analysis results
+        """
+        logger.info(f"Analyzing archetype for {len(df):,} properties...")
+
+        # Perform all analyses
+        self.results['epc_bands'] = self.analyze_epc_bands(df)
+        self.results['sap_scores'] = self.analyze_sap_scores(df)
+        self.results['wall_construction'] = self.analyze_wall_construction(df)
+        self.results['loft_insulation'] = self.analyze_loft_insulation(df)
+        self.results['floor_insulation'] = self.analyze_floor_insulation(df)
+        self.results['glazing'] = self.analyze_glazing(df)
+        self.results['heating_systems'] = self.analyze_heating_systems(df)
+        self.results['heating_controls'] = self.analyze_heating_controls(df)
+        self.results['hot_water'] = self.analyze_hot_water(df)
+        self.results['energy_consumption'] = self.analyze_energy_consumption(df)
+        self.results['co2_emissions'] = self.analyze_co2_emissions(df)
+
+        logger.info("Archetype characterization complete!")
+        return self.results
+
+    def analyze_epc_bands(self, df: pd.DataFrame) -> Dict:
+        """Analyze current EPC band distribution."""
+        logger.info("Analyzing EPC band distribution...")
+
+        if 'CURRENT_ENERGY_RATING' not in df.columns:
+            logger.warning("CURRENT_ENERGY_RATING column not found")
+            return {}
+
+        # Frequency table
+        freq_table = df['CURRENT_ENERGY_RATING'].value_counts().sort_index()
+        freq_pct = df['CURRENT_ENERGY_RATING'].value_counts(normalize=True).sort_index() * 100
+
+        results = {
+            'frequency': freq_table.to_dict(),
+            'percentage': freq_pct.to_dict(),
+            'total': len(df)
+        }
+
+        logger.info(f"EPC Band Distribution:")
+        for band in ['A', 'B', 'C', 'D', 'E', 'F', 'G']:
+            if band in results['frequency']:
+                logger.info(f"  Band {band}: {results['frequency'][band]:,} ({results['percentage'][band]:.1f}%)")
+
+        return results
+
+    def analyze_sap_scores(self, df: pd.DataFrame) -> Dict:
+        """Analyze SAP score distribution."""
+        logger.info("Analyzing SAP scores...")
+
+        sap_columns = ['CURRENT_ENERGY_EFFICIENCY', 'ENERGY_RATING']
+        sap_col = None
+
+        for col in sap_columns:
+            if col in df.columns:
+                sap_col = col
+                break
+
+        if sap_col is None:
+            logger.warning("No SAP score column found")
+            return {}
+
+        results = {
+            'mean': float(df[sap_col].mean()),
+            'median': float(df[sap_col].median()),
+            'std': float(df[sap_col].std()),
+            'min': float(df[sap_col].min()),
+            'max': float(df[sap_col].max()),
+            'percentiles': {
+                '25th': float(df[sap_col].quantile(0.25)),
+                '50th': float(df[sap_col].quantile(0.50)),
+                '75th': float(df[sap_col].quantile(0.75)),
+                '90th': float(df[sap_col].quantile(0.90))
+            }
+        }
+
+        logger.info(f"SAP Score Statistics:")
+        logger.info(f"  Mean: {results['mean']:.1f}")
+        logger.info(f"  Median: {results['median']:.1f}")
+        logger.info(f"  Std Dev: {results['std']:.1f}")
+
+        return results
+
+    def analyze_wall_construction(self, df: pd.DataFrame) -> Dict:
+        """Analyze wall construction types and insulation status."""
+        logger.info("Analyzing wall construction...")
+
+        if 'wall_type' not in df.columns or 'wall_insulated' not in df.columns:
+            logger.warning("Standardized wall columns not found")
+            return {}
+
+        # Wall type distribution
+        wall_types = df['wall_type'].value_counts().to_dict()
+
+        # Insulation status
+        insulated_count = df['wall_insulated'].sum()
+        total = len(df)
+        insulation_rate = (insulated_count / total * 100) if total > 0 else 0
+
+        # Cross-tabulation
+        wall_insulation_crosstab = pd.crosstab(
+            df['wall_type'],
+            df['wall_insulated'],
+            normalize='index'
+        ) * 100
+
+        results = {
+            'wall_types': wall_types,
+            'insulation_rate': float(insulation_rate),
+            'insulated_count': int(insulated_count),
+            'uninsulated_count': int(total - insulated_count),
+            'crosstab': wall_insulation_crosstab.to_dict()
+        }
+
+        logger.info(f"Wall Construction:")
+        for wall_type, count in wall_types.items():
+            logger.info(f"  {wall_type}: {count:,}")
+        logger.info(f"  Insulation rate: {insulation_rate:.1f}%")
+
+        return results
+
+    def analyze_loft_insulation(self, df: pd.DataFrame) -> Dict:
+        """Analyze loft insulation status and thickness."""
+        logger.info("Analyzing loft insulation...")
+
+        loft_col = None
+        for col in ['ROOF_DESCRIPTION', 'LOFT_INSULATION']:
+            if col in df.columns:
+                loft_col = col
+                break
+
+        if loft_col is None:
+            logger.warning("No loft insulation column found")
+            return {}
+
+        # Categorize by thickness (simplified - would need more detailed parsing)
+        df['loft_category'] = 'Unknown'
+
+        if loft_col in df.columns:
+            none_mask = df[loft_col].str.contains('no insulation|0mm', case=False, na=False)
+            partial_mask = df[loft_col].str.contains('50mm|75mm|100mm', case=False, na=False)
+            full_mask = df[loft_col].str.contains('150mm|200mm|250mm|270mm', case=False, na=False)
+
+            df.loc[none_mask, 'loft_category'] = 'None'
+            df.loc[partial_mask, 'loft_category'] = 'Partial (<150mm)'
+            df.loc[full_mask, 'loft_category'] = 'Full (≥150mm)'
+
+        loft_categories = df['loft_category'].value_counts().to_dict()
+        loft_pct = df['loft_category'].value_counts(normalize=True).to_dict()
+
+        results = {
+            'categories': loft_categories,
+            'percentages': {k: float(v*100) for k, v in loft_pct.items()}
+        }
+
+        logger.info(f"Loft Insulation:")
+        for category, count in loft_categories.items():
+            pct = loft_pct.get(category, 0) * 100
+            logger.info(f"  {category}: {count:,} ({pct:.1f}%)")
+
+        return results
+
+    def analyze_floor_insulation(self, df: pd.DataFrame) -> Dict:
+        """Analyze floor insulation presence/absence."""
+        logger.info("Analyzing floor insulation...")
+
+        floor_col = None
+        for col in ['FLOOR_DESCRIPTION', 'FLOOR_INSULATION']:
+            if col in df.columns:
+                floor_col = col
+                break
+
+        if floor_col is None:
+            logger.warning("No floor insulation column found")
+            return {}
+
+        # Check for insulation presence
+        insulated_mask = df[floor_col].str.contains(
+            'insulated|insulation', case=False, na=False
+        )
+
+        insulated_count = insulated_mask.sum()
+        total = len(df)
+        insulation_rate = (insulated_count / total * 100) if total > 0 else 0
+
+        results = {
+            'insulated': int(insulated_count),
+            'uninsulated': int(total - insulated_count),
+            'insulation_rate': float(insulation_rate)
+        }
+
+        logger.info(f"Floor Insulation:")
+        logger.info(f"  Insulated: {insulated_count:,} ({insulation_rate:.1f}%)")
+        logger.info(f"  Uninsulated: {total - insulated_count:,} ({100-insulation_rate:.1f}%)")
+
+        return results
+
+    def analyze_glazing(self, df: pd.DataFrame) -> Dict:
+        """Analyze window glazing types."""
+        logger.info("Analyzing window glazing...")
+
+        glazing_col = None
+        for col in ['WINDOWS_DESCRIPTION', 'GLAZING_TYPE']:
+            if col in df.columns:
+                glazing_col = col
+                break
+
+        if glazing_col is None:
+            logger.warning("No glazing column found")
+            return {}
+
+        # Categorize glazing types
+        df['glazing_type'] = 'Unknown'
+
+        single_mask = df[glazing_col].str.contains('single', case=False, na=False)
+        double_mask = df[glazing_col].str.contains('double', case=False, na=False)
+        triple_mask = df[glazing_col].str.contains('triple', case=False, na=False)
+
+        df.loc[single_mask, 'glazing_type'] = 'Single'
+        df.loc[double_mask, 'glazing_type'] = 'Double'
+        df.loc[triple_mask, 'glazing_type'] = 'Triple'
+
+        glazing_types = df['glazing_type'].value_counts().to_dict()
+        glazing_pct = df['glazing_type'].value_counts(normalize=True).to_dict()
+
+        results = {
+            'types': glazing_types,
+            'percentages': {k: float(v*100) for k, v in glazing_pct.items()}
+        }
+
+        logger.info(f"Window Glazing:")
+        for glaze_type, count in glazing_types.items():
+            pct = glazing_pct.get(glaze_type, 0) * 100
+            logger.info(f"  {glaze_type}: {count:,} ({pct:.1f}%)")
+
+        return results
+
+    def analyze_heating_systems(self, df: pd.DataFrame) -> Dict:
+        """Analyze primary heating systems and fuel types."""
+        logger.info("Analyzing heating systems...")
+
+        if 'heating_system_type' not in df.columns:
+            logger.warning("Standardized heating system column not found")
+            return {}
+
+        heating_types = df['heating_system_type'].value_counts().to_dict()
+        heating_pct = df['heating_system_type'].value_counts(normalize=True).to_dict()
+
+        results = {
+            'types': heating_types,
+            'percentages': {k: float(v*100) for k, v in heating_pct.items()}
+        }
+
+        logger.info(f"Heating Systems:")
+        for heat_type, count in heating_types.items():
+            pct = heating_pct.get(heat_type, 0) * 100
+            logger.info(f"  {heat_type}: {count:,} ({pct:.1f}%)")
+
+        return results
+
+    def analyze_heating_controls(self, df: pd.DataFrame) -> Dict:
+        """Analyze heating control systems."""
+        logger.info("Analyzing heating controls...")
+
+        results = {}
+
+        # TRV presence
+        if 'HEATING_CONTROLS_DESCRIPTION' in df.columns:
+            trv_mask = df['HEATING_CONTROLS_DESCRIPTION'].str.contains(
+                'TRV|thermostatic radiator', case=False, na=False
+            )
+            results['trv_present'] = int(trv_mask.sum())
+            results['trv_rate'] = float(trv_mask.sum() / len(df) * 100)
+
+        logger.info(f"Heating Controls:")
+        if 'trv_rate' in results:
+            logger.info(f"  TRV present: {results['trv_present']:,} ({results['trv_rate']:.1f}%)")
+
+        return results
+
+    def analyze_hot_water(self, df: pd.DataFrame) -> Dict:
+        """Analyze hot water systems."""
+        logger.info("Analyzing hot water systems...")
+
+        hotwater_col = None
+        for col in ['HOTWATER_DESCRIPTION', 'HOT_WATER_SYSTEM']:
+            if col in df.columns:
+                hotwater_col = col
+                break
+
+        if hotwater_col is None:
+            logger.warning("No hot water system column found")
+            return {}
+
+        # Categorize hot water systems
+        df['hotwater_type'] = 'Other'
+
+        immersion_mask = df[hotwater_col].str.contains('immersion', case=False, na=False)
+        combi_mask = df[hotwater_col].str.contains('combi', case=False, na=False)
+        system_mask = df[hotwater_col].str.contains('system', case=False, na=False)
+
+        df.loc[immersion_mask, 'hotwater_type'] = 'Immersion'
+        df.loc[combi_mask, 'hotwater_type'] = 'Combi'
+        df.loc[system_mask, 'hotwater_type'] = 'System Boiler'
+
+        hotwater_types = df['hotwater_type'].value_counts().to_dict()
+        hotwater_pct = df['hotwater_type'].value_counts(normalize=True).to_dict()
+
+        results = {
+            'types': hotwater_types,
+            'percentages': {k: float(v*100) for k, v in hotwater_pct.items()}
+        }
+
+        logger.info(f"Hot Water Systems:")
+        for hw_type, count in hotwater_types.items():
+            pct = hotwater_pct.get(hw_type, 0) * 100
+            logger.info(f"  {hw_type}: {count:,} ({pct:.1f}%)")
+
+        return results
+
+    def analyze_energy_consumption(self, df: pd.DataFrame) -> Dict:
+        """Analyze current energy consumption estimates."""
+        logger.info("Analyzing energy consumption...")
+
+        if 'energy_kwh_per_m2_year' not in df.columns:
+            logger.warning("Normalized energy consumption column not found")
+            return {}
+
+        results = {
+            'mean': float(df['energy_kwh_per_m2_year'].mean()),
+            'median': float(df['energy_kwh_per_m2_year'].median()),
+            'std': float(df['energy_kwh_per_m2_year'].std()),
+            'min': float(df['energy_kwh_per_m2_year'].min()),
+            'max': float(df['energy_kwh_per_m2_year'].max()),
+            'percentiles': {
+                '25th': float(df['energy_kwh_per_m2_year'].quantile(0.25)),
+                '50th': float(df['energy_kwh_per_m2_year'].quantile(0.50)),
+                '75th': float(df['energy_kwh_per_m2_year'].quantile(0.75)),
+                '90th': float(df['energy_kwh_per_m2_year'].quantile(0.90))
+            }
+        }
+
+        logger.info(f"Energy Consumption (kWh/m²/year):")
+        logger.info(f"  Mean: {results['mean']:.1f}")
+        logger.info(f"  Median: {results['median']:.1f}")
+
+        return results
+
+    def analyze_co2_emissions(self, df: pd.DataFrame) -> Dict:
+        """Analyze current CO2 emissions estimates."""
+        logger.info("Analyzing CO2 emissions...")
+
+        if 'co2_kg_per_m2_year' not in df.columns:
+            logger.warning("Normalized CO2 emissions column not found")
+            return {}
+
+        results = {
+            'mean': float(df['co2_kg_per_m2_year'].mean()),
+            'median': float(df['co2_kg_per_m2_year'].median()),
+            'std': float(df['co2_kg_per_m2_year'].std()),
+            'min': float(df['co2_kg_per_m2_year'].min()),
+            'max': float(df['co2_kg_per_m2_year'].max()),
+            'percentiles': {
+                '25th': float(df['co2_kg_per_m2_year'].quantile(0.25)),
+                '50th': float(df['co2_kg_per_m2_year'].quantile(0.50)),
+                '75th': float(df['co2_kg_per_m2_year'].quantile(0.75)),
+                '90th': float(df['co2_kg_per_m2_year'].quantile(0.90))
+            }
+        }
+
+        logger.info(f"CO2 Emissions (kg/m²/year):")
+        logger.info(f"  Mean: {results['mean']:.1f}")
+        logger.info(f"  Median: {results['median']:.1f}")
+
+        return results
+
+    def save_results(self, output_path: Optional[Path] = None):
+        """
+        Save analysis results to file.
+
+        Args:
+            output_path: Path to save results
+        """
+        if output_path is None:
+            output_path = DATA_OUTPUTS_DIR / "archetype_analysis_results.txt"
+
+        with open(output_path, 'w') as f:
+            f.write("ARCHETYPE CHARACTERIZATION RESULTS\n")
+            f.write("="*70 + "\n\n")
+
+            for section, data in self.results.items():
+                f.write(f"\n{section.replace('_', ' ').upper()}\n")
+                f.write("-"*70 + "\n")
+                f.write(str(data) + "\n")
+
+        logger.info(f"Results saved to: {output_path}")
+
+
+def main():
+    """Main execution function for archetype analysis."""
+    logger.info("Starting archetype characterization...")
+
+    # Load validated data
+    input_file = DATA_PROCESSED_DIR / "epc_london_validated.csv"
+
+    if not input_file.exists():
+        logger.error(f"Input file not found: {input_file}")
+        logger.info("Please run data validation first")
+        return
+
+    logger.info(f"Loading data from: {input_file}")
+    df = pd.read_csv(input_file, low_memory=False)
+
+    # Perform analysis
+    analyzer = ArchetypeAnalyzer()
+    results = analyzer.analyze_archetype(df)
+
+    # Save results
+    analyzer.save_results()
+
+    logger.info("Archetype characterization complete!")
+
+
+if __name__ == "__main__":
+    main()
