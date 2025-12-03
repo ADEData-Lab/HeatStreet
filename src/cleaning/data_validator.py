@@ -57,6 +57,9 @@ class EPCDataValidator:
         self.validation_report['total_records'] = len(df)
         logger.info(f"Starting validation of {len(df):,} records...")
 
+        # Standardize column names first (EPC API uses hyphens, we need underscores)
+        df = self._standardize_column_names(df)
+
         # Run validation checks in sequence
         df = self.remove_duplicates(df)
         df = self.validate_floor_areas(df)
@@ -70,6 +73,26 @@ class EPCDataValidator:
         self.log_validation_summary()
 
         return df, self.validation_report
+
+    def _standardize_column_names(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Standardize column names from EPC API format (hyphenated) to expected format (uppercase with underscores).
+
+        Args:
+            df: DataFrame with EPC API column names
+
+        Returns:
+            DataFrame with standardized column names
+        """
+        logger.info("Standardizing column names from EPC API format...")
+
+        # Convert hyphenated lowercase to uppercase with underscores
+        # e.g., 'current-energy-rating' -> 'CURRENT_ENERGY_RATING'
+        df.columns = df.columns.str.replace('-', '_').str.upper()
+
+        logger.info(f"Standardized {len(df.columns)} column names")
+
+        return df
 
     def remove_duplicates(self, df: pd.DataFrame) -> pd.DataFrame:
         """
