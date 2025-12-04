@@ -326,7 +326,7 @@ class ReportGenerator:
 
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(output_path, 'w') as f:
+        with open(output_path, 'w', encoding='utf-8') as f:
             f.write("="*80 + "\n")
             f.write("HEAT STREET PROJECT: EXECUTIVE SUMMARY\n")
             f.write("Edwardian Terraced Housing - London EPC Analysis\n")

@@ -500,7 +500,7 @@ class ScenarioModeler:
         if output_path is None:
             output_path = DATA_OUTPUTS_DIR / "scenario_modeling_results.txt"
 
-        with open(output_path, 'w') as f:
+        with open(output_path, 'w', encoding='utf-8') as f:
             f.write("SCENARIO MODELING RESULTS\n")
             f.write("="*70 + "\n\n")
 
