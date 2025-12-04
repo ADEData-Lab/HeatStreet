@@ -350,8 +350,14 @@ class HeatNetworkAnalyzer:
                 nearby_props = properties_27700[nearby_mask]
 
                 if len(nearby_props) > 0:
-                    # Sum energy consumption (kWh/year)
-                    total_energy_kwh = nearby_props['ENERGY_CONSUMPTION_CURRENT'].sum()
+                    # ENERGY_CONSUMPTION_CURRENT is in kWh/m²/year
+                    # Multiply by floor area to get absolute kWh/year, then sum
+                    if 'TOTAL_FLOOR_AREA' in nearby_props.columns:
+                        absolute_energy = nearby_props['ENERGY_CONSUMPTION_CURRENT'] * nearby_props['TOTAL_FLOOR_AREA']
+                        total_energy_kwh = absolute_energy.sum()
+                    else:
+                        # Fallback: use intensity values (will be underestimate)
+                        total_energy_kwh = nearby_props['ENERGY_CONSUMPTION_CURRENT'].sum()
 
                     # Convert to GWh/km²
                     heat_density_gwh_km2 = (total_energy_kwh / 1_000_000) / buffer_area_km2

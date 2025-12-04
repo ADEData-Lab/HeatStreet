@@ -311,17 +311,42 @@ class ArchetypeAnalyzer:
 
         results = {}
 
-        # TRV presence
-        if 'HEATING_CONTROLS_DESCRIPTION' in df.columns:
-            trv_mask = df['HEATING_CONTROLS_DESCRIPTION'].str.contains(
+        # Find heating controls column (EPC API uses MAINHEATCONT_DESCRIPTION or MAIN_HEATING_CONTROLS)
+        control_col = None
+        for col in ['MAINHEATCONT_DESCRIPTION', 'MAIN_HEATING_CONTROLS', 'HEATING_CONTROLS_DESCRIPTION']:
+            if col in df.columns:
+                control_col = col
+                break
+
+        if control_col:
+            # TRV presence
+            trv_mask = df[control_col].str.contains(
                 'TRV|thermostatic radiator', case=False, na=False
             )
             results['trv_present'] = int(trv_mask.sum())
             results['trv_rate'] = float(trv_mask.sum() / len(df) * 100)
 
+            # Programmer/timer presence
+            programmer_mask = df[control_col].str.contains(
+                'programmer|timer', case=False, na=False
+            )
+            results['programmer_present'] = int(programmer_mask.sum())
+            results['programmer_rate'] = float(programmer_mask.sum() / len(df) * 100)
+
+            # Room thermostat
+            thermostat_mask = df[control_col].str.contains(
+                'room thermostat', case=False, na=False
+            )
+            results['room_thermostat_present'] = int(thermostat_mask.sum())
+            results['room_thermostat_rate'] = float(thermostat_mask.sum() / len(df) * 100)
+
         logger.info(f"Heating Controls:")
         if 'trv_rate' in results:
             logger.info(f"  TRV present: {results['trv_present']:,} ({results['trv_rate']:.1f}%)")
+        if 'programmer_rate' in results:
+            logger.info(f"  Programmer/timer: {results['programmer_present']:,} ({results['programmer_rate']:.1f}%)")
+        if 'room_thermostat_rate' in results:
+            logger.info(f"  Room thermostat: {results['room_thermostat_present']:,} ({results['room_thermostat_rate']:.1f}%)")
 
         return results
 

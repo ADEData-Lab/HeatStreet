@@ -409,17 +409,19 @@ class EPCDataValidator:
 
     def _normalize_energy_metrics(self, df: pd.DataFrame) -> pd.DataFrame:
         """Normalize energy consumption metrics."""
-        if 'ENERGY_CONSUMPTION_CURRENT' in df.columns and 'TOTAL_FLOOR_AREA' in df.columns:
-            df['energy_kwh_per_m2_year'] = (
-                df['ENERGY_CONSUMPTION_CURRENT'] / df['TOTAL_FLOOR_AREA']
-            )
-            logger.info("Energy metrics normalized to kWh/m²/year")
+        # ENERGY_CONSUMPTION_CURRENT is already in kWh/m²/year from EPC API
+        # See: https://epc.opendatacommunities.org/docs/guidance (glossary)
+        if 'ENERGY_CONSUMPTION_CURRENT' in df.columns:
+            df['energy_kwh_per_m2_year'] = df['ENERGY_CONSUMPTION_CURRENT'].copy()
+            logger.info("Energy metrics copied (already in kWh/m²/year from API)")
 
+        # CO2_EMISSIONS_CURRENT is in tonnes/year (absolute)
+        # Convert to kg/m²/year: tonnes * 1000 / floor_area
         if 'CO2_EMISSIONS_CURRENT' in df.columns and 'TOTAL_FLOOR_AREA' in df.columns:
             df['co2_kg_per_m2_year'] = (
-                df['CO2_EMISSIONS_CURRENT'] / df['TOTAL_FLOOR_AREA']
+                df['CO2_EMISSIONS_CURRENT'] * 1000 / df['TOTAL_FLOOR_AREA']
             )
-            logger.info("CO2 metrics normalized to kg/m²/year")
+            logger.info("CO2 metrics normalized to kg/m²/year (converted from tonnes/year)")
 
         return df
 
