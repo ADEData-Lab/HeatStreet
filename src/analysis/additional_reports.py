@@ -123,7 +123,7 @@ class AdditionalReports:
 
     def _save_case_street_summary(self, summary: Dict, path: Path):
         """Save case street summary to text file."""
-        with open(path, 'w') as f:
+        with open(path, 'w', encoding='utf-8') as f:
             f.write("=" * 80 + "\n")
             f.write("CASE STREET ANALYSIS SUMMARY\n")
             f.write("=" * 80 + "\n\n")
@@ -382,7 +382,7 @@ class AdditionalReports:
 
         # Save if path provided
         if output_path:
-            with open(output_path, 'w') as f:
+            with open(output_path, 'w', encoding='utf-8') as f:
                 f.write(report_text)
             logger.info(f"Saved data quality report to {output_path}")
 

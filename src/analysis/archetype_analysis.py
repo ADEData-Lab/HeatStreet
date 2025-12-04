@@ -609,7 +609,7 @@ class ArchetypeAnalyzer:
         if output_path is None:
             output_path = DATA_OUTPUTS_DIR / "archetype_analysis_results.txt"
 
-        with open(output_path, 'w') as f:
+        with open(output_path, 'w', encoding='utf-8') as f:
             f.write("ARCHETYPE CHARACTERIZATION RESULTS\n")
             f.write("="*70 + "\n\n")
 

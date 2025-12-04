@@ -539,7 +539,7 @@ class RetrofitReadinessAnalyzer:
         summary_path = DATA_OUTPUTS_DIR / "reports" / "retrofit_readiness_summary.txt"
         summary_path.parent.mkdir(parents=True, exist_ok=True)
 
-        with open(summary_path, 'w') as f:
+        with open(summary_path, 'w', encoding='utf-8') as f:
             f.write("=" * 80 + "\n")
             f.write("HEAT PUMP RETROFIT READINESS ANALYSIS\n")
             f.write("=" * 80 + "\n\n")

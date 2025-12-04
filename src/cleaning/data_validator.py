@@ -519,7 +519,7 @@ class EPCDataValidator:
         if output_path is None:
             output_path = DATA_PROCESSED_DIR / "validation_report.txt"
 
-        with open(output_path, 'w') as f:
+        with open(output_path, 'w', encoding='utf-8') as f:
             f.write("EPC DATA VALIDATION REPORT\n")
             f.write("="*60 + "\n")
             f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
