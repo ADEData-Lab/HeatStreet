@@ -420,3 +420,114 @@ class AdditionalReports:
             return 0.20
         else:
             return 0.05
+
+    def analyze_heat_network_connection_thresholds(
+        self,
+        df: pd.DataFrame,
+        tier_field: str = 'heat_network_tier',
+        tier_values: list = None,
+        output_path: Optional[Path] = None
+    ) -> pd.DataFrame:
+        """
+        Analyze heat network viability at different connection rates.
+
+        Models what proportion of properties need to connect for
+        network economic viability.
+
+        Args:
+            df: DataFrame with heat network tier classifications
+            tier_field: Column name for heat network tiers
+            tier_values: List of tier values to analyze (default: ['Tier 3: High heat density'])
+            output_path: Optional path to save results
+
+        Returns:
+            DataFrame with connection threshold analysis
+        """
+        if tier_values is None:
+            tier_values = ['Tier 3: High heat density']
+
+        logger.info(f"Analyzing heat network connection thresholds for {len(tier_values)} tiers...")
+
+        all_results = []
+
+        for tier in tier_values:
+            if tier_field not in df.columns:
+                logger.warning(f"Tier field '{tier_field}' not found, skipping threshold analysis")
+                continue
+
+            tier_df = df[df[tier_field] == tier].copy()
+            n_properties = len(tier_df)
+
+            if n_properties == 0:
+                logger.warning(f"No properties found for {tier}")
+                continue
+
+            logger.info(f"  Analyzing {tier}: {n_properties:,} properties")
+
+            # Network infrastructure costs (simplified model)
+            NETWORK_FIXED_COST = 5_000_000  # Base network infrastructure
+            PER_PROPERTY_CONNECTION = 5000   # Individual connection cost
+            ANNUAL_STANDING_CHARGE = 200     # Per property per year
+            HEAT_PRICE_PER_KWH = 0.08        # Delivered heat price (£/kWh)
+
+            # Test different connection rates
+            connection_rates = [0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+
+            # Average baseline consumption for properties in this tier
+            if 'baseline_consumption_kwh_year' in tier_df.columns:
+                avg_consumption = tier_df['baseline_consumption_kwh_year'].mean()
+            elif 'ENERGY_CONSUMPTION_CURRENT' in tier_df.columns and 'TOTAL_FLOOR_AREA' in tier_df.columns:
+                avg_consumption = (tier_df['ENERGY_CONSUMPTION_CURRENT'] * tier_df['TOTAL_FLOOR_AREA']).mean()
+            else:
+                avg_consumption = 15000  # Default assumption
+
+            for rate in connection_rates:
+                n_connected = int(n_properties * rate)
+
+                # Total infrastructure cost
+                total_infra_cost = NETWORK_FIXED_COST + (n_connected * PER_PROPERTY_CONNECTION)
+
+                # Annual revenue
+                annual_standing_revenue = n_connected * ANNUAL_STANDING_CHARGE
+                annual_heat_revenue = n_connected * avg_consumption * HEAT_PRICE_PER_KWH
+                annual_revenue = annual_standing_revenue + annual_heat_revenue
+
+                # Simple payback for network operator
+                network_payback = total_infra_cost / annual_revenue if annual_revenue > 0 else np.inf
+
+                # Typical viability threshold for infrastructure: 25 years
+                viable = network_payback < 25
+
+                all_results.append({
+                    'tier': tier,
+                    'properties_in_tier': n_properties,
+                    'connection_rate': rate,
+                    'properties_connected': n_connected,
+                    'total_infrastructure_cost': total_infra_cost,
+                    'annual_standing_charge_revenue': annual_standing_revenue,
+                    'annual_heat_revenue': annual_heat_revenue,
+                    'total_annual_revenue': annual_revenue,
+                    'network_payback_years': network_payback,
+                    'viable_25yr_threshold': viable,
+                    'avg_consumption_per_property': avg_consumption,
+                })
+
+        threshold_df = pd.DataFrame(all_results)
+
+        # Save if path provided
+        if output_path:
+            threshold_df.to_csv(output_path, index=False)
+            logger.info(f"Saved heat network connection thresholds to {output_path}")
+
+        # Report minimum viable connection rates
+        for tier in tier_values:
+            tier_results = threshold_df[threshold_df['tier'] == tier]
+            viable = tier_results[tier_results['viable_25yr_threshold']]
+            if len(viable) > 0:
+                min_viable = viable['connection_rate'].min()
+                logger.info(f"  {tier}: Minimum viable connection rate = {min_viable*100:.0f}%")
+            else:
+                logger.info(f"  {tier}: No viable connection rate found (all > 25 year payback)")
+
+        logger.info(f"✓ Heat network connection threshold analysis complete")
+        return threshold_df

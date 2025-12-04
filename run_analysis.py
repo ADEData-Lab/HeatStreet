@@ -335,6 +335,35 @@ def validate_data(df):
     return df_validated, report
 
 
+def apply_methodological_adjustments(df):
+    """Apply evidence-based methodological adjustments."""
+    console.print()
+    console.print(Panel("[bold]Phase 2.5: Methodological Adjustments[/bold]", border_style="blue"))
+    console.print()
+
+    from src.analysis.methodological_adjustments import MethodologicalAdjustments
+
+    console.print("[cyan]Applying evidence-based adjustments...[/cyan]")
+
+    adjuster = MethodologicalAdjustments()
+
+    # Apply all adjustments in sequence
+    df_adjusted = adjuster.apply_all_adjustments(df)
+
+    # Generate summary
+    summary = adjuster.generate_adjustment_summary(df_adjusted)
+
+    console.print(f"[green]✓[/green] Methodological adjustments applied")
+    if summary.get('prebound_adjustment', {}).get('applied'):
+        console.print(f"    • Prebound effect adjustment (Few et al., 2023)")
+    if summary.get('flow_temperature', {}).get('applied'):
+        console.print(f"    • Heat pump flow temperature model")
+    if summary.get('uncertainty', {}).get('applied'):
+        console.print(f"    • Measurement uncertainty (Crawley et al., 2019)")
+
+    return df_adjusted
+
+
 def analyze_archetype(df):
     """Run archetype characterization."""
     console.print()
@@ -714,6 +743,24 @@ def generate_additional_reports(df_raw, df_validated, validation_report, archety
     except Exception as e:
         console.print(f"[yellow]⚠ Could not generate subsidy sensitivity: {e}[/yellow]")
 
+    # 5. Heat Network Connection Thresholds
+    try:
+        console.print("[cyan]Analyzing heat network connection thresholds...[/cyan]")
+        threshold_path = output_dir / "heat_network_connection_thresholds.csv"
+        # Check if heat network tier exists
+        if 'heat_network_tier' in df_validated.columns:
+            threshold_df = reporter.analyze_heat_network_connection_thresholds(
+                df_validated,
+                tier_field='heat_network_tier',
+                tier_values=['Tier 3: High heat density', 'Tier 4: Medium heat density'],
+                output_path=threshold_path
+            )
+            reports_created.append("✓ Heat network connection threshold analysis")
+        else:
+            console.print("[yellow]  Heat network tier not found, skipping threshold analysis[/yellow]")
+    except Exception as e:
+        console.print(f"[yellow]⚠ Could not generate connection thresholds: {e}[/yellow]")
+
     console.print()
     console.print(f"[green]✓[/green] Additional reports complete!")
     console.print()
@@ -884,23 +931,26 @@ def main():
     # Keep reference to raw data for quality reports
     df_raw = df.copy()
 
-    # Phase 3: Analyze
-    archetype_results = analyze_archetype(df_validated)
+    # Phase 2.5: Methodological Adjustments
+    df_adjusted = apply_methodological_adjustments(df_validated)
 
-    # Phase 4: Model
-    scenario_results, subsidy_results = model_scenarios(df_validated)
+    # Phase 3: Analyze (use adjusted data)
+    archetype_results = analyze_archetype(df_adjusted)
+
+    # Phase 4: Model (use adjusted data for realistic baselines)
+    scenario_results, subsidy_results = model_scenarios(df_adjusted)
 
     # Phase 4.3: Retrofit Readiness
-    df_readiness, readiness_summary = analyze_retrofit_readiness(df_validated)
+    df_readiness, readiness_summary = analyze_retrofit_readiness(df_adjusted)
 
     # Phase 4.5: Spatial Analysis (optional)
-    pathway_summary = run_spatial_analysis(df_validated)
+    pathway_summary = run_spatial_analysis(df_adjusted)
 
     # Phase 5: Report
-    generate_reports(archetype_results, scenario_results, subsidy_results, df_validated, pathway_summary)
+    generate_reports(archetype_results, scenario_results, subsidy_results, df_adjusted, pathway_summary)
 
     # Phase 5.5: Additional Reports
-    generate_additional_reports(df_raw, df_validated, validation_report, archetype_results, scenario_results)
+    generate_additional_reports(df_raw, df_adjusted, validation_report, archetype_results, scenario_results)
 
     # Complete
     elapsed = time.time() - start_time
