@@ -25,6 +25,7 @@ from src.acquisition.london_gis_downloader import LondonGISDownloader
 from src.cleaning.data_validator import EPCDataValidator
 from src.analysis.archetype_analysis import ArchetypeAnalyzer
 from src.modeling.scenario_model import ScenarioModeler
+from src.utils.analysis_logger import AnalysisLogger
 
 
 console = Console()
@@ -221,11 +222,17 @@ def ask_gis_download():
     return False
 
 
-def download_data(scope):
+def download_data(scope, analysis_logger: AnalysisLogger = None):
     """Download EPC data via API."""
     console.print()
     console.print(Panel("[bold]Phase 1: Data Download[/bold]", border_style="blue"))
     console.print()
+
+    if analysis_logger:
+        analysis_logger.start_phase(
+            "Data Download",
+            "Download EPC data from API and filter for Edwardian terraced houses"
+        )
 
     try:
         downloader = EPCAPIDownloader()
@@ -269,14 +276,25 @@ def download_data(scope):
 
         if df.empty:
             console.print("[red]✗[/red] No data downloaded", style="red")
+            if analysis_logger:
+                analysis_logger.complete_phase(success=False, message="No data downloaded from API")
             return None
 
         console.print(f"[green]✓[/green] Downloaded {len(df):,} records")
+
+        if analysis_logger:
+            analysis_logger.add_metric("raw_records_downloaded", len(df), "Total records from API")
+            analysis_logger.add_metric("boroughs_requested", len(scope['boroughs']) if scope['boroughs'] else 33)
+            analysis_logger.add_metric("from_year", scope['from_year'])
 
         # Apply Edwardian filters
         console.print("[cyan]Applying Edwardian terraced housing filters...[/cyan]")
         df_filtered = downloader.apply_edwardian_filters(df)
         console.print(f"[green]✓[/green] Filtered to {len(df_filtered):,} Edwardian terraced houses")
+
+        if analysis_logger:
+            analysis_logger.add_metric("filtered_records", len(df_filtered), "Edwardian terraced houses after filtering")
+            analysis_logger.add_metric("filter_rate", len(df_filtered) / len(df) * 100, "Percentage retained after filtering")
 
         # Save data
         console.print("[cyan]Saving data...[/cyan]")
@@ -284,21 +302,36 @@ def download_data(scope):
         downloader.save_data(df_filtered, "epc_london_filtered.csv")
         console.print(f"[green]✓[/green] Data saved to data/raw/")
 
+        if analysis_logger:
+            analysis_logger.add_output("data/raw/epc_london_raw.csv", "csv", "Raw EPC data from API")
+            analysis_logger.add_output("data/raw/epc_london_filtered.csv", "csv", "Filtered Edwardian terraced houses")
+            analysis_logger.complete_phase(success=True, message=f"Downloaded {len(df_filtered):,} Edwardian properties")
+
         return df_filtered
 
     except ValueError as e:
         console.print(f"[red]✗[/red] Error: {e}", style="red")
+        if analysis_logger:
+            analysis_logger.complete_phase(success=False, message=f"ValueError: {e}")
         return None
     except Exception as e:
         console.print(f"[red]✗[/red] Unexpected error: {e}", style="red")
+        if analysis_logger:
+            analysis_logger.complete_phase(success=False, message=f"Error: {e}")
         return None
 
 
-def validate_data(df):
+def validate_data(df, analysis_logger: AnalysisLogger = None):
     """Validate and clean data."""
     console.print()
     console.print(Panel("[bold]Phase 2: Data Validation[/bold]", border_style="blue"))
     console.print()
+
+    if analysis_logger:
+        analysis_logger.start_phase(
+            "Data Validation",
+            "Run quality assurance checks and remove invalid/duplicate records"
+        )
 
     console.print("[cyan]Running quality assurance checks...[/cyan]")
 
@@ -309,6 +342,13 @@ def validate_data(df):
     console.print(f"    Records passed: {len(df_validated):,} ({len(df_validated)/report['total_records']*100:.1f}%)")
     console.print(f"    Duplicates removed: {report['duplicates_removed']:,}")
     console.print(f"    Invalid records: {report['total_records'] - len(df_validated):,}")
+
+    if analysis_logger:
+        analysis_logger.add_metric("input_records", report['total_records'], "Records before validation")
+        analysis_logger.add_metric("validated_records", len(df_validated), "Records after validation")
+        analysis_logger.add_metric("duplicates_removed", report['duplicates_removed'], "Duplicate records removed")
+        analysis_logger.add_metric("invalid_records", report['total_records'] - len(df_validated), "Invalid records removed")
+        analysis_logger.add_metric("validation_rate", len(df_validated)/report['total_records']*100, "Percentage of records passing validation")
 
     # Save validated data
     import pandas as pd
@@ -332,14 +372,25 @@ def validate_data(df):
 
     console.print(f"[green]✓[/green] Validated data saved")
 
+    if analysis_logger:
+        analysis_logger.add_output(str(output_file), "csv", "Validated EPC dataset")
+        analysis_logger.add_output("data/processed/validation_report.txt", "report", "Data validation report")
+        analysis_logger.complete_phase(success=True, message=f"{len(df_validated):,} records validated")
+
     return df_validated, report
 
 
-def apply_methodological_adjustments(df):
+def apply_methodological_adjustments(df, analysis_logger: AnalysisLogger = None):
     """Apply evidence-based methodological adjustments."""
     console.print()
     console.print(Panel("[bold]Phase 2.5: Methodological Adjustments[/bold]", border_style="blue"))
     console.print()
+
+    if analysis_logger:
+        analysis_logger.start_phase(
+            "Methodological Adjustments",
+            "Apply evidence-based adjustments (prebound effect, heat pump flow temp, uncertainty)"
+        )
 
     from src.analysis.methodological_adjustments import MethodologicalAdjustments
 
@@ -354,21 +405,36 @@ def apply_methodological_adjustments(df):
     summary = adjuster.generate_adjustment_summary(df_adjusted)
 
     console.print(f"[green]✓[/green] Methodological adjustments applied")
+    adjustments_applied = []
     if summary.get('prebound_adjustment', {}).get('applied'):
         console.print(f"    • Prebound effect adjustment (Few et al., 2023)")
+        adjustments_applied.append("Prebound effect")
     if summary.get('flow_temperature', {}).get('applied'):
         console.print(f"    • Heat pump flow temperature model")
+        adjustments_applied.append("Flow temperature")
     if summary.get('uncertainty', {}).get('applied'):
         console.print(f"    • Measurement uncertainty (Crawley et al., 2019)")
+        adjustments_applied.append("Measurement uncertainty")
+
+    if analysis_logger:
+        analysis_logger.add_metric("adjustments_applied", len(adjustments_applied), f"Applied: {', '.join(adjustments_applied)}")
+        analysis_logger.add_metric("records_adjusted", len(df_adjusted), "Records with adjustments")
+        analysis_logger.complete_phase(success=True, message=f"{len(adjustments_applied)} methodological adjustments applied")
 
     return df_adjusted
 
 
-def analyze_archetype(df):
+def analyze_archetype(df, analysis_logger: AnalysisLogger = None):
     """Run archetype characterization."""
     console.print()
     console.print(Panel("[bold]Phase 3: Archetype Analysis[/bold]", border_style="blue"))
     console.print()
+
+    if analysis_logger:
+        analysis_logger.start_phase(
+            "Archetype Analysis",
+            "Characterize Edwardian housing stock by EPC bands, insulation, heating systems, etc."
+        )
 
     console.print("[cyan]Analyzing property characteristics...[/cyan]")
 
@@ -387,18 +453,35 @@ def analyze_archetype(df):
                 count = results['epc_bands']['frequency'][band]
                 pct = results['epc_bands']['percentage'][band]
                 console.print(f"    Band {band}: {count:,} ({pct:.1f}%)")
+
+        if analysis_logger:
+            for band in ['D', 'E', 'F', 'G']:
+                if band in results['epc_bands']['frequency']:
+                    count = results['epc_bands']['frequency'][band]
+                    pct = results['epc_bands']['percentage'][band]
+                    analysis_logger.add_metric(f"epc_band_{band}", count, f"Band {band}: {pct:.1f}%")
     else:
         console.print()
         console.print("[yellow]Note: EPC band distribution analysis could not be completed (missing required columns)[/yellow]")
 
+    if analysis_logger:
+        analysis_logger.add_output("data/outputs/archetype_analysis_results.txt", "report", "Archetype characterization results")
+        analysis_logger.complete_phase(success=True, message="Archetype characterization complete")
+
     return results
 
 
-def model_scenarios(df):
+def model_scenarios(df, analysis_logger: AnalysisLogger = None):
     """Run scenario modeling."""
     console.print()
     console.print(Panel("[bold]Phase 4: Scenario Modeling[/bold]", border_style="blue"))
     console.print()
+
+    if analysis_logger:
+        analysis_logger.start_phase(
+            "Scenario Modeling",
+            "Model decarbonization scenarios (heat pump, hybrid, district heating) and subsidy sensitivity"
+        )
 
     console.print("[cyan]Modeling decarbonization scenarios...[/cyan]")
 
@@ -414,6 +497,8 @@ def model_scenarios(df):
         for scenario, results in scenario_results.items():
             if 'capital_cost_per_property' in results:
                 console.print(f"    {scenario}: £{results['capital_cost_per_property']:,.0f} per property")
+                if analysis_logger:
+                    analysis_logger.add_metric(f"scenario_{scenario}_cost", results['capital_cost_per_property'], f"Capital cost per property")
             else:
                 console.print(f"    {scenario}: Analysis incomplete (missing required data)")
     else:
@@ -427,14 +512,25 @@ def model_scenarios(df):
     modeler.save_results()
     console.print(f"[green]✓[/green] Results saved")
 
+    if analysis_logger:
+        analysis_logger.add_metric("scenarios_modeled", len(scenario_results), "Decarbonization scenarios analyzed")
+        analysis_logger.add_output("data/outputs/scenario_modeling_results.txt", "report", "Scenario modeling results")
+        analysis_logger.complete_phase(success=True, message=f"{len(scenario_results)} scenarios modeled successfully")
+
     return scenario_results, subsidy_results
 
 
-def analyze_retrofit_readiness(df):
+def analyze_retrofit_readiness(df, analysis_logger: AnalysisLogger = None):
     """Analyze heat pump retrofit readiness."""
     console.print()
     console.print(Panel("[bold]Phase 4.3: Retrofit Readiness Analysis[/bold]", border_style="blue"))
     console.print()
+
+    if analysis_logger:
+        analysis_logger.start_phase(
+            "Retrofit Readiness Analysis",
+            "Assess heat pump readiness, fabric pre-requisites, and retrofit costs"
+        )
 
     console.print("[cyan]Assessing heat pump readiness and barriers...[/cyan]")
     console.print()
@@ -472,6 +568,14 @@ def analyze_retrofit_readiness(df):
         console.print(f"  Total retrofit investment: £{summary['total_retrofit_cost']/1e6:.1f}M")
         console.print()
 
+        if analysis_logger:
+            for tier in range(1, 6):
+                count = summary['tier_distribution'].get(tier, 0)
+                pct = summary['tier_percentages'].get(tier, 0)
+                analysis_logger.add_metric(f"retrofit_tier_{tier}", count, f"{pct:.1f}% of properties")
+            analysis_logger.add_metric("mean_fabric_cost", summary['mean_fabric_cost'], "Average fabric improvement cost per property")
+            analysis_logger.add_metric("total_retrofit_cost", summary['total_retrofit_cost'], "Total retrofit investment needed")
+
         # Generate visualizations
         console.print("[cyan]Creating retrofit readiness visualizations...[/cyan]")
 
@@ -484,15 +588,23 @@ def analyze_retrofit_readiness(df):
 
         console.print(f"[green]✓[/green] Visualizations saved to data/outputs/figures/")
 
+        if analysis_logger:
+            analysis_logger.add_output("data/outputs/retrofit_readiness_analysis.csv", "csv", "Property-level retrofit readiness")
+            analysis_logger.add_output("data/outputs/reports/retrofit_readiness_summary.txt", "report", "Retrofit readiness summary")
+            analysis_logger.add_output("data/outputs/figures/retrofit_readiness_dashboard.png", "png", "Retrofit readiness visualization")
+            analysis_logger.complete_phase(success=True, message="Retrofit readiness assessment complete")
+
         return df_readiness, summary
 
     except Exception as e:
         console.print(f"[yellow]⚠ Retrofit readiness analysis failed: {e}[/yellow]")
         logger.error(f"Retrofit readiness error: {e}")
+        if analysis_logger:
+            analysis_logger.complete_phase(success=False, message=f"Error: {e}")
         return None, None
 
 
-def run_spatial_analysis(df):
+def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None):
     """Run spatial heat network tier analysis (optional - requires GDAL)."""
     console.print()
     console.print(Panel("[bold]Phase 4.5: Spatial Analysis (Optional)[/bold]", border_style="blue"))
@@ -506,6 +618,12 @@ def run_spatial_analysis(df):
 
     try:
         from src.spatial.heat_network_analysis import HeatNetworkAnalyzer
+
+        if analysis_logger:
+            analysis_logger.start_phase(
+                "Spatial Analysis",
+                "Geocode properties and classify into heat network tiers based on heat density"
+            )
 
         analyzer = HeatNetworkAnalyzer()
 
@@ -539,9 +657,18 @@ def run_spatial_analysis(df):
             console.print(f"    • CSV: data/outputs/pathway_suitability_by_tier.csv")
             console.print(f"    • Interactive Map: data/outputs/maps/heat_network_tiers.html")
 
+            if analysis_logger:
+                analysis_logger.add_metric("properties_geocoded", len(properties_classified), "Properties with spatial classification")
+                analysis_logger.add_output("data/processed/epc_with_heat_network_tiers.geojson", "geojson", "Geocoded properties with heat network tiers")
+                analysis_logger.add_output("data/outputs/pathway_suitability_by_tier.csv", "csv", "Pathway suitability by tier")
+                analysis_logger.add_output("data/outputs/maps/heat_network_tiers.html", "html", "Interactive heat network tier map")
+                analysis_logger.complete_phase(success=True, message="Spatial analysis with heat network classification complete")
+
             return pathway_summary
         else:
             console.print("[yellow]⚠ Spatial analysis could not complete[/yellow]")
+            if analysis_logger:
+                analysis_logger.complete_phase(success=False, message="Spatial analysis could not complete")
             return None
 
     except ImportError as e:
@@ -559,19 +686,29 @@ def run_spatial_analysis(df):
         console.print()
         console.print("[cyan]The rest of the analysis will continue without spatial features.[/cyan]")
         console.print()
+        if analysis_logger:
+            analysis_logger.skip_phase("Spatial Analysis", "GDAL/geopandas not installed")
         return None
 
     except Exception as e:
         console.print(f"[yellow]⚠ Spatial analysis error: {e}[/yellow]")
         console.print("[cyan]Continuing without spatial analysis...[/cyan]")
+        if analysis_logger:
+            analysis_logger.complete_phase(success=False, message=f"Error: {e}")
         return None
 
 
-def generate_reports(archetype_results, scenario_results, subsidy_results=None, df_validated=None, pathway_summary=None):
+def generate_reports(archetype_results, scenario_results, subsidy_results=None, df_validated=None, pathway_summary=None, analysis_logger: AnalysisLogger = None):
     """Generate final reports and visualizations."""
     console.print()
     console.print(Panel("[bold]Phase 5: Report Generation[/bold]", border_style="blue"))
     console.print()
+
+    if analysis_logger:
+        analysis_logger.start_phase(
+            "Report Generation",
+            "Generate comprehensive reports, visualizations, and Excel workbook"
+        )
 
     console.print("[cyan]Generating comprehensive reports and visualizations...[/cyan]")
 
@@ -669,14 +806,30 @@ def generate_reports(archetype_results, scenario_results, subsidy_results=None, 
     console.print(f"    • Reports: data/outputs/reports/")
     console.print(f"    • Results: data/outputs/*.txt")
 
+    if analysis_logger:
+        analysis_logger.add_metric("reports_generated", len(reports_created), f"{len(reports_created)} reports and visualizations")
+        for report in reports_created:
+            # Extract file types from report descriptions
+            if "chart" in report.lower() or "histogram" in report.lower():
+                analysis_logger.add_output("data/outputs/figures/", "png", report.replace("✓ ", ""))
+        analysis_logger.add_output("data/outputs/heat_street_analysis_results.xlsx", "xlsx", "Comprehensive Excel workbook")
+        analysis_logger.add_output("data/outputs/reports/executive_summary.txt", "report", "Executive summary")
+        analysis_logger.complete_phase(success=True, message=f"{len(reports_created)} reports and visualizations generated")
+
     return True
 
 
-def generate_additional_reports(df_raw, df_validated, validation_report, archetype_results, scenario_results):
+def generate_additional_reports(df_raw, df_validated, validation_report, archetype_results, scenario_results, analysis_logger: AnalysisLogger = None):
     """Generate additional specialized reports for client presentation."""
     console.print()
     console.print(Panel("[bold]Phase 5.5: Additional Reports[/bold]", border_style="blue"))
     console.print()
+
+    if analysis_logger:
+        analysis_logger.start_phase(
+            "Additional Reports",
+            "Generate specialized reports (case streets, borough breakdown, data quality, subsidy analysis)"
+        )
 
     from src.analysis.additional_reports import AdditionalReports
     from pathlib import Path
@@ -770,6 +923,13 @@ def generate_additional_reports(df_raw, df_validated, validation_report, archety
         for report in reports_created:
             console.print(f"    {report}")
 
+    if analysis_logger:
+        analysis_logger.add_metric("additional_reports", len(reports_created), f"{len(reports_created)} specialized reports")
+        analysis_logger.add_output("data/outputs/borough_breakdown.csv", "csv", "Borough-level breakdown")
+        analysis_logger.add_output("data/outputs/subsidy_sensitivity_analysis.csv", "csv", "Subsidy sensitivity analysis")
+        analysis_logger.add_output("data/outputs/data_quality_report.txt", "report", "Data quality assessment")
+        analysis_logger.complete_phase(success=True, message=f"{len(reports_created)} additional specialized reports generated")
+
     return True
 
 
@@ -831,11 +991,17 @@ def check_existing_data():
     return False, None, 0
 
 
-def load_existing_data(file_path):
+def load_existing_data(file_path, analysis_logger: AnalysisLogger = None):
     """Load previously downloaded data from file."""
     console.print()
     console.print(Panel("[bold]Phase 1: Loading Existing Data[/bold]", border_style="blue"))
     console.print()
+
+    if analysis_logger:
+        analysis_logger.start_phase(
+            "Loading Existing Data",
+            "Load previously downloaded EPC data from file"
+        )
 
     console.print(f"[cyan]Loading data from {file_path.name}...[/cyan]")
 
@@ -843,6 +1009,11 @@ def load_existing_data(file_path):
     df = pd.read_csv(file_path)
 
     console.print(f"[green]✓[/green] Loaded {len(df):,} records")
+
+    if analysis_logger:
+        analysis_logger.add_metric("records_loaded", len(df), "Records loaded from existing file")
+        analysis_logger.add_output(str(file_path), "csv", "Existing EPC data loaded")
+        analysis_logger.complete_phase(success=True, message=f"Loaded {len(df):,} existing records")
 
     return df
 
@@ -862,6 +1033,11 @@ def main():
     # Ensure directories exist
     ensure_directories()
 
+    # Initialize analysis logger
+    analysis_logger = AnalysisLogger()
+    console.print("[green]✓[/green] Analysis logger initialized")
+    console.print()
+
     # Ask about GIS data download
     ask_gis_download()
 
@@ -877,7 +1053,7 @@ def main():
         ).ask()
 
         if use_existing:
-            df = load_existing_data(existing_file)
+            df = load_existing_data(existing_file, analysis_logger)
         else:
             console.print()
             console.print("[yellow]Downloading new data (existing data will be overwritten)...[/yellow]")
@@ -912,7 +1088,7 @@ def main():
         start_time = time.time()
 
         # Phase 1: Download
-        df = download_data(scope)
+        df = download_data(scope, analysis_logger)
         if df is None or df.empty:
             console.print("[red]✗ Analysis stopped - no data available[/red]")
             return
@@ -922,8 +1098,11 @@ def main():
         console.print("[cyan]Proceeding with existing data...[/cyan]")
         console.print()
 
+    # Set metadata
+    analysis_logger.set_metadata("total_properties", len(df))
+
     # Phase 2: Validate
-    df_validated, validation_report = validate_data(df)
+    df_validated, validation_report = validate_data(df, analysis_logger)
     if df_validated.empty:
         console.print("[red]✗ Analysis stopped - no valid data[/red]")
         return
@@ -932,28 +1111,43 @@ def main():
     df_raw = df.copy()
 
     # Phase 2.5: Methodological Adjustments
-    df_adjusted = apply_methodological_adjustments(df_validated)
+    df_adjusted = apply_methodological_adjustments(df_validated, analysis_logger)
 
     # Phase 3: Analyze (use adjusted data)
-    archetype_results = analyze_archetype(df_adjusted)
+    archetype_results = analyze_archetype(df_adjusted, analysis_logger)
 
     # Phase 4: Model (use adjusted data for realistic baselines)
-    scenario_results, subsidy_results = model_scenarios(df_adjusted)
+    scenario_results, subsidy_results = model_scenarios(df_adjusted, analysis_logger)
 
     # Phase 4.3: Retrofit Readiness
-    df_readiness, readiness_summary = analyze_retrofit_readiness(df_adjusted)
+    df_readiness, readiness_summary = analyze_retrofit_readiness(df_adjusted, analysis_logger)
 
     # Phase 4.5: Spatial Analysis (optional)
-    pathway_summary = run_spatial_analysis(df_adjusted)
+    pathway_summary = run_spatial_analysis(df_adjusted, analysis_logger)
 
     # Phase 5: Report
-    generate_reports(archetype_results, scenario_results, subsidy_results, df_adjusted, pathway_summary)
+    generate_reports(archetype_results, scenario_results, subsidy_results, df_adjusted, pathway_summary, analysis_logger)
 
     # Phase 5.5: Additional Reports
-    generate_additional_reports(df_raw, df_adjusted, validation_report, archetype_results, scenario_results)
+    generate_additional_reports(df_raw, df_adjusted, validation_report, archetype_results, scenario_results, analysis_logger)
 
     # Complete
     elapsed = time.time() - start_time
+
+    # Save analysis log
+    console.print()
+    console.print("[cyan]Saving analysis log...[/cyan]")
+    log_path = analysis_logger.save_log()
+    console.print(f"[green]✓[/green] Analysis log saved to: {log_path}")
+
+    # Show summary statistics
+    summary_stats = analysis_logger.get_summary_stats()
+    console.print()
+    console.print(f"[cyan]Analysis Summary:[/cyan]")
+    console.print(f"  • Total phases: {summary_stats['total_phases']}")
+    console.print(f"  • Successful: {summary_stats['successful_phases']}")
+    console.print(f"  • Failed: {summary_stats['failed_phases']}")
+    console.print(f"  • Skipped: {summary_stats['skipped_phases']}")
 
     console.print()
     console.print(Panel.fit(
@@ -962,7 +1156,8 @@ def main():
         f"Properties analyzed: {len(df_validated):,}\n\n"
         f"[cyan]Results saved to:[/cyan]\n"
         f"  • data/processed/ (validated data)\n"
-        f"  • data/outputs/ (reports and charts)",
+        f"  • data/outputs/ (reports and charts)\n"
+        f"  • data/outputs/analysis_log.txt (analysis log)",
         border_style="green"
     ))
     console.print()
