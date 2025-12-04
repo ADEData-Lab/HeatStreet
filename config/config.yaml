@@ -143,28 +143,34 @@ costs:
 subsidy_levels: [0, 25, 50, 75, 100]
 
 # Energy Prices (£/kWh)
+# UPDATED 2025-12-04: Aligned with Ofgem Energy Price Cap Q4 2024
+# Source: https://www.ofgem.gov.uk/energy-price-cap
+# Note: These are unit rates only (excluding standing charges)
 energy_prices:
   current:
-    gas: 0.10
-    electricity: 0.34
+    gas: 0.0624  # Updated from 0.10 - Ofgem cap Q4 2024: 6.24p/kWh
+    electricity: 0.245  # Updated from 0.34 - Ofgem cap Q4 2024: 24.5p/kWh
   projected_2030:
-    gas: 0.12
-    electricity: 0.30
+    gas: 0.07  # Modest increase from current (carbon pricing, reduced demand)
+    electricity: 0.22  # Decrease due to renewables expansion
   projected_2040:
-    gas: 0.15
-    electricity: 0.25
+    gas: 0.08  # Further modest increase
+    electricity: 0.18  # Significant decrease (high renewable penetration)
 
 # Carbon Factors (kgCO2/kWh)
+# UPDATED 2025-12-04: Aligned with DESNZ Greenhouse Gas Reporting Conversion Factors 2024
+# Source: https://www.gov.uk/government/publications/greenhouse-gas-reporting-conversion-factors-2024
+# Grid electricity projections from National Grid ESO Future Energy Scenarios 2025
 carbon_factors:
   current:
-    gas: 0.210
-    electricity: 0.233
+    gas: 0.183  # Updated from 0.210 - DESNZ 2024: 0.18296 kgCO₂e/kWh (gross CV basis)
+    electricity: 0.233  # SAP 10.0 value (DESNZ 2024: 0.225 kgCO₂e/kWh)
   projected_2030:
-    gas: 0.210
-    electricity: 0.150
+    gas: 0.183  # Constant - combustion chemistry unchanged (no biogas blending assumed)
+    electricity: 0.100  # Updated from 0.150 - National Grid FES 2025: 50-100 gCO₂/kWh range
   projected_2040:
-    gas: 0.210
-    electricity: 0.050
+    gas: 0.183  # Constant
+    electricity: 0.050  # Near-zero grid - within NESO projection range (41-67 gCO₂/kWh)
 
 # Heat Pump Parameters
 heat_pump:
