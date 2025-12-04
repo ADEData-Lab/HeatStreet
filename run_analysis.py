@@ -332,7 +332,7 @@ def validate_data(df):
 
     console.print(f"[green]✓[/green] Validated data saved")
 
-    return df_validated
+    return df_validated, report
 
 
 def analyze_archetype(df):
@@ -643,6 +643,89 @@ def generate_reports(archetype_results, scenario_results, subsidy_results=None, 
     return True
 
 
+def generate_additional_reports(df_raw, df_validated, validation_report, archetype_results, scenario_results):
+    """Generate additional specialized reports for client presentation."""
+    console.print()
+    console.print(Panel("[bold]Phase 5.5: Additional Reports[/bold]", border_style="blue"))
+    console.print()
+
+    from src.analysis.additional_reports import AdditionalReports
+    from pathlib import Path
+
+    reporter = AdditionalReports()
+    reports_created = []
+
+    output_dir = Path("data/outputs")
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # 1. Shakespeare Crescent Extract
+    try:
+        console.print("[cyan]Extracting Shakespeare Crescent data...[/cyan]")
+        case_street_path = output_dir / "shakespeare_crescent_extract.csv"
+        case_street_df = reporter.extract_case_street(
+            df_validated,
+            street_name="Shakespeare Crescent",
+            output_path=case_street_path
+        )
+        if len(case_street_df) > 0:
+            reports_created.append(f"✓ Shakespeare Crescent extract ({len(case_street_df)} properties)")
+        else:
+            console.print("[yellow]  No properties found on Shakespeare Crescent[/yellow]")
+    except Exception as e:
+        console.print(f"[yellow]⚠ Could not generate case street extract: {e}[/yellow]")
+
+    # 2. Borough-level Breakdown
+    try:
+        console.print("[cyan]Generating borough-level breakdown...[/cyan]")
+        borough_path = output_dir / "borough_breakdown.csv"
+        borough_df = reporter.generate_borough_breakdown(
+            df_validated,
+            output_path=borough_path
+        )
+        reports_created.append(f"✓ Borough breakdown ({len(borough_df)} boroughs)")
+    except Exception as e:
+        console.print(f"[yellow]⚠ Could not generate borough breakdown: {e}[/yellow]")
+
+    # 3. Data Quality Report
+    try:
+        console.print("[cyan]Generating data quality report...[/cyan]")
+        quality_path = output_dir / "data_quality_report.txt"
+        quality_report = reporter.generate_data_quality_report(
+            df_raw,
+            df_validated,
+            validation_report,
+            output_path=quality_path
+        )
+        reports_created.append("✓ Data quality report")
+    except Exception as e:
+        console.print(f"[yellow]⚠ Could not generate data quality report: {e}[/yellow]")
+
+    # 4. Subsidy Sensitivity Analysis
+    try:
+        console.print("[cyan]Running subsidy sensitivity analysis...[/cyan]")
+        subsidy_path = output_dir / "subsidy_sensitivity_analysis.csv"
+        sensitivity_df = reporter.subsidy_sensitivity_analysis(
+            df_validated,
+            scenario_results,
+            subsidy_levels=[0, 5000, 7500, 10000, 15000],
+            output_path=subsidy_path
+        )
+        reports_created.append("✓ Subsidy sensitivity analysis")
+    except Exception as e:
+        console.print(f"[yellow]⚠ Could not generate subsidy sensitivity: {e}[/yellow]")
+
+    console.print()
+    console.print(f"[green]✓[/green] Additional reports complete!")
+    console.print()
+
+    if reports_created:
+        console.print("[cyan]Generated reports:[/cyan]")
+        for report in reports_created:
+            console.print(f"    {report}")
+
+    return True
+
+
 def check_existing_data():
     """Check if previously downloaded data exists."""
     raw_csv = DATA_RAW_DIR / "epc_london_raw.csv"
@@ -793,10 +876,13 @@ def main():
         console.print()
 
     # Phase 2: Validate
-    df_validated = validate_data(df)
+    df_validated, validation_report = validate_data(df)
     if df_validated.empty:
         console.print("[red]✗ Analysis stopped - no valid data[/red]")
         return
+
+    # Keep reference to raw data for quality reports
+    df_raw = df.copy()
 
     # Phase 3: Analyze
     archetype_results = analyze_archetype(df_validated)
@@ -812,6 +898,9 @@ def main():
 
     # Phase 5: Report
     generate_reports(archetype_results, scenario_results, subsidy_results, df_validated, pathway_summary)
+
+    # Phase 5.5: Additional Reports
+    generate_additional_reports(df_raw, df_validated, validation_report, archetype_results, scenario_results)
 
     # Complete
     elapsed = time.time() - start_time
