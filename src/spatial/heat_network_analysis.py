@@ -256,24 +256,39 @@ class HeatNetworkAnalyzer:
         # Tier 2: Within planned Heat Network Zone
         if heat_zones is not None:
             logger.info("Identifying Tier 2: Within planned HNZ...")
+            logger.info(f"  Processing {len(heat_zones):,} heat zone polygons...")
 
             if heat_zones.crs != 'EPSG:27700':
+                logger.info("  Converting heat zones to EPSG:27700...")
                 heat_zones = heat_zones.to_crs('EPSG:27700')
 
-            # Union all heat zones
-            heat_zones_union = heat_zones.unary_union
+            # Use spatial join instead of unary_union for better performance
+            logger.info("  Performing spatial join (this may take 1-2 minutes for large datasets)...")
 
-            # Check which properties are within zones (and not already Tier 1)
-            tier_2_mask = (
-                properties.geometry.within(heat_zones_union) &
-                (properties['tier_number'] > 2)
-            )
-            tier_2_count = tier_2_mask.sum()
+            # Filter to properties not already classified as Tier 1
+            unclassified_properties = properties[properties['tier_number'] > 2].copy()
 
-            properties.loc[tier_2_mask, 'heat_network_tier'] = 'Tier 2: Within planned HNZ'
-            properties.loc[tier_2_mask, 'tier_number'] = 2
+            if len(unclassified_properties) > 0:
+                # Use sjoin to find properties within any heat zone
+                # This is much faster than unary_union + within for complex geometries
+                joined = gpd.sjoin(
+                    unclassified_properties[['geometry']],
+                    heat_zones[['geometry']],
+                    how='left',
+                    predicate='within'
+                )
 
-            logger.info(f"  Tier 2: {tier_2_count:,} properties ({tier_2_count/len(properties)*100:.1f}%)")
+                # Properties with a match are within a heat zone
+                tier_2_indices = joined[joined.index_right.notna()].index.unique()
+                tier_2_count = len(tier_2_indices)
+
+                # Update properties
+                properties.loc[tier_2_indices, 'heat_network_tier'] = 'Tier 2: Within planned HNZ'
+                properties.loc[tier_2_indices, 'tier_number'] = 2
+
+                logger.info(f"  ✓ Tier 2: {tier_2_count:,} properties ({tier_2_count/len(properties)*100:.1f}%)")
+            else:
+                logger.info("  ✓ Tier 2: 0 properties (all already classified as Tier 1)")
 
         # Tiers 3-5: Based on heat density (would require heat demand data)
         # This is a simplified placeholder - actual implementation would calculate
@@ -312,6 +327,9 @@ class HeatNetworkAnalyzer:
 
         # For properties not already classified as Tier 1 or 2
         unclassified_mask = properties['tier_number'] > 2
+        unclassified_count = unclassified_mask.sum()
+
+        logger.info(f"  Analyzing {unclassified_count:,} unclassified properties...")
 
         if 'ENERGY_CONSUMPTION_CURRENT' not in properties.columns:
             logger.warning("No energy consumption data - using simplified tertile method")
@@ -319,7 +337,8 @@ class HeatNetworkAnalyzer:
 
         try:
             # Method 1: Grid-based heat density (proper implementation)
-            logger.info("Using grid-based heat density calculation...")
+            logger.info("  Using vectorized spatial operations for heat density calculation...")
+            logger.info("  This may take 2-5 minutes for 10K+ properties...")
 
             # Ensure we're in British National Grid (meters)
             if properties.crs != 'EPSG:27700':
@@ -339,11 +358,9 @@ class HeatNetworkAnalyzer:
             x_coords = np.arange(minx, maxx, grid_size)
             y_coords = np.arange(miny, maxy, grid_size)
 
-            # Optimized vectorized approach using spatial join
-            logger.info(f"Using vectorized spatial operations for heat density calculation...")
-
             # Get unclassified properties
             unclassified_props = properties_27700[unclassified_mask].copy()
+            logger.info(f"  Step 1/4: Calculating absolute energy consumption...")
 
             # Calculate absolute energy consumption for all properties
             if 'TOTAL_FLOOR_AREA' in properties_27700.columns:
@@ -354,6 +371,7 @@ class HeatNetworkAnalyzer:
                 properties_27700['_absolute_energy_kwh'] = properties_27700['ENERGY_CONSUMPTION_CURRENT']
 
             # Create buffers for unclassified properties (vectorized)
+            logger.info(f"  Step 2/4: Creating 250m buffers for {len(unclassified_props):,} properties...")
             buffer_radius = 250  # meters
             buffer_area_km2 = (np.pi * buffer_radius**2) / 1_000_000
 
@@ -363,7 +381,10 @@ class HeatNetworkAnalyzer:
             unclassified_buffered['_buffer_idx'] = unclassified_buffered.index
 
             # Spatial join to find all properties within each buffer
-            logger.info(f"Performing spatial join for {len(unclassified_buffered):,} properties...")
+            logger.info(f"  Step 3/4: Performing spatial join (this is the slowest step, ~1-3 min for 10K properties)...")
+            import time
+            start_time = time.time()
+
             joined = gpd.sjoin(
                 unclassified_buffered[['geometry', '_buffer_idx']],
                 properties_27700[['geometry', '_absolute_energy_kwh']],
@@ -371,14 +392,18 @@ class HeatNetworkAnalyzer:
                 predicate='intersects'
             )
 
+            elapsed = time.time() - start_time
+            logger.info(f"  ✓ Spatial join completed in {elapsed:.1f} seconds")
+
             # Aggregate energy consumption per buffer
-            logger.info("Aggregating heat density calculations...")
+            logger.info(f"  Step 4/4: Aggregating heat density calculations...")
             heat_density_by_buffer = joined.groupby('_buffer_idx')['_absolute_energy_kwh'].sum()
 
             # Convert to GWh/km²
             heat_density_gwh_km2 = (heat_density_by_buffer / 1_000_000) / buffer_area_km2
 
             # Classify tiers based on heat density
+            logger.info(f"  Classifying {len(heat_density_gwh_km2):,} properties into heat density tiers...")
             for idx, density in heat_density_gwh_km2.items():
                 if density >= self.heat_network_tiers['tier_3']['min_heat_density_gwh_km2']:
                     properties.loc[idx, 'heat_network_tier'] = 'Tier 3: High heat density'
