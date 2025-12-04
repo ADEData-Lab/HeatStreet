@@ -203,16 +203,24 @@ class ScenarioModeler:
         new_rating = min(100, current_rating + improvement_points)
         new_band = self._rating_to_band(new_rating)
 
-        # Calculate payback period
-        payback_years = capital_cost / bill_savings if bill_savings > 0 else 999
+        # Calculate payback period with proper handling of edge cases
+        # Handle NaN, zero, and negative savings
+        if pd.isna(bill_savings) or pd.isna(capital_cost):
+            payback_years = np.inf  # Not calculable
+        elif bill_savings <= 0:
+            payback_years = np.inf  # Not cost-effective at current prices
+        elif capital_cost <= 0:
+            payback_years = 0  # No cost = immediate payback
+        else:
+            payback_years = capital_cost / bill_savings
 
         return PropertyUpgrade(
             property_id=str(property_data.get('LMK_KEY', 'unknown')),
             scenario=scenario_name,
-            capital_cost=capital_cost,
-            annual_energy_reduction_kwh=energy_reduction,
-            annual_co2_reduction_kg=co2_reduction,
-            annual_bill_savings=bill_savings,
+            capital_cost=capital_cost if not pd.isna(capital_cost) else 0,
+            annual_energy_reduction_kwh=energy_reduction if not pd.isna(energy_reduction) else 0,
+            annual_co2_reduction_kg=co2_reduction if not pd.isna(co2_reduction) else 0,
+            annual_bill_savings=bill_savings if not pd.isna(bill_savings) else 0,
             new_epc_band=new_band,
             payback_years=payback_years
         )
@@ -351,10 +359,23 @@ class ScenarioModeler:
         """
         total_properties = len(upgrades)
 
-        # Calculate payback statistics (filter out unrealistic values)
-        reasonable_paybacks = [u.payback_years for u in upgrades if u.payback_years < 100]
-        avg_payback = np.mean(reasonable_paybacks) if len(reasonable_paybacks) > 0 else 999
-        median_payback = np.median(reasonable_paybacks) if len(reasonable_paybacks) > 0 else 999
+        # Calculate payback statistics (filter out infinite values)
+        # Properties with inf payback are not cost-effective at current prices
+        finite_paybacks = [u.payback_years for u in upgrades if np.isfinite(u.payback_years)]
+        reasonable_paybacks = [p for p in finite_paybacks if p < 100]
+
+        if len(reasonable_paybacks) > 0:
+            avg_payback = np.mean(reasonable_paybacks)
+            median_payback = np.median(reasonable_paybacks)
+        else:
+            # No cost-effective properties
+            avg_payback = np.inf
+            median_payback = np.inf
+
+        # Count properties by cost-effectiveness
+        n_cost_effective = len(reasonable_paybacks)
+        n_not_cost_effective = total_properties - len(finite_paybacks)
+        pct_not_cost_effective = (n_not_cost_effective / total_properties * 100) if total_properties > 0 else 0
 
         results = {
             'total_properties': total_properties,
@@ -363,9 +384,19 @@ class ScenarioModeler:
             'annual_energy_reduction_kwh': sum(u.annual_energy_reduction_kwh for u in upgrades),
             'annual_co2_reduction_kg': sum(u.annual_co2_reduction_kg for u in upgrades),
             'annual_bill_savings': sum(u.annual_bill_savings for u in upgrades),
-            'average_payback_years': avg_payback,
-            'median_payback_years': median_payback
+            'average_payback_years': avg_payback if np.isfinite(avg_payback) else None,
+            'median_payback_years': median_payback if np.isfinite(median_payback) else None,
+            'properties_cost_effective': n_cost_effective,
+            'properties_not_cost_effective': n_not_cost_effective,
+            'pct_not_cost_effective': pct_not_cost_effective,
         }
+
+        # Log payback summary
+        if np.isfinite(avg_payback):
+            logger.info(f"  Mean payback (where cost-effective): {avg_payback:.1f} years")
+            logger.info(f"  Median payback: {median_payback:.1f} years")
+        if pct_not_cost_effective > 0:
+            logger.info(f"  Properties not cost-effective at current prices: {pct_not_cost_effective:.1f}%")
 
         # EPC band shifts
         current_bands = df['CURRENT_ENERGY_RATING'].value_counts().to_dict() if 'CURRENT_ENERGY_RATING' in df.columns else {}
@@ -376,13 +407,14 @@ class ScenarioModeler:
             'after': new_bands
         }
 
-        # Payback distribution
+        # Payback distribution (handle infinite values)
         payback_categories = {
-            '0-5 years': len([u for u in upgrades if u.payback_years <= 5]),
-            '5-10 years': len([u for u in upgrades if 5 < u.payback_years <= 10]),
-            '10-15 years': len([u for u in upgrades if 10 < u.payback_years <= 15]),
-            '15-20 years': len([u for u in upgrades if 15 < u.payback_years <= 20]),
-            '>20 years': len([u for u in upgrades if u.payback_years > 20])
+            '0-5 years': len([u for u in upgrades if np.isfinite(u.payback_years) and u.payback_years <= 5]),
+            '5-10 years': len([u for u in upgrades if np.isfinite(u.payback_years) and 5 < u.payback_years <= 10]),
+            '10-15 years': len([u for u in upgrades if np.isfinite(u.payback_years) and 10 < u.payback_years <= 15]),
+            '15-20 years': len([u for u in upgrades if np.isfinite(u.payback_years) and 15 < u.payback_years <= 20]),
+            '>20 years': len([u for u in upgrades if np.isfinite(u.payback_years) and u.payback_years > 20]),
+            'Not cost-effective': len([u for u in upgrades if not np.isfinite(u.payback_years)])
         }
 
         results['payback_distribution'] = payback_categories

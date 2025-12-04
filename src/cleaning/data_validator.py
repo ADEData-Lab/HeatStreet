@@ -408,20 +408,85 @@ class EPCDataValidator:
         return df
 
     def _normalize_energy_metrics(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Normalize energy consumption metrics."""
-        # ENERGY_CONSUMPTION_CURRENT is already in kWh/m²/year from EPC API
-        # See: https://epc.opendatacommunities.org/docs/guidance (glossary)
-        if 'ENERGY_CONSUMPTION_CURRENT' in df.columns:
-            df['energy_kwh_per_m2_year'] = df['ENERGY_CONSUMPTION_CURRENT'].copy()
-            logger.info("Energy metrics copied (already in kWh/m²/year from API)")
+        """
+        Normalize energy consumption and CO2 emissions metrics.
 
+        EPC API fields (after column standardization):
+        - ENERGY_CONSUMPTION_CURRENT: Primary energy consumption in kWh/m²/year
+        - CO2_EMISSIONS_CURRENT: Total annual CO2 emissions in tonnes/year
+
+        Note: We apply validation checks to catch unit errors early.
+        Expected ranges for Edwardian terraced houses:
+        - Energy: 100-400 kWh/m²/year (mean typically 150-250)
+        - CO2: 20-100 kgCO₂/m²/year (mean typically 40-60)
+        """
+        # Handle energy consumption
+        if 'ENERGY_CONSUMPTION_CURRENT' in df.columns and 'TOTAL_FLOOR_AREA' in df.columns:
+            # Check if ENERGY_CONSUMPTION_CURRENT appears to be absolute (kWh/year)
+            # or already normalized (kWh/m²/year)
+            raw_mean = df['ENERGY_CONSUMPTION_CURRENT'].mean()
+            floor_area_mean = df['TOTAL_FLOOR_AREA'].mean()
+
+            # If mean is very high (>1000), it's likely absolute kWh/year
+            # If mean is in range 50-500, it's likely already kWh/m²/year
+            if raw_mean > 1000:
+                # Absolute value - divide by floor area
+                df['energy_kwh_per_m2_year'] = (
+                    df['ENERGY_CONSUMPTION_CURRENT'] / df['TOTAL_FLOOR_AREA']
+                )
+                logger.info(f"Energy consumption appears to be absolute ({raw_mean:.0f} kWh/year mean)")
+                logger.info("Normalized by dividing by floor area")
+            else:
+                # Already normalized - use directly
+                df['energy_kwh_per_m2_year'] = df['ENERGY_CONSUMPTION_CURRENT'].copy()
+                logger.info(f"Energy consumption appears already normalized ({raw_mean:.1f} kWh/m²/year mean)")
+
+            # Validate the result
+            result_mean = df['energy_kwh_per_m2_year'].mean()
+            if result_mean < 50 or result_mean > 500:
+                logger.warning(
+                    f"Energy consumption mean ({result_mean:.1f} kWh/m²/year) outside expected range (50-500). "
+                    f"Check raw data units. Raw mean: {raw_mean:.1f}, Floor area mean: {floor_area_mean:.1f} m²"
+                )
+                # Attempt correction if severely off
+                if result_mean < 10:
+                    # Likely divided twice or wrong unit - try multiplying by floor area
+                    df['energy_kwh_per_m2_year'] = df['ENERGY_CONSUMPTION_CURRENT'] * df['TOTAL_FLOOR_AREA'] / df['TOTAL_FLOOR_AREA']
+                    corrected_mean = df['energy_kwh_per_m2_year'].mean()
+                    logger.warning(f"Attempted correction, new mean: {corrected_mean:.1f}")
+            else:
+                logger.info(f"✓ Energy consumption validated: mean = {result_mean:.1f} kWh/m²/year")
+        elif 'ENERGY_CONSUMPTION_CURRENT' in df.columns:
+            # No floor area available - copy as-is with warning
+            df['energy_kwh_per_m2_year'] = df['ENERGY_CONSUMPTION_CURRENT'].copy()
+            logger.warning("TOTAL_FLOOR_AREA not available for energy normalization check")
+
+        # Handle CO2 emissions
         # CO2_EMISSIONS_CURRENT is in tonnes/year (absolute)
         # Convert to kg/m²/year: tonnes * 1000 / floor_area
         if 'CO2_EMISSIONS_CURRENT' in df.columns and 'TOTAL_FLOOR_AREA' in df.columns:
             df['co2_kg_per_m2_year'] = (
                 df['CO2_EMISSIONS_CURRENT'] * 1000 / df['TOTAL_FLOOR_AREA']
             )
+
+            # Validate the result
+            co2_mean = df['co2_kg_per_m2_year'].mean()
+            if co2_mean < 10 or co2_mean > 150:
+                logger.warning(
+                    f"CO₂ emissions mean ({co2_mean:.1f} kgCO₂/m²/year) outside expected range (10-150). "
+                    f"Raw CO₂ mean: {df['CO2_EMISSIONS_CURRENT'].mean():.2f} tonnes/year"
+                )
+            else:
+                logger.info(f"✓ CO₂ emissions validated: mean = {co2_mean:.1f} kgCO₂/m²/year")
+
             logger.info("CO2 metrics normalized to kg/m²/year (converted from tonnes/year)")
+
+        # Also create absolute energy consumption for cost calculations
+        if 'energy_kwh_per_m2_year' in df.columns and 'TOTAL_FLOOR_AREA' in df.columns:
+            df['energy_kwh_per_year_absolute'] = (
+                df['energy_kwh_per_m2_year'] * df['TOTAL_FLOOR_AREA']
+            )
+            logger.info("Created absolute energy consumption column (kWh/year)")
 
         return df
 

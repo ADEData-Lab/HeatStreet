@@ -221,9 +221,10 @@ class AdditionalReports:
 
         report_lines = []
         report_lines.append("=" * 80)
-        report_lines.append("DATA QUALITY REPORT")
+        report_lines.append("HEAT STREET PROJECT: DATA QUALITY REPORT")
         report_lines.append("=" * 80)
         report_lines.append(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        report_lines.append(f"Report Version: 2.0")
         report_lines.append("")
 
         # Data volumes
@@ -232,7 +233,8 @@ class AdditionalReports:
         report_lines.append(f"Total records downloaded:     {len(df_raw):,}")
         report_lines.append(f"Records passed validation:    {len(df_validated):,}")
         report_lines.append(f"Records excluded:             {len(df_raw) - len(df_validated):,}")
-        report_lines.append(f"Retention rate:               {len(df_validated)/len(df_raw)*100:.1f}%")
+        retention_rate = len(df_validated)/len(df_raw)*100 if len(df_raw) > 0 else 0
+        report_lines.append(f"Retention rate:               {retention_rate:.1f}%")
         report_lines.append("")
 
         # Exclusion reasons
@@ -256,8 +258,12 @@ class AdditionalReports:
             'ENERGY_CONSUMPTION_CURRENT',
             'CO2_EMISSIONS_CURRENT',
             'WALLS_DESCRIPTION',
+            'WALLS_ENERGY_EFF',
             'ROOF_DESCRIPTION',
+            'ROOF_ENERGY_EFF',
+            'WINDOWS_DESCRIPTION',
             'MAINHEAT_DESCRIPTION',
+            'MAINHEAT_CONT_DESCRIPTION',
             'POSTCODE',
         ]
 
@@ -265,6 +271,8 @@ class AdditionalReports:
             if field in df_validated.columns:
                 completeness = (1 - df_validated[field].isna().sum() / len(df_validated)) * 100
                 report_lines.append(f"{field:35s} {completeness:5.1f}%")
+            else:
+                report_lines.append(f"{field:35s} (not available)")
 
         report_lines.append("")
 
@@ -274,12 +282,23 @@ class AdditionalReports:
 
         if 'TOTAL_FLOOR_AREA' in df_validated.columns:
             report_lines.append(f"Floor Area:         {df_validated['TOTAL_FLOOR_AREA'].min():.0f} - {df_validated['TOTAL_FLOOR_AREA'].max():.0f} m²")
+            report_lines.append(f"  Mean:             {df_validated['TOTAL_FLOOR_AREA'].mean():.1f} m²")
 
-        if 'ENERGY_CONSUMPTION_CURRENT' in df_validated.columns:
-            report_lines.append(f"Energy Consumption: {df_validated['ENERGY_CONSUMPTION_CURRENT'].min():.0f} - {df_validated['ENERGY_CONSUMPTION_CURRENT'].max():.0f} kWh/m²/year")
+        if 'energy_kwh_per_m2_year' in df_validated.columns:
+            report_lines.append(f"Energy (normalised): {df_validated['energy_kwh_per_m2_year'].min():.0f} - {df_validated['energy_kwh_per_m2_year'].max():.0f} kWh/m²/year")
+            report_lines.append(f"  Mean:             {df_validated['energy_kwh_per_m2_year'].mean():.1f} kWh/m²/year")
+        elif 'ENERGY_CONSUMPTION_CURRENT' in df_validated.columns:
+            report_lines.append(f"Energy (raw):       {df_validated['ENERGY_CONSUMPTION_CURRENT'].min():.0f} - {df_validated['ENERGY_CONSUMPTION_CURRENT'].max():.0f}")
 
-        if 'CO2_EMISSIONS_CURRENT' in df_validated.columns:
-            report_lines.append(f"CO₂ Emissions:      {df_validated['CO2_EMISSIONS_CURRENT'].min():.1f} - {df_validated['CO2_EMISSIONS_CURRENT'].max():.1f} tonnes/year")
+        if 'co2_kg_per_m2_year' in df_validated.columns:
+            report_lines.append(f"CO₂ (normalised):   {df_validated['co2_kg_per_m2_year'].min():.1f} - {df_validated['co2_kg_per_m2_year'].max():.1f} kgCO₂/m²/year")
+            report_lines.append(f"  Mean:             {df_validated['co2_kg_per_m2_year'].mean():.1f} kgCO₂/m²/year")
+        elif 'CO2_EMISSIONS_CURRENT' in df_validated.columns:
+            report_lines.append(f"CO₂ (raw):          {df_validated['CO2_EMISSIONS_CURRENT'].min():.2f} - {df_validated['CO2_EMISSIONS_CURRENT'].max():.2f} tonnes/year")
+
+        if 'CURRENT_ENERGY_EFFICIENCY' in df_validated.columns:
+            report_lines.append(f"SAP Score:          {df_validated['CURRENT_ENERGY_EFFICIENCY'].min():.0f} - {df_validated['CURRENT_ENERGY_EFFICIENCY'].max():.0f}")
+            report_lines.append(f"  Mean:             {df_validated['CURRENT_ENERGY_EFFICIENCY'].mean():.1f}")
 
         report_lines.append("")
 
@@ -289,12 +308,74 @@ class AdditionalReports:
             total_records = len(df_validated)
             report_lines.append("DUPLICATE HANDLING")
             report_lines.append("-" * 80)
-            report_lines.append(f"Unique properties (UPRN):     {unique_uprns:,}")
+            report_lines.append(f"Unique properties (LMK_KEY):  {unique_uprns:,}")
             report_lines.append(f"Total records:                {total_records:,}")
             if unique_uprns < total_records:
                 report_lines.append(f"Properties with multiple EPCs: {total_records - unique_uprns:,}")
 
         report_lines.append("")
+
+        # Methodological adjustments applied
+        report_lines.append("METHODOLOGICAL ADJUSTMENTS APPLIED")
+        report_lines.append("-" * 80)
+
+        if 'prebound_factor' in df_validated.columns:
+            mean_factor = df_validated['prebound_factor'].mean()
+            report_lines.append(f"1. Prebound effect adjustment (Few et al., 2023)")
+            report_lines.append(f"   Mean adjustment factor: {mean_factor:.2f}")
+            report_lines.append(f"   Impact: Reduces baseline consumption estimates by ~{(1-mean_factor)*100:.0f}%")
+        else:
+            report_lines.append("1. Prebound effect adjustment: Not applied")
+
+        if 'estimated_flow_temp' in df_validated.columns:
+            mean_flow_temp = df_validated['estimated_flow_temp'].mean()
+            report_lines.append(f"2. Heat pump flow temperature model")
+            report_lines.append(f"   Mean estimated flow temp: {mean_flow_temp:.1f}°C")
+        else:
+            report_lines.append("2. Heat pump flow temperature model: Not applied")
+
+        if 'sap_uncertainty' in df_validated.columns:
+            mean_uncertainty = df_validated['sap_uncertainty'].mean()
+            report_lines.append(f"3. Measurement uncertainty (Crawley et al., 2019)")
+            report_lines.append(f"   Mean SAP uncertainty: ±{mean_uncertainty:.1f} points")
+        else:
+            report_lines.append("3. Measurement uncertainty: Not applied")
+
+        report_lines.append("")
+
+        # Known limitations
+        report_lines.append("KNOWN LIMITATIONS")
+        report_lines.append("-" * 80)
+
+        known_limitations = [
+            "1. EPC measurement error: ±8 SAP points at lower ratings, ±2.4 at higher "
+            "ratings (Crawley et al., 2019)",
+            "2. Performance gap: EPCs systematically overpredict energy consumption by "
+            "8-48% depending on band (Few et al., 2023). Prebound effect adjustment applied.",
+            "3. Heating controls data incomplete for majority of records - field often missing "
+            "or non-standardised in EPC database",
+            "4. Emitter sizing not recorded in EPC data - heat pump radiator upgrade needs "
+            "estimated from fabric performance",
+            "5. Conservation area status not identified in EPC data - some wall insulation "
+            "recommendations (particularly EWI) may be impractical in listed buildings",
+            "6. Hot water cylinder size not reliably recorded - cylinder upgrade needs assumed "
+            "for all combi boiler replacements",
+            "7. Loft insulation thickness often unspecified (recorded as efficiency rating only) "
+            "- top-up needs estimated from rating where possible",
+            "8. Solid floor insulation rarely feasible in Edwardian properties - excluded from "
+            "cost estimates despite potential benefits",
+            "9. EPC data represents modelled (SAP) consumption, not actual metered usage - "
+            "savings estimates should be treated as indicative",
+            "10. Heat network viability depends on local factors (existing infrastructure, "
+            "anchor loads) not captured in property-level EPC data",
+        ]
+
+        for limitation in known_limitations:
+            report_lines.append(limitation)
+            report_lines.append("")
+
+        report_lines.append("=" * 80)
+        report_lines.append("END OF DATA QUALITY REPORT")
         report_lines.append("=" * 80)
 
         report_text = "\n".join(report_lines)

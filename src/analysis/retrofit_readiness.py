@@ -120,58 +120,132 @@ class RetrofitReadinessAnalyzer:
         return heat_demand
 
     def _needs_loft_insulation(self, df: pd.DataFrame) -> pd.Series:
-        """Identify properties needing loft insulation upgrade."""
-        # EPC API provides ROOF_DESCRIPTION and ROOF_ENERGY_EFF, not loft_insulation_thickness
-        needs_loft = pd.Series(False, index=df.index)  # Default to False (conservative)
+        """
+        Identify properties needing loft insulation upgrade.
 
-        # Check ROOF_ENERGY_EFF first (most reliable indicator)
+        Uses tiered confidence approach:
+        - High confidence: Explicit thickness or 'no insulation'
+        - Medium confidence: Efficiency rating only
+        - Low confidence: Unknown (conservative - assume needs work)
+
+        Returns True for properties that definitely or likely need top-up.
+        """
+        import re
+
+        # EPC API provides ROOF_DESCRIPTION and ROOF_ENERGY_EFF
+        needs_loft = pd.Series(False, index=df.index)
+        confidence = pd.Series('unknown', index=df.index)
+
+        # Check ROOF_DESCRIPTION for explicit thickness
+        if 'ROOF_DESCRIPTION' in df.columns:
+            roof_desc = df['ROOF_DESCRIPTION'].fillna('').str.lower()
+
+            # No insulation - definitely needs work (high confidence)
+            no_insulation = roof_desc.str.contains('no insulation|0 mm|0mm|uninsulated', na=False)
+            needs_loft |= no_insulation
+            confidence[no_insulation] = 'high'
+
+            # Extract thickness where present
+            def get_thickness(desc):
+                match = re.search(r'(\d+)\s*mm', str(desc).lower())
+                return int(match.group(1)) if match else None
+
+            thicknesses = roof_desc.apply(get_thickness)
+
+            # Low thickness (<200mm) - needs top-up (high confidence)
+            low_thickness = thicknesses.notna() & (thicknesses < 200)
+            needs_loft |= low_thickness
+            confidence[low_thickness] = 'high'
+
+            # Good thickness (200-269mm) - optional top-up (high confidence, not critical)
+            good_thickness = thicknesses.notna() & (thicknesses >= 200) & (thicknesses < 270)
+            confidence[good_thickness] = 'high'
+
+            # Full thickness (270mm+) - no work needed (high confidence)
+            full_thickness = thicknesses.notna() & (thicknesses >= 270)
+            confidence[full_thickness] = 'high'
+
+        # Check ROOF_ENERGY_EFF for remaining unknowns (medium confidence)
         if 'ROOF_ENERGY_EFF' in df.columns:
-            # Need upgrade if roof efficiency is poor or very poor
-            needs_loft = df['ROOF_ENERGY_EFF'].isin(['Poor', 'poor', 'Very Poor', 'very poor'])
+            unknown_mask = confidence == 'unknown'
 
-        # If ROOF_DESCRIPTION available, check for insulation mentions
-        elif 'ROOF_DESCRIPTION' in df.columns:
-            # Flag properties with no insulation mentioned
-            no_insulation_mask = (
-                df['ROOF_DESCRIPTION'].str.contains('no insulation|uninsulated', case=False, na=False) |
-                df['ROOF_DESCRIPTION'].isna()
-            )
-            # Flag properties with insufficient insulation
-            low_insulation_mask = df['ROOF_DESCRIPTION'].str.contains(
-                '50mm|75mm|100mm|less than', case=False, na=False
-            )
-            needs_loft = no_insulation_mask | low_insulation_mask
+            very_poor = df['ROOF_ENERGY_EFF'].isin(['Very Poor', 'very poor'])
+            poor = df['ROOF_ENERGY_EFF'].isin(['Poor', 'poor'])
+            average = df['ROOF_ENERGY_EFF'].isin(['Average', 'average'])
+            good = df['ROOF_ENERGY_EFF'].isin(['Good', 'good', 'Very Good', 'very good'])
 
-        # Fallback: check legacy loft_insulation_thickness field (if exists)
-        elif 'loft_insulation_thickness' in df.columns:
-            needs_loft = (
-                (df['loft_insulation_thickness'].isna()) |
-                (df['loft_insulation_thickness'] == 'None') |
-                (df['loft_insulation_thickness'] == 'unknown') |
-                (df['loft_insulation_thickness'].str.contains('100mm|less', case=False, na=False))
-            )
+            # Very poor/poor rating - likely needs work (medium confidence)
+            needs_loft |= (unknown_mask & (very_poor | poor))
+            confidence[unknown_mask & (very_poor | poor | average | good)] = 'medium'
+
+        # For remaining unknowns, use conservative assumption (low confidence)
+        still_unknown = confidence == 'unknown'
+        needs_loft |= still_unknown  # Conservative: assume needs work if unknown
+        confidence[still_unknown] = 'low'
+
+        # Store confidence for reporting
+        if 'loft_topup_confidence' not in df.columns:
+            df['loft_topup_confidence'] = confidence
+
+        # Log summary
+        total = len(df)
+        needs_count = needs_loft.sum()
+        logger.info(f"Loft insulation needs: {needs_count:,} ({needs_count/total*100:.1f}%)")
 
         return needs_loft
 
     def _needs_wall_insulation(self, df: pd.DataFrame) -> pd.Series:
-        """Identify properties needing wall insulation."""
-        # Check for wall_insulated boolean field (created by data_validator.py)
+        """
+        Identify properties needing wall insulation.
+
+        Returns True if:
+        1. wall_insulated is False/NaN (from data_validator), OR
+        2. WALLS_DESCRIPTION contains 'no insulation'/'uninsulated', OR
+        3. WALLS_ENERGY_EFF is 'Poor' or 'Very Poor'
+
+        This function checks multiple indicators to avoid false negatives.
+        """
+        needs_wall = pd.Series(False, index=df.index)
+
+        # Primary check: wall_insulated boolean field (created by data_validator.py)
         if 'wall_insulated' in df.columns:
-            # Need insulation if walls are uninsulated (False or NaN)
-            needs_wall = (~df['wall_insulated']) | (df['wall_insulated'].isna())
-            return needs_wall
+            # Need insulation if walls are uninsulated (False) or unknown (NaN)
+            # Convert boolean to proper mask, handling NaN values
+            wall_insulated = df['wall_insulated'].fillna(False)
+            needs_wall = ~wall_insulated
 
-        # Fallback: check for legacy string field
-        if 'wall_insulation' in df.columns:
-            needs_wall = (
-                (df['wall_insulation'] == 'No') |
-                (df['wall_insulation'] == 'None') |
-                (df['wall_insulation'].isna())
+            logger.debug(f"Wall insulation check from wall_insulated: {needs_wall.sum():,} need insulation")
+
+        # Secondary check: WALLS_DESCRIPTION text
+        if 'WALLS_DESCRIPTION' in df.columns:
+            walls_desc = df['WALLS_DESCRIPTION'].fillna('').str.lower()
+
+            # Check for explicit "no insulation" or similar
+            no_insulation_mask = (
+                walls_desc.str.contains('no insulation', na=False) |
+                walls_desc.str.contains('uninsulated', na=False) |
+                (walls_desc.str.contains('solid', na=False) & ~walls_desc.str.contains('insulation|insulated', na=False))
             )
-            return needs_wall
 
-        # No wall insulation data available
-        return pd.Series(False, index=df.index)
+            # Combine with primary check (OR logic - either indicates need)
+            needs_wall = needs_wall | no_insulation_mask
+
+            logger.debug(f"Wall insulation check from WALLS_DESCRIPTION: {no_insulation_mask.sum():,} need insulation")
+
+        # Tertiary check: WALLS_ENERGY_EFF efficiency rating
+        if 'WALLS_ENERGY_EFF' in df.columns:
+            poor_walls = df['WALLS_ENERGY_EFF'].isin(['Very Poor', 'very poor', 'Poor', 'poor'])
+            needs_wall = needs_wall | poor_walls
+
+            logger.debug(f"Wall insulation check from WALLS_ENERGY_EFF: {poor_walls.sum():,} have poor efficiency")
+
+        # Log summary
+        total_needs = needs_wall.sum()
+        total_properties = len(df)
+        pct_needs = (total_needs / total_properties * 100) if total_properties > 0 else 0
+        logger.info(f"Wall insulation needs: {total_needs:,} properties ({pct_needs:.1f}%)")
+
+        return needs_wall
 
     def _wall_insulation_type(self, df: pd.DataFrame) -> pd.Series:
         """Determine which type of wall insulation is needed."""
@@ -242,62 +316,95 @@ class RetrofitReadinessAnalyzer:
 
     def _classify_readiness_tier(self, df: pd.DataFrame) -> pd.Series:
         """
-        Classify properties into heat pump readiness tiers.
+        Classify properties into heat pump readiness tiers based on fabric condition
+        and estimated flow temperature requirement.
 
-        Tier 1: Ready now (<100 kWh/m², minimal fabric work)
-        Tier 2: Minor work (100-150 kWh/m², loft/glazing)
-        Tier 3: Major work (150-200 kWh/m², solid wall insulation)
-        Tier 4: Very challenging (200-250 kWh/m²)
-        Tier 5: Not suitable (>250 kWh/m²)
+        Tiers:
+        1 - Ready: Good insulation, likely adequate emitters (5-15% expected)
+        2 - Minor work: One deficiency (e.g., loft top-up needed) (20-30% expected)
+        3 - Moderate work: Two deficiencies (e.g., loft + glazing) (30-40% expected)
+        4 - Significant work: Poor fabric, likely needs emitter upgrades (20-30% expected)
+        5 - Major intervention: Very poor fabric, definitely needs emitters (5-15% expected)
+
+        Based on multi-factor assessment rather than just heat demand thresholds.
         """
-        tier = pd.Series(5, index=df.index)  # Default to tier 5
+        tier = pd.Series(3, index=df.index)  # Default to middle tier
 
-        current_demand = df['heat_demand_kwh_m2']
-        post_fabric_demand = df['heat_demand_after_fabric']
+        # Calculate deficiency score for each property
+        deficiency_scores = pd.Series(0.0, index=df.index)
 
-        # Tier 1: Ready now
-        # Low current demand AND minimal work needed
-        tier1_criteria = (
-            (current_demand < self.HEAT_DEMAND_THRESHOLDS['ready']) &
-            (~df['needs_wall_insulation'])
-        )
-        tier[tier1_criteria] = 1
+        # Wall insulation check (major factor - weighted 2x)
+        if 'wall_insulated' in df.columns:
+            # Uninsulated walls = major deficiency
+            uninsulated_walls = ~df['wall_insulated']
+            deficiency_scores += uninsulated_walls.astype(float) * 2.0
 
-        # Tier 2: Minor work
-        # Current demand moderate OR post-fabric demand low
-        tier2_criteria = (
-            (tier != 1) &
-            (
-                (current_demand < self.HEAT_DEMAND_THRESHOLDS['minor_work']) |
-                (post_fabric_demand < self.HEAT_DEMAND_THRESHOLDS['ready'])
-            ) &
-            (~df['wall_insulation_type'].str.contains('solid', na=False))  # No solid wall
-        )
-        tier[tier2_criteria] = 2
+        # Also check wall type for solid walls (harder to insulate)
+        if 'wall_type' in df.columns:
+            solid_walls = df['wall_type'].str.contains('Solid|solid', na=False)
+            # Uninsulated solid walls get extra penalty
+            if 'wall_insulated' in df.columns:
+                uninsulated_solid = solid_walls & (~df['wall_insulated'])
+                deficiency_scores += uninsulated_solid.astype(float) * 0.5
 
-        # Tier 3: Major work
-        # Needs solid wall insulation but achievable
-        tier3_criteria = (
-            (tier > 2) &
-            (
-                (current_demand < self.HEAT_DEMAND_THRESHOLDS['major_work']) |
-                (post_fabric_demand < self.HEAT_DEMAND_THRESHOLDS['minor_work'])
+        # Loft insulation check
+        if 'ROOF_ENERGY_EFF' in df.columns:
+            poor_roof = df['ROOF_ENERGY_EFF'].isin(['Very Poor', 'very poor', 'Poor', 'poor'])
+            deficiency_scores += poor_roof.astype(float) * 1.0
+        elif 'ROOF_DESCRIPTION' in df.columns:
+            no_loft = df['ROOF_DESCRIPTION'].str.contains(
+                'no insulation|0 mm|uninsulated', case=False, na=False
             )
-        )
-        tier[tier3_criteria] = 3
+            deficiency_scores += no_loft.astype(float) * 1.0
 
-        # Tier 4: Very challenging
-        # High demand even after fabric work
-        tier4_criteria = (
-            (tier > 3) &
-            (
-                (current_demand < self.HEAT_DEMAND_THRESHOLDS['challenging']) |
-                (post_fabric_demand < self.HEAT_DEMAND_THRESHOLDS['major_work'])
+            # Partial/insufficient loft insulation
+            low_loft = df['ROOF_DESCRIPTION'].str.contains(
+                '50mm|75mm|100mm', case=False, na=False
             )
-        )
-        tier[tier4_criteria] = 4
+            deficiency_scores += low_loft.astype(float) * 0.5
 
-        # Tier 5: Everything else (>250 kWh/m² or still high after fabric)
+        # Glazing check
+        if 'glazing_type' in df.columns:
+            single_glazed = df['glazing_type'].str.contains('Single|single', na=False)
+            deficiency_scores += single_glazed.astype(float) * 1.0
+        elif 'WINDOWS_DESCRIPTION' in df.columns:
+            single_glazed = df['WINDOWS_DESCRIPTION'].str.contains('single', case=False, na=False)
+            deficiency_scores += single_glazed.astype(float) * 1.0
+
+        # Floor insulation check
+        if 'FLOOR_ENERGY_EFF' in df.columns:
+            poor_floor = df['FLOOR_ENERGY_EFF'].isin(['Very Poor', 'very poor', 'Poor', 'poor'])
+            deficiency_scores += poor_floor.astype(float) * 0.5
+
+        # SAP score as proxy for overall fabric performance
+        if 'CURRENT_ENERGY_EFFICIENCY' in df.columns:
+            sap = df['CURRENT_ENERGY_EFFICIENCY'].fillna(50)
+            very_poor_sap = sap < 40
+            poor_sap = (sap >= 40) & (sap < 55)
+            deficiency_scores += very_poor_sap.astype(float) * 1.0
+            deficiency_scores += poor_sap.astype(float) * 0.5
+
+        # Classify into tiers based on deficiency score
+        # Score thresholds designed to give expected distribution
+        tier = pd.Series(3, index=df.index)  # Default
+
+        tier[deficiency_scores <= 0.5] = 1   # Ready (score 0-0.5)
+        tier[(deficiency_scores > 0.5) & (deficiency_scores <= 1.5)] = 2   # Minor work
+        tier[(deficiency_scores > 1.5) & (deficiency_scores <= 2.5)] = 3   # Moderate work
+        tier[(deficiency_scores > 2.5) & (deficiency_scores <= 4.0)] = 4   # Significant work
+        tier[deficiency_scores > 4.0] = 5   # Major intervention
+
+        # Store deficiency score for debugging/analysis
+        df['deficiency_score'] = deficiency_scores
+
+        # Log tier distribution for validation
+        tier_counts = tier.value_counts().sort_index()
+        tier_pcts = (tier.value_counts(normalize=True).sort_index() * 100)
+        logger.info("Retrofit readiness tier distribution:")
+        for t in range(1, 6):
+            count = tier_counts.get(t, 0)
+            pct = tier_pcts.get(t, 0)
+            logger.info(f"  Tier {t}: {count:,} properties ({pct:.1f}%)")
 
         return tier
 
