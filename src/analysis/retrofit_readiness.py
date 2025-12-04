@@ -111,51 +111,67 @@ class RetrofitReadinessAnalyzer:
 
     def _calculate_heat_demand(self, df: pd.DataFrame) -> pd.Series:
         """Calculate current heat demand in kWh/m²/year."""
-        # Use current energy consumption as proxy for heat demand
-        # EPC provides total energy, we'll use it as heat demand approximation
+        # ENERGY_CONSUMPTION_CURRENT from EPC API is already in kWh/m²/year
+        # See: https://epc.opendatacommunities.org/docs/guidance (glossary)
+        # No need to divide by floor area - just use directly
 
         heat_demand = df['ENERGY_CONSUMPTION_CURRENT'].copy()
-
-        # For properties with floor area, calculate per m²
-        if 'TOTAL_FLOOR_AREA' in df.columns:
-            floor_area = df['TOTAL_FLOOR_AREA'].replace(0, np.nan)
-            heat_demand_m2 = df['ENERGY_CONSUMPTION_CURRENT'] / floor_area
-            # Use calculated value where available
-            heat_demand = heat_demand_m2.fillna(heat_demand)
 
         return heat_demand
 
     def _needs_loft_insulation(self, df: pd.DataFrame) -> pd.Series:
         """Identify properties needing loft insulation upgrade."""
-        if 'loft_insulation_thickness' not in df.columns:
-            # If no loft data, assume most Edwardian properties need it
-            return pd.Series(True, index=df.index)
+        # EPC API provides ROOF_DESCRIPTION and ROOF_ENERGY_EFF, not loft_insulation_thickness
+        needs_loft = pd.Series(False, index=df.index)  # Default to False (conservative)
 
-        # Need upgrade if:
-        # - No loft insulation
-        # - Less than 270mm (heat pump standard)
-        needs_loft = (
-            (df['loft_insulation_thickness'].isna()) |
-            (df['loft_insulation_thickness'] == 'None') |
-            (df['loft_insulation_thickness'] == 'unknown') |
-            (df['loft_insulation_thickness'].str.contains('100mm|less', case=False, na=False))
-        )
+        # Check ROOF_ENERGY_EFF first (most reliable indicator)
+        if 'ROOF_ENERGY_EFF' in df.columns:
+            # Need upgrade if roof efficiency is poor or very poor
+            needs_loft = df['ROOF_ENERGY_EFF'].isin(['Poor', 'poor', 'Very Poor', 'very poor'])
+
+        # If ROOF_DESCRIPTION available, check for insulation mentions
+        elif 'ROOF_DESCRIPTION' in df.columns:
+            # Flag properties with no insulation mentioned
+            no_insulation_mask = (
+                df['ROOF_DESCRIPTION'].str.contains('no insulation|uninsulated', case=False, na=False) |
+                df['ROOF_DESCRIPTION'].isna()
+            )
+            # Flag properties with insufficient insulation
+            low_insulation_mask = df['ROOF_DESCRIPTION'].str.contains(
+                '50mm|75mm|100mm|less than', case=False, na=False
+            )
+            needs_loft = no_insulation_mask | low_insulation_mask
+
+        # Fallback: check legacy loft_insulation_thickness field (if exists)
+        elif 'loft_insulation_thickness' in df.columns:
+            needs_loft = (
+                (df['loft_insulation_thickness'].isna()) |
+                (df['loft_insulation_thickness'] == 'None') |
+                (df['loft_insulation_thickness'] == 'unknown') |
+                (df['loft_insulation_thickness'].str.contains('100mm|less', case=False, na=False))
+            )
 
         return needs_loft
 
     def _needs_wall_insulation(self, df: pd.DataFrame) -> pd.Series:
         """Identify properties needing wall insulation."""
-        if 'wall_type' not in df.columns or 'wall_insulation' not in df.columns:
-            return pd.Series(False, index=df.index)
+        # Check for wall_insulated boolean field (created by data_validator.py)
+        if 'wall_insulated' in df.columns:
+            # Need insulation if walls are uninsulated (False or NaN)
+            needs_wall = (~df['wall_insulated']) | (df['wall_insulated'].isna())
+            return needs_wall
 
-        # Need insulation if walls are uninsulated
-        needs_wall = (
-            (df['wall_insulation'] == 'No') |
-            (df['wall_insulation'] == 'None') |
-            (df['wall_insulation'].isna())
-        )
+        # Fallback: check for legacy string field
+        if 'wall_insulation' in df.columns:
+            needs_wall = (
+                (df['wall_insulation'] == 'No') |
+                (df['wall_insulation'] == 'None') |
+                (df['wall_insulation'].isna())
+            )
+            return needs_wall
 
-        return needs_wall
+        # No wall insulation data available
+        return pd.Series(False, index=df.index)
 
     def _wall_insulation_type(self, df: pd.DataFrame) -> pd.Series:
         """Determine which type of wall insulation is needed."""

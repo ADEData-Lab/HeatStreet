@@ -114,8 +114,16 @@ class ScenarioModeler:
         """Model baseline (no intervention) scenario."""
         logger.info("Modeling baseline scenario...")
 
-        total_energy = df['ENERGY_CONSUMPTION_CURRENT'].sum() if 'ENERGY_CONSUMPTION_CURRENT' in df.columns else 0
+        # ENERGY_CONSUMPTION_CURRENT is in kWh/m²/year - multiply by floor area for absolute values
+        if 'ENERGY_CONSUMPTION_CURRENT' in df.columns and 'TOTAL_FLOOR_AREA' in df.columns:
+            total_energy = (df['ENERGY_CONSUMPTION_CURRENT'] * df['TOTAL_FLOOR_AREA']).sum()
+        else:
+            total_energy = 0
+
+        # CO2_EMISSIONS_CURRENT is already in tonnes/year (absolute)
         total_co2 = df['CO2_EMISSIONS_CURRENT'].sum() if 'CO2_EMISSIONS_CURRENT' in df.columns else 0
+        # Convert tonnes to kg
+        total_co2_kg = total_co2 * 1000
 
         return {
             'total_properties': len(df),
@@ -125,7 +133,7 @@ class ScenarioModeler:
             'annual_co2_reduction_kg': 0,
             'annual_bill_savings': 0,
             'current_annual_energy_kwh': float(total_energy),
-            'current_annual_co2_kg': float(total_co2),
+            'current_annual_co2_kg': float(total_co2_kg),
             'epc_band_shifts': {},
             'average_payback_years': 0
         }
@@ -216,10 +224,19 @@ class ScenarioModeler:
         loft_area = floor_area * 0.9
         return loft_area * self.costs['loft_insulation_per_m2']
 
+    def _get_absolute_energy(self, property_data: pd.Series) -> float:
+        """
+        Get absolute energy consumption in kWh/year.
+        ENERGY_CONSUMPTION_CURRENT from EPC is in kWh/m²/year, so multiply by floor area.
+        """
+        energy_intensity = property_data.get('ENERGY_CONSUMPTION_CURRENT', 150)  # kWh/m²/year
+        floor_area = property_data.get('TOTAL_FLOOR_AREA', 100)  # m²
+        return energy_intensity * floor_area  # kWh/year
+
     def _savings_loft_insulation(self, property_data: pd.Series) -> float:
         """Calculate energy savings from loft insulation."""
         # Typical savings: 15-25% of heating energy for uninsulated loft
-        current_energy = property_data.get('ENERGY_CONSUMPTION_CURRENT', 15000)
+        current_energy = self._get_absolute_energy(property_data)
         return current_energy * 0.15  # Conservative estimate
 
     def _cost_wall_insulation(self, property_data: pd.Series) -> float:
@@ -238,7 +255,7 @@ class ScenarioModeler:
     def _savings_wall_insulation(self, property_data: pd.Series) -> float:
         """Calculate energy savings from wall insulation."""
         # Typical savings: 20-35% of heating energy for uninsulated walls
-        current_energy = property_data.get('ENERGY_CONSUMPTION_CURRENT', 15000)
+        current_energy = self._get_absolute_energy(property_data)
         wall_type = property_data.get('wall_type', 'Solid')
 
         if wall_type == 'Cavity':
@@ -256,7 +273,7 @@ class ScenarioModeler:
     def _savings_glazing(self, property_data: pd.Series) -> float:
         """Calculate energy savings from window glazing."""
         # Typical savings: 10-15% of heating energy
-        current_energy = property_data.get('ENERGY_CONSUMPTION_CURRENT', 15000)
+        current_energy = self._get_absolute_energy(property_data)
         return current_energy * 0.10
 
     def _savings_heat_pump(self, property_data: pd.Series) -> float:
@@ -265,7 +282,7 @@ class ScenarioModeler:
         # With SCOP of 3.0, need 1/3 the energy
         # But electricity is ~3.4x more expensive than gas
         # So bill impact is complex - simplified here
-        current_heating = property_data.get('ENERGY_CONSUMPTION_CURRENT', 15000) * 0.8
+        current_heating = self._get_absolute_energy(property_data) * 0.8
         # Primary energy savings (gas reduced, electricity increased)
         gas_saved = current_heating
         electricity_used = current_heating / self.config['heat_pump']['scop']
@@ -282,7 +299,7 @@ class ScenarioModeler:
         """Calculate savings from district heating connection."""
         # Depends on district heating tariff vs current costs
         # Simplified: 10-20% savings on bills
-        current_energy = property_data.get('ENERGY_CONSUMPTION_CURRENT', 15000)
+        current_energy = self._get_absolute_energy(property_data)
         return current_energy * 0.15
 
     def _cost_fabric_package(self, property_data: pd.Series) -> float:
@@ -297,7 +314,7 @@ class ScenarioModeler:
         """Calculate savings from combined fabric improvements."""
         # Don't simply add - there are diminishing returns
         # Use conservative estimate of 40% total savings
-        current_energy = property_data.get('ENERGY_CONSUMPTION_CURRENT', 15000)
+        current_energy = self._get_absolute_energy(property_data)
         return current_energy * 0.40
 
     def _rating_to_band(self, rating: float) -> str:
@@ -334,15 +351,20 @@ class ScenarioModeler:
         """
         total_properties = len(upgrades)
 
+        # Calculate payback statistics (filter out unrealistic values)
+        reasonable_paybacks = [u.payback_years for u in upgrades if u.payback_years < 100]
+        avg_payback = np.mean(reasonable_paybacks) if len(reasonable_paybacks) > 0 else 999
+        median_payback = np.median(reasonable_paybacks) if len(reasonable_paybacks) > 0 else 999
+
         results = {
             'total_properties': total_properties,
             'capital_cost_total': sum(u.capital_cost for u in upgrades),
-            'capital_cost_per_property': sum(u.capital_cost for u in upgrades) / total_properties,
+            'capital_cost_per_property': sum(u.capital_cost for u in upgrades) / total_properties if total_properties > 0 else 0,
             'annual_energy_reduction_kwh': sum(u.annual_energy_reduction_kwh for u in upgrades),
             'annual_co2_reduction_kg': sum(u.annual_co2_reduction_kg for u in upgrades),
             'annual_bill_savings': sum(u.annual_bill_savings for u in upgrades),
-            'average_payback_years': np.mean([u.payback_years for u in upgrades if u.payback_years < 100]),
-            'median_payback_years': np.median([u.payback_years for u in upgrades if u.payback_years < 100])
+            'average_payback_years': avg_payback,
+            'median_payback_years': median_payback
         }
 
         # EPC band shifts
