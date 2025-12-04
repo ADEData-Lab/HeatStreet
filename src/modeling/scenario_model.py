@@ -11,6 +11,9 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from loguru import logger
+from concurrent.futures import ProcessPoolExecutor
+import multiprocessing
+import os
 
 import sys
 sys.path.append(str(Path(__file__).parent.parent.parent))
@@ -34,6 +37,129 @@ class PropertyUpgrade:
     annual_bill_savings: float
     new_epc_band: str
     payback_years: float
+
+
+def _calculate_property_upgrade_worker(args):
+    """
+    Worker function for parallel property upgrade calculations.
+    Must be at module level for pickling.
+
+    Args:
+        args: Tuple of (property_dict, scenario_name, measures, costs, config)
+
+    Returns:
+        PropertyUpgrade object
+    """
+    property_dict, scenario_name, measures, costs, config = args
+
+    capital_cost = 0
+    energy_reduction = 0
+    co2_reduction = 0
+
+    floor_area = property_dict.get('TOTAL_FLOOR_AREA', 100)
+    energy_consumption = property_dict.get('ENERGY_CONSUMPTION_CURRENT', 150)
+    wall_type = property_dict.get('wall_type', 'Solid')
+    current_rating = property_dict.get('CURRENT_ENERGY_EFFICIENCY', 50)
+
+    # Helper function to get absolute energy
+    def get_absolute_energy():
+        return energy_consumption * floor_area
+
+    # Calculate costs and impacts for each measure
+    for measure in measures:
+        if measure == 'loft_insulation_topup':
+            loft_area = floor_area * 0.9
+            capital_cost += loft_area * costs['loft_insulation_per_m2']
+            energy_reduction += get_absolute_energy() * 0.15
+
+        elif measure == 'wall_insulation':
+            if wall_type == 'Cavity':
+                capital_cost += costs['cavity_wall_insulation']
+                energy_reduction += get_absolute_energy() * 0.20
+            else:
+                wall_area = floor_area * 1.5
+                capital_cost += wall_area * costs['internal_wall_insulation_per_m2']
+                energy_reduction += get_absolute_energy() * 0.30
+
+        elif measure == 'double_glazing':
+            window_area = floor_area * 0.2
+            capital_cost += window_area * costs['double_glazing_per_m2']
+            energy_reduction += get_absolute_energy() * 0.10
+
+        elif measure == 'ashp_installation':
+            capital_cost += costs['ashp_installation']
+            current_heating = get_absolute_energy() * 0.8
+            gas_saved = current_heating
+            electricity_used = current_heating / config['heat_pump']['scop']
+            energy_reduction += gas_saved - electricity_used
+
+        elif measure == 'emitter_upgrades':
+            num_radiators = int(floor_area / 15)
+            capital_cost += num_radiators * costs['emitter_upgrade_per_radiator']
+
+        elif measure == 'district_heating_connection':
+            capital_cost += costs['district_heating_connection']
+            energy_reduction += get_absolute_energy() * 0.15
+
+        elif measure in ['fabric_improvements', 'modest_fabric_improvements']:
+            # Combination of measures
+            loft_area = floor_area * 0.9
+            capital_cost += loft_area * costs['loft_insulation_per_m2']
+            if wall_type == 'Cavity':
+                capital_cost += costs['cavity_wall_insulation']
+            else:
+                wall_area = floor_area * 1.5
+                capital_cost += wall_area * costs['internal_wall_insulation_per_m2']
+            window_area = floor_area * 0.2
+            capital_cost += window_area * costs['double_glazing_per_m2']
+            energy_reduction += get_absolute_energy() * 0.40
+
+    # Calculate CO2 reduction
+    co2_reduction = energy_reduction * config['carbon_factors']['current']['gas']
+
+    # Calculate bill savings
+    bill_savings = energy_reduction * config['energy_prices']['current']['gas']
+
+    # Estimate new EPC band
+    improvement_points = (energy_reduction / floor_area) * 0.5
+    new_rating = min(100, current_rating + improvement_points)
+
+    # Convert rating to band
+    if new_rating >= 92:
+        new_band = 'A'
+    elif new_rating >= 81:
+        new_band = 'B'
+    elif new_rating >= 69:
+        new_band = 'C'
+    elif new_rating >= 55:
+        new_band = 'D'
+    elif new_rating >= 39:
+        new_band = 'E'
+    elif new_rating >= 21:
+        new_band = 'F'
+    else:
+        new_band = 'G'
+
+    # Calculate payback period
+    if pd.isna(bill_savings) or pd.isna(capital_cost):
+        payback_years = np.inf
+    elif bill_savings <= 0:
+        payback_years = np.inf
+    elif capital_cost <= 0:
+        payback_years = 0
+    else:
+        payback_years = capital_cost / bill_savings
+
+    return PropertyUpgrade(
+        property_id=str(property_dict.get('LMK_KEY', 'unknown')),
+        scenario=scenario_name,
+        capital_cost=capital_cost if not pd.isna(capital_cost) else 0,
+        annual_energy_reduction_kwh=energy_reduction if not pd.isna(energy_reduction) else 0,
+        annual_co2_reduction_kg=co2_reduction if not pd.isna(co2_reduction) else 0,
+        annual_bill_savings=bill_savings if not pd.isna(bill_savings) else 0,
+        new_epc_band=new_band,
+        payback_years=payback_years
+    )
 
 
 class ScenarioModeler:
@@ -80,7 +206,7 @@ class ScenarioModeler:
         scenario_config: Dict
     ) -> Dict:
         """
-        Model a single decarbonization scenario.
+        Model a single decarbonization scenario with parallel processing.
 
         Args:
             df: Property DataFrame
@@ -96,12 +222,26 @@ class ScenarioModeler:
             # Baseline scenario - no interventions
             return self._model_baseline(df)
 
-        # Calculate costs and impacts for each property
-        property_upgrades = []
+        # Calculate costs and impacts for each property using parallel processing
+        logger.info(f"  Processing {len(df):,} properties in parallel...")
 
-        for idx, row in df.iterrows():
-            upgrade = self._calculate_property_upgrade(row, scenario_name, measures)
-            property_upgrades.append(upgrade)
+        # Convert DataFrame rows to dictionaries for pickling
+        property_dicts = df.to_dict('records')
+
+        # Prepare arguments for parallel processing
+        args_list = [
+            (prop_dict, scenario_name, measures, self.costs, self.config)
+            for prop_dict in property_dicts
+        ]
+
+        # Use ProcessPoolExecutor for CPU-bound calculations
+        # Use max_workers based on CPU count, leave some cores free
+        max_workers = max(1, multiprocessing.cpu_count() - 1)
+
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            property_upgrades = list(executor.map(_calculate_property_upgrade_worker, args_list, chunksize=100))
+
+        logger.info(f"  Parallel processing complete!")
 
         # Aggregate results
         results = self._aggregate_scenario_results(property_upgrades, df)

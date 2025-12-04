@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 from loguru import logger
 import numpy as np
+from concurrent.futures import ProcessPoolExecutor
+import multiprocessing
 
 import sys
 sys.path.append(str(Path(__file__).parent.parent.parent))
@@ -337,43 +339,61 @@ class HeatNetworkAnalyzer:
             x_coords = np.arange(minx, maxx, grid_size)
             y_coords = np.arange(miny, maxy, grid_size)
 
-            logger.info(f"Creating {len(x_coords) * len(y_coords)} grid cells...")
+            # Optimized vectorized approach using spatial join
+            logger.info(f"Using vectorized spatial operations for heat density calculation...")
 
-            # For each unclassified property, calculate heat density in its vicinity
-            for idx, prop in properties_27700[unclassified_mask].iterrows():
-                # Create 500m buffer around property
-                buffer = prop.geometry.buffer(250)  # 250m radius = 500m diameter
-                buffer_area_km2 = buffer.area / 1_000_000  # Convert m² to km²
+            # Get unclassified properties
+            unclassified_props = properties_27700[unclassified_mask].copy()
 
-                # Find all properties within this buffer
-                nearby_mask = properties_27700.geometry.within(buffer)
-                nearby_props = properties_27700[nearby_mask]
+            # Calculate absolute energy consumption for all properties
+            if 'TOTAL_FLOOR_AREA' in properties_27700.columns:
+                properties_27700['_absolute_energy_kwh'] = (
+                    properties_27700['ENERGY_CONSUMPTION_CURRENT'] * properties_27700['TOTAL_FLOOR_AREA']
+                )
+            else:
+                properties_27700['_absolute_energy_kwh'] = properties_27700['ENERGY_CONSUMPTION_CURRENT']
 
-                if len(nearby_props) > 0:
-                    # ENERGY_CONSUMPTION_CURRENT is in kWh/m²/year
-                    # Multiply by floor area to get absolute kWh/year, then sum
-                    if 'TOTAL_FLOOR_AREA' in nearby_props.columns:
-                        absolute_energy = nearby_props['ENERGY_CONSUMPTION_CURRENT'] * nearby_props['TOTAL_FLOOR_AREA']
-                        total_energy_kwh = absolute_energy.sum()
-                    else:
-                        # Fallback: use intensity values (will be underestimate)
-                        total_energy_kwh = nearby_props['ENERGY_CONSUMPTION_CURRENT'].sum()
+            # Create buffers for unclassified properties (vectorized)
+            buffer_radius = 250  # meters
+            buffer_area_km2 = (np.pi * buffer_radius**2) / 1_000_000
 
-                    # Convert to GWh/km²
-                    heat_density_gwh_km2 = (total_energy_kwh / 1_000_000) / buffer_area_km2
+            # Create a GeoDataFrame with buffered geometries
+            unclassified_buffered = unclassified_props.copy()
+            unclassified_buffered['geometry'] = unclassified_buffered.geometry.buffer(buffer_radius)
+            unclassified_buffered['_buffer_idx'] = unclassified_buffered.index
 
-                    # Classify by heat density thresholds
-                    if heat_density_gwh_km2 >= self.heat_network_tiers['tier_3']['min_heat_density_gwh_km2']:
-                        properties.loc[idx, 'heat_network_tier'] = 'Tier 3: High heat density'
-                        properties.loc[idx, 'tier_number'] = 3
-                        properties.loc[idx, 'heat_density_gwh_km2'] = heat_density_gwh_km2
-                    elif heat_density_gwh_km2 >= self.heat_network_tiers['tier_4']['min_heat_density_gwh_km2']:
-                        properties.loc[idx, 'heat_network_tier'] = 'Tier 4: Medium heat density'
-                        properties.loc[idx, 'tier_number'] = 4
-                        properties.loc[idx, 'heat_density_gwh_km2'] = heat_density_gwh_km2
-                    else:
-                        # Tier 5 (already default)
-                        properties.loc[idx, 'heat_density_gwh_km2'] = heat_density_gwh_km2
+            # Spatial join to find all properties within each buffer
+            logger.info(f"Performing spatial join for {len(unclassified_buffered):,} properties...")
+            joined = gpd.sjoin(
+                unclassified_buffered[['geometry', '_buffer_idx']],
+                properties_27700[['geometry', '_absolute_energy_kwh']],
+                how='left',
+                predicate='intersects'
+            )
+
+            # Aggregate energy consumption per buffer
+            logger.info("Aggregating heat density calculations...")
+            heat_density_by_buffer = joined.groupby('_buffer_idx')['_absolute_energy_kwh'].sum()
+
+            # Convert to GWh/km²
+            heat_density_gwh_km2 = (heat_density_by_buffer / 1_000_000) / buffer_area_km2
+
+            # Classify tiers based on heat density
+            for idx, density in heat_density_gwh_km2.items():
+                if density >= self.heat_network_tiers['tier_3']['min_heat_density_gwh_km2']:
+                    properties.loc[idx, 'heat_network_tier'] = 'Tier 3: High heat density'
+                    properties.loc[idx, 'tier_number'] = 3
+                    properties.loc[idx, 'heat_density_gwh_km2'] = density
+                elif density >= self.heat_network_tiers['tier_4']['min_heat_density_gwh_km2']:
+                    properties.loc[idx, 'heat_network_tier'] = 'Tier 4: Medium heat density'
+                    properties.loc[idx, 'tier_number'] = 4
+                    properties.loc[idx, 'heat_density_gwh_km2'] = density
+                else:
+                    # Tier 5 (already default)
+                    properties.loc[idx, 'heat_density_gwh_km2'] = density
+
+            # Clean up temporary column
+            properties_27700.drop(columns=['_absolute_energy_kwh'], inplace=True, errors='ignore')
 
             tier_3_count = (properties['tier_number'] == 3).sum()
             tier_4_count = (properties['tier_number'] == 4).sum()

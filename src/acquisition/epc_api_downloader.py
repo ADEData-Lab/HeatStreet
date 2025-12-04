@@ -17,6 +17,8 @@ from datetime import datetime
 from tqdm import tqdm
 from loguru import logger
 from dotenv import load_dotenv
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 import sys
 sys.path.append(str(Path(__file__).parent.parent.parent))
@@ -259,15 +261,17 @@ class EPCAPIDownloader:
         self,
         property_types: Optional[List[str]] = None,
         from_year: int = 2015,
-        max_results_per_borough: Optional[int] = None
+        max_results_per_borough: Optional[int] = None,
+        max_workers: int = 4
     ) -> pd.DataFrame:
         """
-        Download EPC data for all London boroughs.
+        Download EPC data for all London boroughs with parallel processing.
 
         Args:
             property_types: List of property types to download (default: ['house'])
             from_year: Earliest year for certificates (default: 2015)
             max_results_per_borough: Max results per borough (None = all)
+            max_workers: Number of parallel download threads (default: 4)
 
         Returns:
             Combined DataFrame for all boroughs
@@ -278,11 +282,14 @@ class EPCAPIDownloader:
         logger.info(f"Downloading EPC data for all {len(self.LONDON_LA_CODES)} London boroughs...")
         logger.info(f"Property types: {property_types}")
         logger.info(f"From year: {from_year}")
+        logger.info(f"Using {max_workers} parallel download threads")
 
         all_borough_data = []
+        download_lock = threading.Lock()
 
-        for borough_name in self.LONDON_LA_CODES.keys():
-            for property_type in property_types:
+        def download_borough_wrapper(borough_name: str, property_type: str):
+            """Wrapper function for parallel borough downloads."""
+            try:
                 df = self.download_borough_data(
                     borough_name=borough_name,
                     property_type=property_type,
@@ -292,7 +299,40 @@ class EPCAPIDownloader:
 
                 if not df.empty:
                     df['borough'] = borough_name
-                    all_borough_data.append(df)
+                    with download_lock:
+                        all_borough_data.append(df)
+                    return len(df)
+                return 0
+            except Exception as e:
+                logger.error(f"Error downloading {borough_name} ({property_type}): {e}")
+                return 0
+
+        # Create list of download tasks
+        download_tasks = [
+            (borough_name, property_type)
+            for borough_name in self.LONDON_LA_CODES.keys()
+            for property_type in property_types
+        ]
+
+        # Execute downloads in parallel using ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(download_borough_wrapper, borough, prop_type): (borough, prop_type)
+                for borough, prop_type in download_tasks
+            }
+
+            # Track progress
+            completed = 0
+            total_tasks = len(download_tasks)
+
+            for future in as_completed(futures):
+                completed += 1
+                borough, prop_type = futures[future]
+                try:
+                    records = future.result()
+                    logger.info(f"[{completed}/{total_tasks}] Completed {borough} ({prop_type}): {records:,} records")
+                except Exception as e:
+                    logger.error(f"[{completed}/{total_tasks}] Failed {borough} ({prop_type}): {e}")
 
         if all_borough_data:
             combined_df = pd.concat(all_borough_data, ignore_index=True)

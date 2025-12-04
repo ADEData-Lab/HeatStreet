@@ -12,6 +12,7 @@ from typing import Dict, List, Optional
 import matplotlib.pyplot as plt
 import seaborn as sns
 from loguru import logger
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import sys
 sys.path.append(str(Path(__file__).parent.parent.parent))
@@ -38,30 +39,67 @@ class ArchetypeAnalyzer:
 
         logger.info("Initialized Archetype Analyzer")
 
-    def analyze_archetype(self, df: pd.DataFrame) -> Dict:
+    def analyze_archetype(self, df: pd.DataFrame, use_parallel: bool = True) -> Dict:
         """
-        Run complete archetype characterization analysis.
+        Run complete archetype characterization analysis with parallel processing.
 
         Args:
             df: Validated EPC DataFrame
+            use_parallel: Use parallel processing for independent analyses (default: True)
 
         Returns:
             Dictionary containing all analysis results
         """
         logger.info(f"Analyzing archetype for {len(df):,} properties...")
 
-        # Perform all analyses
-        self.results['epc_bands'] = self.analyze_epc_bands(df)
-        self.results['sap_scores'] = self.analyze_sap_scores(df)
-        self.results['wall_construction'] = self.analyze_wall_construction(df)
-        self.results['loft_insulation'] = self.analyze_loft_insulation(df)
-        self.results['floor_insulation'] = self.analyze_floor_insulation(df)
-        self.results['glazing'] = self.analyze_glazing(df)
-        self.results['heating_systems'] = self.analyze_heating_systems(df)
-        self.results['heating_controls'] = self.analyze_heating_controls(df)
-        self.results['hot_water'] = self.analyze_hot_water(df)
-        self.results['energy_consumption'] = self.analyze_energy_consumption(df)
-        self.results['co2_emissions'] = self.analyze_co2_emissions(df)
+        if use_parallel:
+            logger.info("Running analyses in parallel...")
+
+            # Define all analysis functions with their keys
+            analysis_tasks = [
+                ('epc_bands', self.analyze_epc_bands),
+                ('sap_scores', self.analyze_sap_scores),
+                ('wall_construction', self.analyze_wall_construction),
+                ('loft_insulation', self.analyze_loft_insulation),
+                ('floor_insulation', self.analyze_floor_insulation),
+                ('glazing', self.analyze_glazing),
+                ('heating_systems', self.analyze_heating_systems),
+                ('heating_controls', self.analyze_heating_controls),
+                ('hot_water', self.analyze_hot_water),
+                ('energy_consumption', self.analyze_energy_consumption),
+                ('co2_emissions', self.analyze_co2_emissions)
+            ]
+
+            # Execute analyses in parallel using ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=8) as executor:
+                # Submit all analysis tasks
+                futures = {
+                    executor.submit(func, df): key
+                    for key, func in analysis_tasks
+                }
+
+                # Collect results as they complete
+                for future in as_completed(futures):
+                    key = futures[future]
+                    try:
+                        self.results[key] = future.result()
+                    except Exception as e:
+                        logger.error(f"Error in {key} analysis: {e}")
+                        self.results[key] = {}
+
+        else:
+            # Sequential execution (fallback)
+            self.results['epc_bands'] = self.analyze_epc_bands(df)
+            self.results['sap_scores'] = self.analyze_sap_scores(df)
+            self.results['wall_construction'] = self.analyze_wall_construction(df)
+            self.results['loft_insulation'] = self.analyze_loft_insulation(df)
+            self.results['floor_insulation'] = self.analyze_floor_insulation(df)
+            self.results['glazing'] = self.analyze_glazing(df)
+            self.results['heating_systems'] = self.analyze_heating_systems(df)
+            self.results['heating_controls'] = self.analyze_heating_controls(df)
+            self.results['hot_water'] = self.analyze_hot_water(df)
+            self.results['energy_consumption'] = self.analyze_energy_consumption(df)
+            self.results['co2_emissions'] = self.analyze_co2_emissions(df)
 
         logger.info("Archetype characterization complete!")
         return self.results

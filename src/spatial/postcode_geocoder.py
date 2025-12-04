@@ -14,6 +14,8 @@ from loguru import logger
 from tqdm import tqdm
 import geopandas as gpd
 from shapely.geometry import Point
+from concurrent.futures import ThreadPoolExecutor, as_completed
+import threading
 
 
 class PostcodeGeocoder:
@@ -111,18 +113,20 @@ class PostcodeGeocoder:
             logger.debug(f"Error geocoding {postcode}: {e}")
             return None
 
-    def geocode_batch(self, postcodes: List[str], batch_size: int = 100) -> dict:
+    def geocode_batch(self, postcodes: List[str], batch_size: int = 100, max_workers: int = 4) -> dict:
         """
-        Geocode multiple postcodes using batch API.
+        Geocode multiple postcodes using parallel batch API calls.
 
         Args:
             postcodes: List of UK postcodes
             batch_size: Number of postcodes per batch (max 100)
+            max_workers: Number of parallel API request threads (default: 4)
 
         Returns:
             Dictionary mapping postcode to (lat, lon) tuple
         """
         results = {}
+        results_lock = threading.Lock()
 
         # Clean postcodes
         postcodes = [self.clean_postcode(pc) for pc in postcodes if pd.notna(pc)]
@@ -139,12 +143,14 @@ class PostcodeGeocoder:
         if not uncached:
             return results
 
-        logger.info(f"Geocoding {len(uncached):,} postcodes (batch mode)...")
+        logger.info(f"Geocoding {len(uncached):,} postcodes (parallel batch mode with {max_workers} workers)...")
 
-        # Process in batches
-        for i in tqdm(range(0, len(uncached), batch_size), desc="Geocoding batches"):
-            batch = uncached[i:i+batch_size]
+        # Split into batches
+        batches = [uncached[i:i+batch_size] for i in range(0, len(uncached), batch_size)]
 
+        def geocode_single_batch(batch: List[str], batch_idx: int):
+            """Geocode a single batch of postcodes."""
+            batch_results = {}
             try:
                 # Call batch API
                 response = requests.post(
@@ -163,15 +169,40 @@ class PostcodeGeocoder:
                                 lat = item['result']['latitude']
                                 lon = item['result']['longitude']
 
-                                results[postcode] = (lat, lon)
-                                self.cache[postcode] = (lat, lon)
+                                batch_results[postcode] = (lat, lon)
 
-                # Rate limiting - be nice to free API
-                time.sleep(0.1)
+                # Small delay between batches to be nice to free API
+                time.sleep(0.05)
+
+                return batch_results, batch_idx
 
             except Exception as e:
-                logger.warning(f"Error geocoding batch: {e}")
-                continue
+                logger.warning(f"Error geocoding batch {batch_idx}: {e}")
+                return {}, batch_idx
+
+        # Process batches in parallel using ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(geocode_single_batch, batch, idx): idx
+                for idx, batch in enumerate(batches)
+            }
+
+            # Track progress with tqdm
+            with tqdm(total=len(batches), desc="Geocoding batches") as pbar:
+                for future in as_completed(futures):
+                    try:
+                        batch_results, batch_idx = future.result()
+
+                        # Add results to main results dict (thread-safe)
+                        with results_lock:
+                            results.update(batch_results)
+                            self.cache.update(batch_results)
+
+                        pbar.update(1)
+
+                    except Exception as e:
+                        logger.error(f"Batch processing failed: {e}")
+                        pbar.update(1)
 
         # Save cache
         if self.cache_file:
