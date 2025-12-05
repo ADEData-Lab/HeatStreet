@@ -291,3 +291,173 @@ class MethodologicalAdjustments:
             }
 
         return summary
+
+
+def apply_demand_uncertainty(
+    df: pd.DataFrame,
+    demand_col: str = 'annual_kwh_saving',
+    bill_col: str = 'annual_bill_saving',
+    co2_col: str = 'co2_saving_tonnes',
+    low: float = -0.20,
+    high: float = 0.20,
+    anomaly_low: float = -0.30,
+    anomaly_high: float = 0.30
+) -> pd.DataFrame:
+    """
+    Apply demand uncertainty ranges to analysis results.
+
+    Creates low/high variants of demand, bills, and CO2 based on EPC measurement
+    error and prebound effect uncertainties.
+
+    Args:
+        df: DataFrame with analysis results (must have demand/bill/CO2 columns)
+        demand_col: Column name for demand/savings to apply uncertainty to
+        bill_col: Column name for bill savings (derived from demand)
+        co2_col: Column name for CO2 savings (derived from demand)
+        low: Low uncertainty bound (e.g., -0.20 for -20%)
+        high: High uncertainty bound (e.g., 0.20 for +20%)
+        anomaly_low: Low bound for flagged anomalies (e.g., -0.30 for -30%)
+        anomaly_high: High bound for flagged anomalies
+
+    Returns:
+        DataFrame with additional columns:
+        - {col}_low: Lower bound estimate
+        - {col}_high: Upper bound estimate
+        - simple_payback_years_low/high (if capex column exists)
+
+    Example:
+        df_with_uncertainty = apply_demand_uncertainty(
+            df,
+            demand_col='annual_kwh_saving',
+            low=-0.20,
+            high=0.20
+        )
+    """
+    logger.info("Applying demand uncertainty ranges...")
+
+    df_uncertain = df.copy()
+
+    # Determine if property is an anomaly
+    if 'is_epc_fabric_anomaly' in df.columns:
+        is_anomaly = df['is_epc_fabric_anomaly']
+    else:
+        is_anomaly = pd.Series(False, index=df.index)
+
+    # Calculate uncertainty bounds (anomalies get wider range)
+    low_factor = np.where(is_anomaly, 1 + anomaly_low, 1 + low)
+    high_factor = np.where(is_anomaly, 1 + anomaly_high, 1 + high)
+
+    # Apply to demand/savings
+    if demand_col in df.columns:
+        df_uncertain[f'{demand_col}_baseline'] = df[demand_col]
+        df_uncertain[f'{demand_col}_low'] = df[demand_col] * low_factor
+        df_uncertain[f'{demand_col}_high'] = df[demand_col] * high_factor
+
+        logger.info(f"  Applied uncertainty to {demand_col}: [{low*100:.0f}%, +{high*100:.0f}%]")
+
+    # Apply to bills (proportional to demand)
+    if bill_col in df.columns:
+        df_uncertain[f'{bill_col}_baseline'] = df[bill_col]
+        df_uncertain[f'{bill_col}_low'] = df[bill_col] * low_factor
+        df_uncertain[f'{bill_col}_high'] = df[bill_col] * high_factor
+
+        logger.info(f"  Applied uncertainty to {bill_col}")
+
+    # Apply to CO2 (proportional to demand)
+    if co2_col in df.columns:
+        df_uncertain[f'{co2_col}_baseline'] = df[co2_col]
+        df_uncertain[f'{co2_col}_low'] = df[co2_col] * low_factor
+        df_uncertain[f'{co2_col}_high'] = df[co2_col] * high_factor
+
+        logger.info(f"  Applied uncertainty to {co2_col}")
+
+    # Calculate payback uncertainty (if capex exists)
+    if 'capex_per_home' in df.columns and f'{bill_col}_low' in df_uncertain.columns:
+        capex = df['capex_per_home']
+
+        # Low bill savings = longer payback (pessimistic)
+        bill_low = df_uncertain[f'{bill_col}_low']
+        df_uncertain['simple_payback_years_high'] = np.where(
+            bill_low > 0, capex / bill_low, np.inf
+        )
+
+        # High bill savings = shorter payback (optimistic)
+        bill_high = df_uncertain[f'{bill_col}_high']
+        df_uncertain['simple_payback_years_low'] = np.where(
+            bill_high > 0, capex / bill_high, np.inf
+        )
+
+        logger.info("  Calculated payback uncertainty ranges")
+
+    # Alternative: if 'total_capex' column exists
+    elif 'total_capex' in df.columns and f'{bill_col}_low' in df_uncertain.columns:
+        capex = df['total_capex']
+
+        bill_low = df_uncertain[f'{bill_col}_low']
+        df_uncertain['simple_payback_years_high'] = np.where(
+            bill_low > 0, capex / bill_low, np.inf
+        )
+
+        bill_high = df_uncertain[f'{bill_col}_high']
+        df_uncertain['simple_payback_years_low'] = np.where(
+            bill_high > 0, capex / bill_high, np.inf
+        )
+
+        logger.info("  Calculated payback uncertainty ranges")
+
+    # Log summary
+    n_anomalies = is_anomaly.sum()
+    if n_anomalies > 0:
+        logger.info(f"  {n_anomalies:,} properties with anomaly flag get wider uncertainty ({anomaly_low*100:.0f}% to +{anomaly_high*100:.0f}%)")
+
+    return df_uncertain
+
+
+def generate_uncertainty_summary(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Generate summary statistics showing uncertainty ranges.
+
+    Args:
+        df: DataFrame with uncertainty columns applied
+
+    Returns:
+        Summary DataFrame showing baseline, low, and high estimates
+    """
+    summary_rows = []
+
+    # Find columns with _baseline suffix
+    baseline_cols = [c for c in df.columns if c.endswith('_baseline')]
+
+    for base_col in baseline_cols:
+        metric_name = base_col.replace('_baseline', '')
+        low_col = f'{metric_name}_low'
+        high_col = f'{metric_name}_high'
+
+        if low_col in df.columns and high_col in df.columns:
+            summary_rows.append({
+                'metric': metric_name,
+                'baseline_mean': df[base_col].mean(),
+                'low_mean': df[low_col].mean(),
+                'high_mean': df[high_col].mean(),
+                'baseline_total': df[base_col].sum(),
+                'low_total': df[low_col].sum(),
+                'high_total': df[high_col].sum(),
+            })
+
+    # Add payback if available
+    if 'simple_payback_years_low' in df.columns:
+        finite_baseline = df[np.isfinite(df['simple_payback_years'])] if 'simple_payback_years' in df.columns else df
+        finite_low = df[np.isfinite(df['simple_payback_years_low'])]
+        finite_high = df[np.isfinite(df['simple_payback_years_high'])]
+
+        summary_rows.append({
+            'metric': 'simple_payback_years',
+            'baseline_mean': finite_baseline['simple_payback_years'].mean() if 'simple_payback_years' in finite_baseline.columns else np.nan,
+            'low_mean': finite_high['simple_payback_years_low'].mean() if len(finite_high) > 0 else np.nan,  # Note: low payback from high savings
+            'high_mean': finite_low['simple_payback_years_high'].mean() if len(finite_low) > 0 else np.nan,
+            'baseline_total': np.nan,
+            'low_total': np.nan,
+            'high_total': np.nan,
+        })
+
+    return pd.DataFrame(summary_rows)

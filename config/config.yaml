@@ -130,14 +130,63 @@ scenarios:
 
 # Cost Assumptions (£)
 costs:
+  # Fabric measures
   loft_insulation_per_m2: 30
+  loft_insulation_topup: 1200  # 100mm -> 270mm fixed cost
   cavity_wall_insulation: 2500
   internal_wall_insulation_per_m2: 100
   external_wall_insulation_per_m2: 150
+  solid_wall_insulation_ewi: 10000  # External wall insulation (typical)
+  solid_wall_insulation_iwi: 14000  # Internal wall insulation (conservation areas)
+  floor_insulation: 1500  # Suspended timber floor insulation
+  draught_proofing: 500  # Doors and windows draught strips
+
+  # Glazing measures
   double_glazing_per_m2: 400
+  double_glazing_upgrade: 6000  # Single -> double, typical property
+  triple_glazing_per_m2: 600
+  triple_glazing_upgrade: 9000  # Double -> triple (Danish standard)
+
+  # Heat technology
   ashp_installation: 12000
+  hybrid_heat_pump: 8000  # Keeps gas boiler for peaks
+
+  # Emitter and distribution
   emitter_upgrade_per_radiator: 300
+  radiator_upsizing: 2500  # Full property radiator upsizing for low-temp HP
+  hot_water_cylinder: 1200  # 200L cylinder + installation
+
+  # Heat network
   district_heating_connection: 5000
+
+  # Electrical
+  electrical_upgrade: 1500  # 60A -> 100A supply for HP
+
+# Measure Savings (kWh/year per typical property or % reduction)
+measure_savings:
+  # Note: These are typical annual kWh savings or % heat loss reductions
+  loft_insulation_topup:
+    kwh_saving_pct: 0.15  # 15% of heating demand
+    flow_temp_reduction_k: 2  # 2°C lower flow temp achievable
+  wall_insulation:
+    cavity_kwh_saving_pct: 0.20  # 20% of heating demand
+    solid_kwh_saving_pct: 0.30  # 30% of heating demand
+    flow_temp_reduction_k: 5  # 5°C lower flow temp achievable
+  floor_insulation:
+    kwh_saving_pct: 0.05  # 5% of heating demand
+    flow_temp_reduction_k: 1
+  double_glazing:
+    kwh_saving_pct: 0.10  # 10% of heating demand
+    flow_temp_reduction_k: 2
+  triple_glazing:
+    kwh_saving_pct: 0.15  # 15% of heating demand (vs single)
+    flow_temp_reduction_k: 3
+  draught_proofing:
+    kwh_saving_pct: 0.05
+    flow_temp_reduction_k: 1
+  radiator_upsizing:
+    kwh_saving_pct: 0.0  # No direct saving, enables lower flow temp
+    flow_temp_reduction_k: 10  # Enables 10°C lower flow temp
 
 # Subsidy Levels for Sensitivity Analysis (%)
 subsidy_levels: [0, 25, 50, 75, 100]
@@ -176,6 +225,68 @@ carbon_factors:
 heat_pump:
   scop: 3.0  # Seasonal Coefficient of Performance
   design_flow_temps: [35, 45, 55, 65]  # °C
+
+# Heat Network Parameters
+heat_network:
+  # Current penetration assumption (share of homes connected)
+  current_penetration: 0.002  # 0.2%
+  # Penetration levels for sensitivity analysis
+  penetration_sensitivity: [0.002, 0.005, 0.01, 0.02, 0.05, 0.10]  # 0.2% to 10%
+  # Heat network tariff (£/kWh delivered heat)
+  tariff_per_kwh: 0.08
+  # Heat network efficiency (losses)
+  distribution_efficiency: 0.90  # 10% distribution losses
+
+# Financial Parameters
+financial:
+  discount_rate: 0.035  # 3.5% real discount rate (HM Treasury Green Book)
+  analysis_horizon_years: 20  # Project lifetime for NPV calculations
+  price_scenarios:
+    baseline:
+      name: "Current prices (Ofgem cap)"
+      gas: 0.0624
+      electricity: 0.245
+      heat_network: 0.08
+    low:
+      name: "Low energy prices"
+      gas: 0.05
+      electricity: 0.20
+      heat_network: 0.06
+    high:
+      name: "High energy prices"
+      gas: 0.08
+      electricity: 0.30
+      heat_network: 0.10
+    projected_2030:
+      name: "2030 projections"
+      gas: 0.07
+      electricity: 0.22
+      heat_network: 0.07
+
+# Uncertainty Parameters
+# Based on EPC measurement error and prebound effect research
+uncertainty:
+  # Demand uncertainty range (±% around nominal)
+  demand_error_low: -0.20  # -20%
+  demand_error_high: 0.20  # +20%
+  # Higher uncertainty for flagged anomalies
+  anomaly_demand_error_low: -0.30  # -30%
+  anomaly_demand_error_high: 0.30  # +30%
+  # SAP score uncertainty by band (from Crawley et al., 2019)
+  sap_uncertainty:
+    high_rating: 2.4   # SAP 85+
+    good_rating: 4.0   # SAP 70-84
+    average_rating: 6.0  # SAP 55-69
+    low_rating: 8.0    # SAP <55
+
+# EPC Anomaly Detection Thresholds
+anomaly_detection:
+  # Roof insulation threshold (mm) - below this is considered poorly insulated
+  roof_insulation_threshold_mm: 100
+  # Suspicious EPC bands for uninsulated properties
+  suspicious_bands: ["C", "D"]
+  # Wall conditions that trigger anomaly flag
+  uninsulated_wall_conditions: ["none", "unknown"]
 
 # Output Settings
 output:
