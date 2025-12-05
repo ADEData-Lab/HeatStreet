@@ -70,6 +70,65 @@ def get_cost_assumptions() -> Dict[str, float]:
     return config['costs']
 
 
+def get_measure_savings() -> Dict[str, Any]:
+    """Get measure savings assumptions from config."""
+    config = load_config()
+    return config.get('measure_savings', {})
+
+
+def get_heat_network_params() -> Dict[str, Any]:
+    """Get heat network parameters from config."""
+    config = load_config()
+    return config.get('heat_network', {})
+
+
+def get_financial_params() -> Dict[str, Any]:
+    """Get financial parameters (discount rate, price scenarios) from config."""
+    config = load_config()
+    return config.get('financial', {})
+
+
+def get_uncertainty_params() -> Dict[str, Any]:
+    """Get uncertainty parameters from config."""
+    config = load_config()
+    return config.get('uncertainty', {})
+
+
+def get_anomaly_detection_params() -> Dict[str, Any]:
+    """Get EPC anomaly detection thresholds from config."""
+    config = load_config()
+    return config.get('anomaly_detection', {})
+
+
+def get_energy_prices(scenario: str = 'current') -> Dict[str, float]:
+    """
+    Get energy prices for a given scenario.
+
+    Args:
+        scenario: One of 'current', 'projected_2030', 'projected_2040'
+                  or a price_scenario key from financial config
+
+    Returns:
+        Dictionary with gas, electricity prices in £/kWh
+    """
+    config = load_config()
+
+    # Try legacy energy_prices first
+    if scenario in config.get('energy_prices', {}):
+        return config['energy_prices'][scenario]
+
+    # Try new financial.price_scenarios
+    price_scenarios = config.get('financial', {}).get('price_scenarios', {})
+    if scenario in price_scenarios:
+        return price_scenarios[scenario]
+
+    # Default to current prices
+    return config.get('energy_prices', {}).get('current', {
+        'gas': 0.0624,
+        'electricity': 0.245
+    })
+
+
 def ensure_directories():
     """Create necessary directories if they don't exist."""
     directories = [
