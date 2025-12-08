@@ -6,6 +6,7 @@ with interactive prompts and progress indicators.
 """
 
 import os
+import shutil
 import sys
 from pathlib import Path
 from loguru import logger
@@ -664,12 +665,12 @@ def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None):
                 analysis_logger.add_output("data/outputs/maps/heat_network_tiers.html", "html", "Interactive heat network tier map")
                 analysis_logger.complete_phase(success=True, message="Spatial analysis with heat network classification complete")
 
-            return pathway_summary
+            return properties_classified, pathway_summary
         else:
             console.print("[yellow]⚠ Spatial analysis could not complete[/yellow]")
             if analysis_logger:
                 analysis_logger.complete_phase(success=False, message="Spatial analysis could not complete")
-            return None
+            return None, None
 
     except ImportError as e:
         console.print()
@@ -688,14 +689,14 @@ def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None):
         console.print()
         if analysis_logger:
             analysis_logger.skip_phase("Spatial Analysis", "GDAL/geopandas not installed")
-        return None
+        return None, None
 
     except Exception as e:
         console.print(f"[yellow]⚠ Spatial analysis error: {e}[/yellow]")
         console.print("[cyan]Continuing without spatial analysis...[/cyan]")
         if analysis_logger:
             analysis_logger.complete_phase(success=False, message=f"Error: {e}")
-        return None
+        return None, None
 
 
 def generate_reports(archetype_results, scenario_results, subsidy_results=None, df_validated=None, pathway_summary=None, analysis_logger: AnalysisLogger = None):
@@ -752,7 +753,7 @@ def generate_reports(archetype_results, scenario_results, subsidy_results=None, 
         except Exception as e:
             console.print(f"[yellow]⚠ Could not generate subsidy chart: {e}[/yellow]")
 
-    # 5. Text Summary Report
+    # 5. Text and Markdown Summary Reports
     if archetype_results and scenario_results:
         try:
             # Use real pathway summary from spatial analysis if available
@@ -772,7 +773,9 @@ def generate_reports(archetype_results, scenario_results, subsidy_results=None, 
                 })
 
             generator.generate_summary_report(archetype_results, scenario_results, tier_summary)
-            reports_created.append("✓ Executive summary report")
+            reports_created.append("✓ Executive summary report (text)")
+            generator.generate_markdown_summary(archetype_results, scenario_results, tier_summary)
+            reports_created.append("✓ Executive summary report (Markdown)")
         except Exception as e:
             console.print(f"[yellow]⚠ Could not generate summary report: {e}[/yellow]")
 
@@ -813,7 +816,8 @@ def generate_reports(archetype_results, scenario_results, subsidy_results=None, 
             if "chart" in report.lower() or "histogram" in report.lower():
                 analysis_logger.add_output("data/outputs/figures/", "png", report.replace("✓ ", ""))
         analysis_logger.add_output("data/outputs/heat_street_analysis_results.xlsx", "xlsx", "Comprehensive Excel workbook")
-        analysis_logger.add_output("data/outputs/reports/executive_summary.txt", "report", "Executive summary")
+        analysis_logger.add_output("data/outputs/reports/executive_summary.txt", "report", "Executive summary (text)")
+        analysis_logger.add_output("data/outputs/reports/executive_summary.md", "report", "Executive summary (Markdown)")
         analysis_logger.complete_phase(success=True, message=f"{len(reports_created)} reports and visualizations generated")
 
     return True
@@ -929,6 +933,52 @@ def generate_additional_reports(df_raw, df_validated, validation_report, archety
         analysis_logger.add_output("data/outputs/subsidy_sensitivity_analysis.csv", "csv", "Subsidy sensitivity analysis")
         analysis_logger.add_output("data/outputs/data_quality_report.txt", "report", "Data quality assessment")
         analysis_logger.complete_phase(success=True, message=f"{len(reports_created)} additional specialized reports generated")
+
+    return True
+
+
+def package_dashboard_assets(analysis_logger: AnalysisLogger = None):
+    """Ensure the interactive dashboard is available in outputs and logged."""
+    console.print()
+    console.print(Panel("[bold]Phase 6: Dashboard Packaging[/bold]", border_style="blue"))
+    console.print()
+
+    if analysis_logger:
+        analysis_logger.start_phase(
+            "Dashboard Packaging",
+            "Copy the offline dashboard into the outputs directory for easy access",
+        )
+
+    dashboard_source = Path("heat-street-dashboard.html")
+    outputs_dir = Path("data/outputs")
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    dashboard_target = outputs_dir / dashboard_source.name
+
+    try:
+        if dashboard_source.exists():
+            shutil.copy2(dashboard_source, dashboard_target)
+            console.print(f"[green]✓[/green] Dashboard available at {dashboard_target}")
+            if analysis_logger:
+                analysis_logger.add_output(
+                    str(dashboard_target),
+                    "html",
+                    "Offline interactive dashboard copied to outputs",
+                )
+                analysis_logger.complete_phase(success=True, message="Dashboard copied to outputs")
+        else:
+            console.print(
+                f"[yellow]⚠ Dashboard source not found at {dashboard_source}. Skipping copy.[/yellow]"
+            )
+            if analysis_logger:
+                analysis_logger.complete_phase(
+                    success=False,
+                    message=f"Dashboard missing at {dashboard_source}",
+                )
+    except Exception as e:
+        console.print(f"[yellow]⚠ Could not package dashboard: {e}[/yellow]")
+        if analysis_logger:
+            analysis_logger.complete_phase(success=False, message=f"Error: {e}")
+        return False
 
     return True
 
@@ -1123,13 +1173,16 @@ def main():
     df_readiness, readiness_summary = analyze_retrofit_readiness(df_adjusted, analysis_logger)
 
     # Phase 4.5: Spatial Analysis (optional)
-    pathway_summary = run_spatial_analysis(df_adjusted, analysis_logger)
+    properties_with_tiers, pathway_summary = run_spatial_analysis(df_adjusted, analysis_logger)
 
     # Phase 5: Report
     generate_reports(archetype_results, scenario_results, subsidy_results, df_adjusted, pathway_summary, analysis_logger)
 
     # Phase 5.5: Additional Reports
     generate_additional_reports(df_raw, df_adjusted, validation_report, archetype_results, scenario_results, analysis_logger)
+
+    # Phase 6: Package dashboard
+    package_dashboard_assets(analysis_logger)
 
     # Complete
     elapsed = time.time() - start_time
