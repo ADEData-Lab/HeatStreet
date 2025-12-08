@@ -25,8 +25,6 @@ def test_hybrid_cost_bug_fix():
     The bug was that hybrid pathway showed same cost as fabric-only.
     After fix, hybrid should have higher costs (fabric + heat tech).
 
-    Returns:
-        bool: True if test passes
     """
     logger.info("=" * 60)
     logger.info("TEST: Hybrid Cost Bug Fix")
@@ -136,10 +134,9 @@ def test_hybrid_cost_bug_fix():
     if errors:
         for error in errors:
             logger.error(f"FAIL: {error}")
-        return False
+        assert False, "\n".join(errors)
 
     logger.info("PASS: All hybrid cost bug tests passed!")
-    return True
 
 
 def test_epc_anomaly_flagging():
@@ -151,8 +148,6 @@ def test_epc_anomaly_flagging():
     2. Single glazed + EPC band C -> should flag
     3. Well-insulated + EPC band C -> should NOT flag
 
-    Returns:
-        bool: True if test passes
     """
     logger.info("=" * 60)
     logger.info("TEST: EPC Anomaly Flagging")
@@ -239,18 +234,15 @@ def test_epc_anomaly_flagging():
     if errors:
         for error in errors:
             logger.error(f"FAIL: {error}")
-        return False
+        assert False, "\n".join(errors)
 
     logger.info("PASS: All anomaly flagging tests passed!")
-    return True
 
 
 def test_package_and_pathway_ids():
     """
     Verify that all package and pathway IDs resolve to known definitions.
 
-    Returns:
-        bool: True if test passes
     """
     logger.info("=" * 60)
     logger.info("TEST: Package and Pathway ID Resolution")
@@ -309,18 +301,15 @@ def test_package_and_pathway_ids():
     if errors:
         for error in errors:
             logger.error(f"FAIL: {error}")
-        return False
+        assert False, "\n".join(errors)
 
     logger.info("\nPASS: All package and pathway ID tests passed!")
-    return True
 
 
 def test_demand_uncertainty():
     """
     Verify that demand uncertainty calculations work correctly.
 
-    Returns:
-        bool: True if test passes
     """
     logger.info("=" * 60)
     logger.info("TEST: Demand Uncertainty Calculations")
@@ -405,10 +394,9 @@ def test_demand_uncertainty():
     if errors:
         for error in errors:
             logger.error(f"FAIL: {error}")
-        return False
+        assert False, "\n".join(errors)
 
     logger.info("PASS: All demand uncertainty tests passed!")
-    return True
 
 
 def run_all_tests():
@@ -417,12 +405,21 @@ def run_all_tests():
     logger.info("RUNNING ALL TESTS")
     logger.info("=" * 70 + "\n")
 
-    results = {
-        'hybrid_cost_bug': test_hybrid_cost_bug_fix(),
-        'epc_anomaly_flagging': test_epc_anomaly_flagging(),
-        'package_pathway_ids': test_package_and_pathway_ids(),
-        'demand_uncertainty': test_demand_uncertainty(),
+    tests = {
+        'hybrid_cost_bug': test_hybrid_cost_bug_fix,
+        'epc_anomaly_flagging': test_epc_anomaly_flagging,
+        'package_pathway_ids': test_package_and_pathway_ids,
+        'demand_uncertainty': test_demand_uncertainty,
     }
+
+    results = {}
+    for test_name, test_func in tests.items():
+        try:
+            test_func()
+            results[test_name] = True
+        except AssertionError as err:
+            logger.error(f"FAIL: {test_name} -> {err}")
+            results[test_name] = False
 
     # Summary
     logger.info("\n" + "=" * 70)
