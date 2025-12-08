@@ -1,4 +1,21 @@
 # Heat Street EPC Analysis Configuration
+#
+# AUTHORITATIVE SOURCES REFERENCE
+# ================================
+# All calculation parameters, assumptions, and formulas in this configuration
+# are documented with evidence and validation status in:
+#   AUTHORITATIVE_SOURCES.md
+#
+# This document provides:
+# - Source citations for all values
+# - Validation status (Validated, Scenario-based, Heuristic, etc.)
+# - Notes explaining assumptions and caveats
+#
+# When updating any value in this file, please also update the corresponding
+# entry in AUTHORITATIVE_SOURCES.md to maintain audit trail integrity.
+#
+# Last validated: December 2024
+# ================================
 
 # Project Settings
 project:
@@ -57,6 +74,7 @@ property_filters:
   certificate_recency_years: 10
 
 # Data Quality Thresholds
+# See AUTHORITATIVE_SOURCES.md Section 9: EPC Data Validation Thresholds
 data_quality:
   min_floor_area: 25  # m²
   max_floor_area: 400  # m²
@@ -129,6 +147,7 @@ scenarios:
       - "ashp_elsewhere"
 
 # Cost Assumptions (£)
+# See AUTHORITATIVE_SOURCES.md Section 3: Retrofit Measure Costs
 costs:
   # Fabric measures
   loft_insulation_per_m2: 30
@@ -163,6 +182,7 @@ costs:
   electrical_upgrade: 1500  # 60A -> 100A supply for HP
 
 # Measure Savings (kWh/year per typical property or % reduction)
+# See AUTHORITATIVE_SOURCES.md Section 4: Energy Savings Parameters
 measure_savings:
   # Note: These are typical annual kWh savings or % heat loss reductions
   loft_insulation_topup:
@@ -192,6 +212,7 @@ measure_savings:
 subsidy_levels: [0, 25, 50, 75, 100]
 
 # Energy Prices (£/kWh)
+# See AUTHORITATIVE_SOURCES.md Section 1: Energy Prices and Tariffs
 # UPDATED 2025-12-04: Aligned with Ofgem Energy Price Cap Q4 2024
 # Source: https://www.ofgem.gov.uk/energy-price-cap
 # Note: These are unit rates only (excluding standing charges)
@@ -207,6 +228,7 @@ energy_prices:
     electricity: 0.18  # Significant decrease (high renewable penetration)
 
 # Carbon Factors (kgCO2/kWh)
+# See AUTHORITATIVE_SOURCES.md Section 2: Carbon Emission Factors
 # UPDATED 2025-12-04: Aligned with DESNZ Greenhouse Gas Reporting Conversion Factors 2024
 # Source: https://www.gov.uk/government/publications/greenhouse-gas-reporting-conversion-factors-2024
 # Grid electricity projections from National Grid ESO Future Energy Scenarios 2025
@@ -222,11 +244,14 @@ carbon_factors:
     electricity: 0.050  # Near-zero grid - within NESO projection range (41-67 gCO₂/kWh)
 
 # Heat Pump Parameters
+# See AUTHORITATIVE_SOURCES.md Section 5: Heat Pump Parameters
 heat_pump:
   scop: 3.0  # Seasonal Coefficient of Performance
   design_flow_temps: [35, 45, 55, 65]  # °C
 
 # Heat Network Parameters
+# See AUTHORITATIVE_SOURCES.md Section 6: Heat Network Parameters
+# NOTE: current_penetration value (0.2%) may be outdated - UK heat networks now supply ~2-3% of heat
 heat_network:
   # Current penetration assumption (share of homes connected)
   current_penetration: 0.002  # 0.2%
@@ -238,6 +263,7 @@ heat_network:
   distribution_efficiency: 0.90  # 10% distribution losses
 
 # Financial Parameters
+# See AUTHORITATIVE_SOURCES.md Section 7: Financial Parameters
 financial:
   discount_rate: 0.035  # 3.5% real discount rate (HM Treasury Green Book)
   analysis_horizon_years: 20  # Project lifetime for NPV calculations
@@ -264,7 +290,8 @@ financial:
       heat_network: 0.07
 
 # Uncertainty Parameters
-# Based on EPC measurement error and prebound effect research
+# See AUTHORITATIVE_SOURCES.md Section 8: Methodological Adjustments
+# Based on EPC measurement error and prebound effect research (Crawley et al. 2019)
 uncertainty:
   # Demand uncertainty range (±% around nominal)
   demand_error_low: -0.20  # -20%
@@ -280,6 +307,7 @@ uncertainty:
     low_rating: 8.0    # SAP <55
 
 # EPC Anomaly Detection Thresholds
+# See AUTHORITATIVE_SOURCES.md Section 9: EPC Data Validation Thresholds
 anomaly_detection:
   # Roof insulation threshold (mm) - below this is considered poorly insulated
   roof_insulation_threshold_mm: 100
