@@ -752,7 +752,7 @@ def generate_reports(archetype_results, scenario_results, subsidy_results=None, 
         except Exception as e:
             console.print(f"[yellow]⚠ Could not generate subsidy chart: {e}[/yellow]")
 
-    # 5. Text Summary Report
+    # 5. Text and Markdown Summary Reports
     if archetype_results and scenario_results:
         try:
             # Use real pathway summary from spatial analysis if available
@@ -772,7 +772,9 @@ def generate_reports(archetype_results, scenario_results, subsidy_results=None, 
                 })
 
             generator.generate_summary_report(archetype_results, scenario_results, tier_summary)
-            reports_created.append("✓ Executive summary report")
+            reports_created.append("✓ Executive summary report (text)")
+            generator.generate_markdown_summary(archetype_results, scenario_results, tier_summary)
+            reports_created.append("✓ Executive summary report (Markdown)")
         except Exception as e:
             console.print(f"[yellow]⚠ Could not generate summary report: {e}[/yellow]")
 
@@ -813,7 +815,8 @@ def generate_reports(archetype_results, scenario_results, subsidy_results=None, 
             if "chart" in report.lower() or "histogram" in report.lower():
                 analysis_logger.add_output("data/outputs/figures/", "png", report.replace("✓ ", ""))
         analysis_logger.add_output("data/outputs/heat_street_analysis_results.xlsx", "xlsx", "Comprehensive Excel workbook")
-        analysis_logger.add_output("data/outputs/reports/executive_summary.txt", "report", "Executive summary")
+        analysis_logger.add_output("data/outputs/reports/executive_summary.txt", "report", "Executive summary (text)")
+        analysis_logger.add_output("data/outputs/reports/executive_summary.md", "report", "Executive summary (Markdown)")
         analysis_logger.complete_phase(success=True, message=f"{len(reports_created)} reports and visualizations generated")
 
     return True
