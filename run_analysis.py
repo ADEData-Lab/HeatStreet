@@ -6,6 +6,7 @@ with interactive prompts and progress indicators.
 """
 
 import os
+import shutil
 import sys
 from pathlib import Path
 from loguru import logger
@@ -936,6 +937,52 @@ def generate_additional_reports(df_raw, df_validated, validation_report, archety
     return True
 
 
+def package_dashboard_assets(analysis_logger: AnalysisLogger = None):
+    """Ensure the interactive dashboard is available in outputs and logged."""
+    console.print()
+    console.print(Panel("[bold]Phase 6: Dashboard Packaging[/bold]", border_style="blue"))
+    console.print()
+
+    if analysis_logger:
+        analysis_logger.start_phase(
+            "Dashboard Packaging",
+            "Copy the offline dashboard into the outputs directory for easy access",
+        )
+
+    dashboard_source = Path("heat-street-dashboard.html")
+    outputs_dir = Path("data/outputs")
+    outputs_dir.mkdir(parents=True, exist_ok=True)
+    dashboard_target = outputs_dir / dashboard_source.name
+
+    try:
+        if dashboard_source.exists():
+            shutil.copy2(dashboard_source, dashboard_target)
+            console.print(f"[green]✓[/green] Dashboard available at {dashboard_target}")
+            if analysis_logger:
+                analysis_logger.add_output(
+                    str(dashboard_target),
+                    "html",
+                    "Offline interactive dashboard copied to outputs",
+                )
+                analysis_logger.complete_phase(success=True, message="Dashboard copied to outputs")
+        else:
+            console.print(
+                f"[yellow]⚠ Dashboard source not found at {dashboard_source}. Skipping copy.[/yellow]"
+            )
+            if analysis_logger:
+                analysis_logger.complete_phase(
+                    success=False,
+                    message=f"Dashboard missing at {dashboard_source}",
+                )
+    except Exception as e:
+        console.print(f"[yellow]⚠ Could not package dashboard: {e}[/yellow]")
+        if analysis_logger:
+            analysis_logger.complete_phase(success=False, message=f"Error: {e}")
+        return False
+
+    return True
+
+
 def check_existing_data():
     """Check if previously downloaded data exists."""
     raw_csv = DATA_RAW_DIR / "epc_london_raw.csv"
@@ -1133,6 +1180,9 @@ def main():
 
     # Phase 5.5: Additional Reports
     generate_additional_reports(df_raw, df_adjusted, validation_report, archetype_results, scenario_results, analysis_logger)
+
+    # Phase 6: Package dashboard
+    package_dashboard_assets(analysis_logger)
 
     # Complete
     elapsed = time.time() - start_time
