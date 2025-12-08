@@ -5,7 +5,6 @@ Analyzes property locations relative to existing/planned heat networks.
 Implements Section 3.3 and 4.1 of the project specification.
 """
 
-import io
 import pandas as pd
 import geopandas as gpd
 from shapely.geometry import Point
@@ -589,14 +588,6 @@ class HeatNetworkAnalyzer:
             plt.close(fig)
 
         try:
-            import folium
-            from folium import plugins
-            from PIL import Image
-            from reportlab.lib.pagesizes import A4
-            from reportlab.pdfgen import canvas
-            from reportlab.lib.utils import ImageReader
-            from datetime import datetime
-
             logger.info("Creating heat network tier map...")
 
             if output_path is None:
@@ -612,96 +603,112 @@ class HeatNetworkAnalyzer:
             center_lat = properties.geometry.y.mean()
             center_lon = properties.geometry.x.mean()
 
-            # Create map
-            m = folium.Map(
-                location=[center_lat, center_lon],
-                zoom_start=12,
-                tiles=None
-            )
-            folium.TileLayer('CartoDB Positron', name='Light basemap', control=False).add_to(m)
-            folium.TileLayer('OpenStreetMap', name='OSM fallback').add_to(m)
-
-            # Color scheme for tiers
-            tier_colors = {
-                1: 'darkred',
-                2: 'red',
-                3: 'orange',
-                4: 'yellow',
-                5: 'lightgreen'
-            }
-
-            # Add properties as markers (sample if too many)
-            sample_size = min(1000, len(properties))
-            if len(properties) > sample_size:
-                logger.info(f"Sampling {sample_size} properties for map visualization")
-                properties_sample = properties.sample(sample_size)
-            else:
-                properties_sample = properties
-
-            for idx, row in properties_sample.iterrows():
-                if row.geometry is not None:
-                    tier_num = row.get('tier_number', 5)
-                    folium.CircleMarker(
-                        location=[row.geometry.y, row.geometry.x],
-                        radius=3,
-                        color=tier_colors.get(tier_num, 'gray'),
-                        fill=True,
-                        fillOpacity=0.6,
-                        popup=f"Tier {tier_num}: {row.get('heat_network_tier', 'Unknown')}"
-                    ).add_to(m)
-
-            # Add legend
-            legend_html = '''
-            <div style="position: fixed; bottom: 50px; left: 50px; width: 300px; height: 180px;
-                        background-color: white; border:2px solid grey; z-index:9999; font-size:14px;
-                        padding: 10px">
-            <p><strong>Heat Network Tiers</strong></p>
-            <p><i class="fa fa-circle" style="color:darkred"></i> Tier 1: Adjacent to existing network</p>
-            <p><i class="fa fa-circle" style="color:red"></i> Tier 2: Within planned HNZ</p>
-            <p><i class="fa fa-circle" style="color:orange"></i> Tier 3: High heat density</p>
-            <p><i class="fa fa-circle" style="color:yellow"></i> Tier 4: Moderate heat density</p>
-            <p><i class="fa fa-circle" style="color:lightgreen"></i> Tier 5: Low heat density</p>
-            </div>
-            '''
-            m.get_root().html.add_child(folium.Element(legend_html))
-
-            # Save map
-            m.save(str(output_path))
-            logger.info(f"Map saved to: {output_path}")
-
-            # Render to PNG if requested
+            # Prepare image/pdf output paths
             if image_output_path is None:
                 image_output_path = output_path.with_suffix('.png')
-
-            if image_output_path:
-                image_output_path.parent.mkdir(parents=True, exist_ok=True)
-                png_generated = False
-                try:
-                    png_data = m._to_png(delay=3)
-                    Image.open(io.BytesIO(png_data)).save(image_output_path)
-                    png_generated = True
-                    logger.info(f"Map image saved to: {image_output_path}")
-                except ImportError:
-                    logger.warning(
-                        "Unable to render map PNG because rendering dependencies are missing. "
-                        "Install folium with map rendering extras (selenium) to enable image export."
-                    )
-                except Exception as e:
-                    logger.error(f"Error rendering map image: {e}")
-
-                if not png_generated:
-                    try:
-                        _generate_static_map_image(properties, image_output_path)
-                        logger.info(
-                            f"Fallback static map image saved to: {image_output_path}"
-                        )
-                        png_generated = True
-                    except Exception as e:
-                        logger.error(f"Error creating fallback map image: {e}")
-
-            # Generate PDF layout if requested
             if pdf_output_path is None:
                 pdf_output_path = output_path.with_suffix('.pdf')
+
+            png_generated = False
+
+            try:
+                import folium
+
+                m = folium.Map(
+                    location=[center_lat, center_lon],
+                    zoom_start=12,
+                    tiles=None
+                )
+                folium.TileLayer(
+                    tiles="https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+                    attr="&copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a> contributors"
+                         " &copy; <a href='https://carto.com/attributions'>CARTO</a>",
+                    name='CartoDB Positron',
+                    control=False
+                ).add_to(m)
+                folium.TileLayer('OpenStreetMap', name='OSM fallback').add_to(m)
+
+                # Color scheme for tiers
+                tier_colors = {
+                    1: 'darkred',
+                    2: 'red',
+                    3: 'orange',
+                    4: 'yellow',
+                    5: 'lightgreen'
+                }
+
+                # Add properties as markers (sample if too many)
+                sample_size = min(1000, len(properties))
+                if len(properties) > sample_size:
+                    logger.info(f"Sampling {sample_size} properties for map visualization")
+                    properties_sample = properties.sample(sample_size)
+                else:
+                    properties_sample = properties
+
+                for idx, row in properties_sample.iterrows():
+                    if row.geometry is not None:
+                        tier_num = row.get('tier_number', 5)
+                        folium.CircleMarker(
+                            location=[row.geometry.y, row.geometry.x],
+                            radius=3,
+                            color=tier_colors.get(tier_num, 'gray'),
+                            fill=True,
+                            fillOpacity=0.6,
+                            popup=f"Tier {tier_num}: {row.get('heat_network_tier', 'Unknown')}"
+                        ).add_to(m)
+
+                # Add legend
+                legend_html = '''
+                <div style="position: fixed; bottom: 50px; left: 50px; width: 300px; height: 180px;
+                            background-color: white; border:2px solid grey; z-index:9999; font-size:14px;
+                            padding: 10px">
+                <p><strong>Heat Network Tiers</strong></p>
+                <p><i class="fa fa-circle" style="color:darkred"></i> Tier 1: Adjacent to existing network</p>
+                <p><i class="fa fa-circle" style="color:red"></i> Tier 2: Within planned HNZ</p>
+                <p><i class="fa fa-circle" style="color:orange"></i> Tier 3: High heat density</p>
+                <p><i class="fa fa-circle" style="color:yellow"></i> Tier 4: Moderate heat density</p>
+                <p><i class="fa fa-circle" style="color:lightgreen"></i> Tier 5: Low heat density</p>
+                </div>
+                '''
+                m.get_root().html.add_child(folium.Element(legend_html))
+
+                # Save map
+                m.save(str(output_path))
+                logger.info(f"Map saved to: {output_path}")
+
+                # Render to PNG if requested
+                if image_output_path:
+                    image_output_path.parent.mkdir(parents=True, exist_ok=True)
+                    try:
+                        png_data = m._to_png(delay=3)
+                        image_output_path.write_bytes(png_data)
+                        png_generated = True
+                        logger.info(f"Map image saved to: {image_output_path}")
+                    except Exception as e:
+                        logger.warning(
+                            "Unable to render map PNG from folium directly. "
+                            "Falling back to static renderer."
+                        )
+                        logger.debug(f"folium _to_png error: {e}")
+
+            except ImportError:
+                logger.warning("folium not available; skipping interactive map and HTML export")
+            except Exception as e:
+                logger.error(f"Error creating interactive map: {e}")
+
+            if not png_generated and image_output_path:
+                try:
+                    _generate_static_map_image(properties, image_output_path)
+                    logger.info(
+                        f"Fallback static map image saved to: {image_output_path}"
+                    )
+                    png_generated = True
+                except ImportError:
+                    logger.warning(
+                        "matplotlib not available; unable to create fallback map image."
+                    )
+                except Exception as e:
+                    logger.error(f"Error creating fallback map image: {e}")
 
             if pdf_output_path:
                 pdf_output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -709,6 +716,11 @@ class HeatNetworkAnalyzer:
                     if not image_output_path or not image_output_path.exists():
                         logger.warning("Map image not available; skipping PDF export.")
                     else:
+                        from reportlab.lib.pagesizes import A4
+                        from reportlab.pdfgen import canvas
+                        from reportlab.lib.utils import ImageReader
+                        from datetime import datetime
+
                         c = canvas.Canvas(str(pdf_output_path), pagesize=A4)
                         width, height = A4
 
@@ -745,10 +757,8 @@ class HeatNetworkAnalyzer:
                 except Exception as e:
                     logger.error(f"Error creating PDF layout: {e}")
 
-        except ImportError:
-            logger.warning("folium not available, skipping map creation")
         except Exception as e:
-            logger.error(f"Error creating map: {e}")
+            logger.error(f"Error creating map outputs: {e}")
 
     def run_complete_analysis(
         self,
