@@ -138,33 +138,103 @@ def run_analysis_phase(args):
 
 
 def run_modeling_phase(args):
-    """Run scenario modeling phase."""
+    """Run comprehensive modeling and analysis phase."""
     logger.info("\n" + "="*70)
-    logger.info("PHASE 4: SCENARIO MODELING")
+    logger.info("PHASE 4: COMPREHENSIVE MODELING & ANALYSIS")
     logger.info("="*70)
 
     from config.config import DATA_PROCESSED_DIR
     import pandas as pd
+    from src.analysis.fabric_analysis import FabricAnalyzer
+    from src.analysis.retrofit_packages import RetrofitPackageAnalyzer
+    from src.modeling.pathway_model import PathwayModeler
+    from src.analysis.load_profiles import LoadProfileGenerator
+    from src.analysis.penetration_sensitivity import PenetrationSensitivityAnalyzer
+    from src.analysis.fabric_tipping_point import FabricTippingPointAnalyzer
 
     input_file = DATA_PROCESSED_DIR / "epc_london_validated.csv"
     if not input_file.exists():
-        logger.error("Validated data not found. Run cleaning phase first.")
-        return None
+        # Try parquet
+        input_file = DATA_PROCESSED_DIR / "epc_london_validated.parquet"
+        if not input_file.exists():
+            logger.error("Validated data not found. Run cleaning phase first.")
+            return None
 
-    df = pd.read_csv(input_file, low_memory=False)
+    logger.info(f"Loading data from: {input_file}")
+    if input_file.suffix == '.parquet':
+        df = pd.read_parquet(input_file)
+    else:
+        df = pd.read_csv(input_file, low_memory=False)
 
+    logger.info(f"Loaded {len(df):,} properties")
+
+    results = {}
+
+    # ---- Fabric Analysis (Section 1 & 7) ----
+    logger.info("\n📊 Running fabric analysis...")
+    fabric_analyzer = FabricAnalyzer()
+    fabric_results = fabric_analyzer.run_full_analysis(df)
+    results['fabric'] = fabric_results
+    logger.info("✓ Fabric analysis complete")
+
+    # ---- Retrofit Packages Analysis (Section 2, 3, 4) ----
+    logger.info("\n📦 Running retrofit packages analysis...")
+    package_analyzer = RetrofitPackageAnalyzer()
+    package_results = package_analyzer.analyze_all_packages(df)
+    package_summary = package_analyzer.generate_package_summary(package_results)
+    window_comparison = package_analyzer.generate_window_comparison()
+    package_analyzer.export_results(package_results, package_summary, window_comparison)
+    results['packages'] = {'results': package_results, 'summary': package_summary}
+    logger.info("✓ Retrofit packages analysis complete")
+
+    # ---- Fabric Tipping Point (Section 8) ----
+    logger.info("\n📈 Running fabric tipping point analysis...")
+    tipping_analyzer = FabricTippingPointAnalyzer()
+    tipping_curve, tipping_summary = tipping_analyzer.run_analysis(
+        typical_annual_heat_demand_kwh=15000
+    )
+    results['tipping_point'] = {'curve': tipping_curve, 'summary': tipping_summary}
+    logger.info("✓ Tipping point analysis complete")
+
+    # ---- Pathway Modeling (Section 5 & 6) ----
+    logger.info("\n🛤️  Running pathway modeling...")
+    pathway_modeler = PathwayModeler()
+    pathway_results = pathway_modeler.model_all_pathways(df)
+    pathway_summary = pathway_modeler.generate_pathway_summary(pathway_results)
+    pathway_modeler.export_results(pathway_results, pathway_summary)
+    results['pathways'] = {'results': pathway_results, 'summary': pathway_summary}
+    logger.info("✓ Pathway modeling complete")
+
+    # ---- Load Profiles (Section 9) ----
+    logger.info("\n⚡ Running load profile analysis...")
+    load_generator = LoadProfileGenerator()
+    load_profiles, load_summary = load_generator.generate_pathway_load_profiles(pathway_results)
+    load_generator.export_results(load_profiles, load_summary)
+    results['load_profiles'] = {'profiles': load_profiles, 'summary': load_summary}
+    logger.info("✓ Load profile analysis complete")
+
+    # ---- Penetration Sensitivity (Section 10) ----
+    logger.info("\n🔄 Running penetration sensitivity analysis...")
+    sensitivity_analyzer = PenetrationSensitivityAnalyzer()
+    sensitivity_results = sensitivity_analyzer.run_sensitivity_analysis(df)
+    sensitivity_analyzer.export_results(sensitivity_results)
+    results['sensitivity'] = sensitivity_results
+    logger.info("✓ Penetration sensitivity complete")
+
+    # ---- Original Scenario Modeling (for backwards compatibility) ----
+    logger.info("\n🎯 Running scenario modeling...")
     modeler = ScenarioModeler()
-
-    # Model all scenarios
     scenario_results = modeler.model_all_scenarios(df)
-
-    # Model subsidy sensitivity
     subsidy_results = modeler.model_subsidy_sensitivity(df, 'heat_pump')
-
     modeler.save_results()
-
+    results['scenarios'] = {'results': scenario_results, 'subsidy': subsidy_results}
     logger.info("✓ Scenario modeling complete")
-    return scenario_results, subsidy_results
+
+    logger.info("\n" + "="*70)
+    logger.info("✓ COMPREHENSIVE MODELING & ANALYSIS COMPLETE")
+    logger.info("="*70)
+
+    return results
 
 
 def run_spatial_phase(args):
