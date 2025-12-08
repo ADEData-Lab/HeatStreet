@@ -377,6 +377,116 @@ class ReportGenerator:
 
         logger.info(f"Summary report saved to: {output_path}")
 
+    def generate_markdown_summary(
+        self,
+        archetype_results: Dict,
+        scenario_results: Dict,
+        tier_summary: pd.DataFrame,
+        output_path: Optional[Path] = None,
+    ):
+        """
+        Generate a Markdown executive summary mirroring the text report content.
+
+        Args:
+            archetype_results: Results from archetype analysis
+            scenario_results: Results from scenario modeling
+            tier_summary: Heat network tier summary
+            output_path: Path to save Markdown report
+        """
+
+        logger.info("Generating Markdown summary report...")
+
+        if output_path is None:
+            output_path = DATA_OUTPUTS_DIR / "reports" / "executive_summary.md"
+
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        lines: List[str] = []
+
+        dashboard_tabs = [
+            ("Overview", "Key KPIs across the whole dataset including stock size and carbon impacts."),
+            ("Housing Stock", "EPC band mix, wall/roof construction, glazing, and heating system breakdowns."),
+            ("Scenarios", "Capital costs, CO₂ reductions, bill savings, and payback timing for the main pathways."),
+            ("Retrofit Readiness", "Insulation readiness, fabric-first findings, and emitter suitability insights."),
+            ("Cost-Benefit", "Cost curves, sensitivity bands, and tier-by-tier cost-benefit summaries."),
+            ("Boroughs", "Borough-level comparisons, including EPC band and readiness differences."),
+            ("Case Street", "Worked example street with micro-segmentation of homes and measures."),
+            ("Uncertainty", "Confidence bands and key modelling uncertainties to monitor."),
+            ("Grid & Climate", "Grid peak impacts, climate considerations, and load profiles."),
+            ("Policy", "Policy levers, data limitations, and recommended next steps."),
+        ]
+
+        # Header
+        lines.append("# Heat Street Project: Executive Summary")
+        lines.append("Edwardian Terraced Housing - London EPC Analysis")
+        lines.append("")
+
+        # Archetype Summary
+        lines.append("## 1. Property Archetype Characteristics")
+        if "epc_bands" in archetype_results:
+            lines.append("### Current EPC Band Distribution")
+            for band, count in archetype_results["epc_bands"]["frequency"].items():
+                pct = archetype_results["epc_bands"]["percentage"][band]
+                lines.append(f"- **Band {band}:** {count:,} properties ({pct:.1f}%)")
+            lines.append("")
+
+        if "sap_scores" in archetype_results:
+            lines.append("### SAP Score Statistics")
+            lines.append(f"- **Mean:** {archetype_results['sap_scores']['mean']:.1f}")
+            lines.append(f"- **Median:** {archetype_results['sap_scores']['median']:.1f}")
+            lines.append(
+                f"- **Range:** {archetype_results['sap_scores']['min']:.0f} – {archetype_results['sap_scores']['max']:.0f}"
+            )
+            lines.append("")
+
+        if "wall_construction" in archetype_results:
+            lines.append("### Wall Insulation")
+            lines.append(
+                f"- **Insulation rate:** {archetype_results['wall_construction']['insulation_rate']:.1f}%"
+            )
+            lines.append("")
+
+        # Scenario Results
+        lines.append("## 2. Decarbonization Scenario Analysis")
+        for scenario, results in scenario_results.items():
+            lines.append(f"### {scenario.upper()}")
+            lines.append(f"- **Total capital cost:** £{results['capital_cost_total']:,.0f}")
+            lines.append(f"- **Cost per property:** £{results['capital_cost_per_property']:,.0f}")
+            lines.append(
+                f"- **Annual CO₂ reduction:** {results['annual_co2_reduction_kg']/1000:,.0f} tonnes"
+            )
+            lines.append(f"- **Annual bill savings:** £{results['annual_bill_savings']:,.0f}")
+            if "average_payback_years" in results:
+                lines.append(f"- **Average payback:** {results['average_payback_years']:.1f} years")
+            lines.append("")
+
+        # Heat Network Tiers
+        lines.append("## 3. Heat Network Zone Classification")
+        if not tier_summary.empty:
+            lines.append("| Tier | Property Count | Percentage | Recommended Pathway |")
+            lines.append("| --- | ---: | ---: | --- |")
+            for _, row in tier_summary.iterrows():
+                lines.append(
+                    f"| {row['Tier']} | {int(row['Property Count']):,} | {row['Percentage']:.1f}% | {row['Recommended Pathway']} |"
+                )
+        else:
+            lines.append("No heat network tier data available.")
+
+        lines.append("")
+        lines.append("## 4. React Dashboard Coverage")
+        lines.append("This report aligns with the interactive dashboard. Each tab is represented below:")
+        for tab_name, description in dashboard_tabs:
+            lines.append(f"- **{tab_name}:** {description}")
+
+        lines.append("")
+        lines.append("---")
+        lines.append("Report generated automatically by the Heat Street analysis pipeline.")
+
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
+
+        logger.info(f"Markdown summary report saved to: {output_path}")
+
     def export_to_excel(
         self,
         archetype_results: Dict,
