@@ -5,6 +5,7 @@ Analyzes property locations relative to existing/planned heat networks.
 Implements Section 3.3 and 4.1 of the project specification.
 """
 
+import io
 import pandas as pd
 import geopandas as gpd
 from shapely.geometry import Point
@@ -519,7 +520,9 @@ class HeatNetworkAnalyzer:
     def create_heat_network_map(
         self,
         properties: gpd.GeoDataFrame,
-        output_path: Optional[Path] = None
+        output_path: Optional[Path] = None,
+        image_output_path: Optional[Path] = None,
+        pdf_output_path: Optional[Path] = None
     ):
         """
         Create an interactive map showing heat network tiers.
@@ -527,10 +530,72 @@ class HeatNetworkAnalyzer:
         Args:
             properties: GeoDataFrame with tier classifications
             output_path: Path to save map HTML
+            image_output_path: Optional path to save a rendered PNG of the map
+            pdf_output_path: Optional path to save a PDF layout including the map
         """
+
+        def _generate_static_map_image(properties_wgs84: gpd.GeoDataFrame, output_path: Path):
+            """Create a static PNG of the classified properties without folium.
+
+            This is used as a fallback when HTML-to-PNG rendering dependencies are
+            unavailable to ensure downstream PDF creation still has map imagery.
+            """
+
+            import matplotlib.pyplot as plt
+
+            tier_colors = {
+                1: "#8B0000",
+                2: "#D32F2F",
+                3: "#EF6C00",
+                4: "#FBC02D",
+                5: "#9CCC65",
+            }
+
+            if properties_wgs84.crs != "EPSG:4326":
+                properties_wgs84 = properties_wgs84.to_crs("EPSG:4326")
+
+            fig, ax = plt.subplots(figsize=(9, 10))
+            ax.set_facecolor("#f7f7f7")
+
+            margin = 0.02
+            bounds = properties_wgs84.total_bounds
+            x_min, y_min, x_max, y_max = bounds
+            x_range = x_max - x_min
+            y_range = y_max - y_min
+
+            ax.set_xlim(x_min - margin * x_range, x_max + margin * x_range)
+            ax.set_ylim(y_min - margin * y_range, y_max + margin * y_range)
+
+            for tier_num, color in tier_colors.items():
+                tier_subset = properties_wgs84[properties_wgs84.get("tier_number", 5) == tier_num]
+                if len(tier_subset) == 0:
+                    continue
+                tier_subset.plot(
+                    ax=ax,
+                    color=color,
+                    markersize=10,
+                    alpha=0.7,
+                    label=f"Tier {tier_num}"
+                )
+
+            ax.legend(title="Heat Network Tiers", loc="upper right")
+            ax.set_xlabel("Longitude")
+            ax.set_ylabel("Latitude")
+            ax.set_title("Heat Network Tier Map (static fallback)")
+            ax.grid(True, linestyle="--", linewidth=0.5, alpha=0.6)
+
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            fig.savefig(output_path, dpi=200, bbox_inches="tight")
+            plt.close(fig)
+
         try:
             import folium
             from folium import plugins
+            from PIL import Image
+            from reportlab.lib.pagesizes import A4
+            from reportlab.pdfgen import canvas
+            from reportlab.lib.utils import ImageReader
+            from datetime import datetime
 
             logger.info("Creating heat network tier map...")
 
@@ -551,8 +616,10 @@ class HeatNetworkAnalyzer:
             m = folium.Map(
                 location=[center_lat, center_lon],
                 zoom_start=12,
-                tiles='OpenStreetMap'
+                tiles=None
             )
+            folium.TileLayer('CartoDB Positron', name='Light basemap', control=False).add_to(m)
+            folium.TileLayer('OpenStreetMap', name='OSM fallback').add_to(m)
 
             # Color scheme for tiers
             tier_colors = {
@@ -601,6 +668,82 @@ class HeatNetworkAnalyzer:
             # Save map
             m.save(str(output_path))
             logger.info(f"Map saved to: {output_path}")
+
+            # Render to PNG if requested
+            if image_output_path is None:
+                image_output_path = output_path.with_suffix('.png')
+
+            if image_output_path:
+                image_output_path.parent.mkdir(parents=True, exist_ok=True)
+                png_generated = False
+                try:
+                    png_data = m._to_png(delay=3)
+                    Image.open(io.BytesIO(png_data)).save(image_output_path)
+                    png_generated = True
+                    logger.info(f"Map image saved to: {image_output_path}")
+                except ImportError:
+                    logger.warning(
+                        "Unable to render map PNG because rendering dependencies are missing. "
+                        "Install folium with map rendering extras (selenium) to enable image export."
+                    )
+                except Exception as e:
+                    logger.error(f"Error rendering map image: {e}")
+
+                if not png_generated:
+                    try:
+                        _generate_static_map_image(properties, image_output_path)
+                        logger.info(
+                            f"Fallback static map image saved to: {image_output_path}"
+                        )
+                        png_generated = True
+                    except Exception as e:
+                        logger.error(f"Error creating fallback map image: {e}")
+
+            # Generate PDF layout if requested
+            if pdf_output_path is None:
+                pdf_output_path = output_path.with_suffix('.pdf')
+
+            if pdf_output_path:
+                pdf_output_path.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    if not image_output_path or not image_output_path.exists():
+                        logger.warning("Map image not available; skipping PDF export.")
+                    else:
+                        c = canvas.Canvas(str(pdf_output_path), pagesize=A4)
+                        width, height = A4
+
+                        title_text = "Heat Network Tier Map"
+                        subtitle_text = f"Generated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
+
+                        c.setFont("Helvetica-Bold", 16)
+                        c.drawString(40, height - 60, title_text)
+                        c.setFont("Helvetica", 10)
+                        c.drawString(40, height - 80, subtitle_text)
+
+                        img_reader = ImageReader(str(image_output_path))
+                        img_width, img_height = img_reader.getSize()
+
+                        max_width = width - 80
+                        max_height = height - 160
+                        scale = min(max_width / img_width, max_height / img_height)
+
+                        display_width = img_width * scale
+                        display_height = img_height * scale
+
+                        x_pos = (width - display_width) / 2
+                        y_pos = (height - display_height) / 2 - 20
+
+                        c.drawImage(img_reader, x_pos, y_pos, width=display_width, height=display_height)
+                        c.showPage()
+                        c.save()
+                        logger.info(f"Map PDF saved to: {pdf_output_path}")
+                except ImportError:
+                    logger.warning(
+                        "Unable to generate PDF layout because reportlab is not installed. "
+                        "Install reportlab to enable PDF export."
+                    )
+                except Exception as e:
+                    logger.error(f"Error creating PDF layout: {e}")
 
         except ImportError:
             logger.warning("folium not available, skipping map creation")
