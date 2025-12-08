@@ -664,12 +664,12 @@ def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None):
                 analysis_logger.add_output("data/outputs/maps/heat_network_tiers.html", "html", "Interactive heat network tier map")
                 analysis_logger.complete_phase(success=True, message="Spatial analysis with heat network classification complete")
 
-            return pathway_summary
+            return properties_classified, pathway_summary
         else:
             console.print("[yellow]⚠ Spatial analysis could not complete[/yellow]")
             if analysis_logger:
                 analysis_logger.complete_phase(success=False, message="Spatial analysis could not complete")
-            return None
+            return None, None
 
     except ImportError as e:
         console.print()
@@ -688,14 +688,14 @@ def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None):
         console.print()
         if analysis_logger:
             analysis_logger.skip_phase("Spatial Analysis", "GDAL/geopandas not installed")
-        return None
+        return None, None
 
     except Exception as e:
         console.print(f"[yellow]⚠ Spatial analysis error: {e}[/yellow]")
         console.print("[cyan]Continuing without spatial analysis...[/cyan]")
         if analysis_logger:
             analysis_logger.complete_phase(success=False, message=f"Error: {e}")
-        return None
+        return None, None
 
 
 def generate_reports(archetype_results, scenario_results, subsidy_results=None, df_validated=None, pathway_summary=None, analysis_logger: AnalysisLogger = None):
@@ -1126,7 +1126,7 @@ def main():
     df_readiness, readiness_summary = analyze_retrofit_readiness(df_adjusted, analysis_logger)
 
     # Phase 4.5: Spatial Analysis (optional)
-    pathway_summary = run_spatial_analysis(df_adjusted, analysis_logger)
+    properties_with_tiers, pathway_summary = run_spatial_analysis(df_adjusted, analysis_logger)
 
     # Phase 5: Report
     generate_reports(archetype_results, scenario_results, subsidy_results, df_adjusted, pathway_summary, analysis_logger)
