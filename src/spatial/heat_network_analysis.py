@@ -5,6 +5,7 @@ Analyzes property locations relative to existing/planned heat networks.
 Implements Section 3.3 and 4.1 of the project specification.
 """
 
+import io
 import pandas as pd
 import geopandas as gpd
 from shapely.geometry import Point
@@ -519,7 +520,9 @@ class HeatNetworkAnalyzer:
     def create_heat_network_map(
         self,
         properties: gpd.GeoDataFrame,
-        output_path: Optional[Path] = None
+        output_path: Optional[Path] = None,
+        image_output_path: Optional[Path] = None,
+        pdf_output_path: Optional[Path] = None
     ):
         """
         Create an interactive map showing heat network tiers.
@@ -527,10 +530,17 @@ class HeatNetworkAnalyzer:
         Args:
             properties: GeoDataFrame with tier classifications
             output_path: Path to save map HTML
+            image_output_path: Optional path to save a rendered PNG of the map
+            pdf_output_path: Optional path to save a PDF layout including the map
         """
         try:
             import folium
             from folium import plugins
+            from PIL import Image
+            from reportlab.lib.pagesizes import A4
+            from reportlab.pdfgen import canvas
+            from reportlab.lib.utils import ImageReader
+            from datetime import datetime
 
             logger.info("Creating heat network tier map...")
 
@@ -551,7 +561,7 @@ class HeatNetworkAnalyzer:
             m = folium.Map(
                 location=[center_lat, center_lon],
                 zoom_start=12,
-                tiles='OpenStreetMap'
+                tiles='CartoDB positron'
             )
 
             # Color scheme for tiers
@@ -601,6 +611,70 @@ class HeatNetworkAnalyzer:
             # Save map
             m.save(str(output_path))
             logger.info(f"Map saved to: {output_path}")
+
+            # Render to PNG if requested
+            if image_output_path is None:
+                image_output_path = output_path.with_suffix('.png')
+
+            if image_output_path:
+                image_output_path.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    png_data = m._to_png(delay=3)
+                    Image.open(io.BytesIO(png_data)).save(image_output_path)
+                    logger.info(f"Map image saved to: {image_output_path}")
+                except ImportError as e:
+                    logger.warning(
+                        "Unable to render map PNG because rendering dependencies are missing. "
+                        "Install folium with map rendering extras (selenium) to enable image export."
+                    )
+                except Exception as e:
+                    logger.error(f"Error rendering map image: {e}")
+
+            # Generate PDF layout if requested
+            if pdf_output_path is None:
+                pdf_output_path = output_path.with_suffix('.pdf')
+
+            if pdf_output_path:
+                pdf_output_path.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    if not image_output_path or not image_output_path.exists():
+                        logger.warning("Map image not available; skipping PDF export.")
+                    else:
+                        c = canvas.Canvas(str(pdf_output_path), pagesize=A4)
+                        width, height = A4
+
+                        title_text = "Heat Network Tier Map"
+                        subtitle_text = f"Generated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
+
+                        c.setFont("Helvetica-Bold", 16)
+                        c.drawString(40, height - 60, title_text)
+                        c.setFont("Helvetica", 10)
+                        c.drawString(40, height - 80, subtitle_text)
+
+                        img_reader = ImageReader(str(image_output_path))
+                        img_width, img_height = img_reader.getSize()
+
+                        max_width = width - 80
+                        max_height = height - 160
+                        scale = min(max_width / img_width, max_height / img_height)
+
+                        display_width = img_width * scale
+                        display_height = img_height * scale
+
+                        x_pos = (width - display_width) / 2
+                        y_pos = (height - display_height) / 2 - 20
+
+                        c.drawImage(img_reader, x_pos, y_pos, width=display_width, height=display_height)
+                        c.showPage()
+                        c.save()
+                        logger.info(f"Map PDF saved to: {pdf_output_path}")
+                except ImportError:
+                    logger.warning(
+                        "Unable to generate PDF layout because reportlab is not installed. "
+                        "Install reportlab to enable PDF export."
+                    )
+                except Exception as e:
+                    logger.error(f"Error creating PDF layout: {e}")
 
         except ImportError:
             logger.warning("folium not available, skipping map creation")
