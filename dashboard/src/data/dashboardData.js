@@ -201,34 +201,36 @@ export const sensitivityData = [
 
 // Section 5.12: Grid Peak Load Data
 export const gridPeakData = [
-  { technology: 'Individual Heat Pumps', peakKW: 3.5, risk: 'High' },
-  { technology: 'Shared Ground Loops', peakKW: 2.8, risk: 'Medium' },
-  { technology: 'Heat Networks', peakKW: 0.5, risk: 'Low' }
+  { scenario: 'Baseline', peak: 520, average: 320 },
+  { scenario: 'Fabric Only', peak: 440, average: 270 },
+  { scenario: 'Heat Pump', peak: 310, average: 190 },
+  { scenario: 'Heat Network', peak: 80, average: 45 }
 ];
 
 // Section 5.13: Indoor Climate Data
 export const indoorClimateData = [
-  { metric: '<16°C', before: 18.5, after: 2.1 },
-  { metric: '16-18°C', before: 24.3, after: 8.2 },
-  { metric: '18-20°C', before: 32.1, after: 45.3 },
-  { metric: '20-22°C', before: 18.7, after: 38.9 },
-  { metric: '>22°C', before: 6.4, after: 5.5 }
+  { hour: '06:00', temperature: 17.5, humidity: 62 },
+  { hour: '09:00', temperature: 18.9, humidity: 58 },
+  { hour: '12:00', temperature: 19.6, humidity: 55 },
+  { hour: '15:00', temperature: 20.4, humidity: 53 },
+  { hour: '18:00', temperature: 20.1, humidity: 54 },
+  { hour: '21:00', temperature: 19.3, humidity: 57 }
 ];
 
 // Section 5.14: Cost Reduction Levers
 export const costLeversData = [
-  { lever: 'Shared ground loops', saving: 2100, difficulty: 'Medium' },
-  { lever: 'Supply chain optimisation', saving: 1800, difficulty: 'Low' },
-  { lever: 'Bulk procurement', saving: 1200, difficulty: 'Low' },
-  { lever: 'Standardised designs', saving: 800, difficulty: 'Low' },
-  { lever: 'Street-by-street delivery', saving: 200, difficulty: 'Medium' }
+  { lever: 'Shared ground loops', impact: 2100, difficulty: 'Medium' },
+  { lever: 'Supply chain optimisation', impact: 1800, difficulty: 'Low' },
+  { lever: 'Bulk procurement', impact: 1200, difficulty: 'Low' },
+  { lever: 'Standardised designs', impact: 800, difficulty: 'Low' },
+  { lever: 'Street-by-street delivery', impact: 200, difficulty: 'Medium' }
 ];
 
 // Section 5.15: Loft Insulation Categories
 export const loftInsulationData = [
-  { category: 'None', percentage: 22.8, needsWork: 'yes' },
-  { category: 'Partial (100-200mm)', percentage: 63.3, needsWork: 'yes' },
-  { category: 'Full (≥270mm)', percentage: 13.9, needsWork: 'no' }
+  { thickness: 'None', properties: 160000 },
+  { thickness: '100-200mm', properties: 440000 },
+  { thickness: '≥270mm', properties: 100000 }
 ];
 
 // Section 5.16: Cost-Benefit Optimisation Data
@@ -237,7 +239,7 @@ export const costBenefitTierData = [
     tier: 'Tier 1',
     tierLabel: 'Ready Now',
     properties: 56344,
-    pct: 8.0,
+    share: 8.0,
     fabricCost: 2150,
     totalCost: 15420,
     heatDemand: 108,
@@ -251,7 +253,7 @@ export const costBenefitTierData = [
     tier: 'Tier 2',
     tierLabel: 'Minor Work',
     properties: 178179,
-    pct: 25.3,
+    share: 25.3,
     fabricCost: 4280,
     totalCost: 20280,
     heatDemand: 125,
@@ -265,7 +267,7 @@ export const costBenefitTierData = [
     tier: 'Tier 3',
     tierLabel: 'Moderate Work',
     properties: 251438,
-    pct: 35.7,
+    share: 35.7,
     fabricCost: 7650,
     totalCost: 24650,
     heatDemand: 145,
@@ -279,7 +281,7 @@ export const costBenefitTierData = [
     tier: 'Tier 4',
     tierLabel: 'Major Work',
     properties: 162449,
-    pct: 23.1,
+    share: 23.1,
     fabricCost: 12840,
     totalCost: 29840,
     heatDemand: 162,
@@ -293,7 +295,7 @@ export const costBenefitTierData = [
     tier: 'Tier 5',
     tierLabel: 'Extensive Work',
     properties: 56073,
-    pct: 7.9,
+    share: 7.9,
     fabricCost: 18720,
     totalCost: 38720,
     heatDemand: 178,
@@ -307,20 +309,20 @@ export const costBenefitTierData = [
 
 // Cost Curve Data for Cost-Benefit Analysis
 export const costCurveData = [
-  { cost: 0, heatDemand: 250, comfort: 45, label: 'Baseline' },
-  { cost: 2150, heatDemand: 108, comfort: 94, label: 'Tier 1' },
-  { cost: 4280, heatDemand: 125, comfort: 88, label: 'Tier 2' },
-  { cost: 7650, heatDemand: 145, comfort: 78, label: 'Tier 3' },
-  { cost: 12840, heatDemand: 162, comfort: 68, label: 'Tier 4' },
-  { cost: 18720, heatDemand: 178, comfort: 58, label: 'Tier 5' }
+  { measure: 'Baseline', cost: 0, savings: 0 },
+  { measure: 'Tier 1', cost: 2150, savings: 620 },
+  { measure: 'Tier 2', cost: 4280, savings: 1080 },
+  { measure: 'Tier 3', cost: 7650, savings: 1420 },
+  { measure: 'Tier 4', cost: 12840, savings: 1675 },
+  { measure: 'Tier 5', cost: 18720, savings: 1810 }
 ];
 
 // Glazing Analysis Data for Housing Stock tab
 export const glazingData = [
-  { type: 'Single', percentage: 3.9, count: 27475 },
-  { type: 'Double', percentage: 81.2, count: 572041 },
-  { type: 'Triple', percentage: 0.1, count: 704 },
-  { type: 'Unknown', percentage: 14.8, count: 104263 }
+  { type: 'Single', share: 3.9, uValue: 4.8 },
+  { type: 'Double', share: 81.2, uValue: 2.0 },
+  { type: 'Triple', share: 0.1, uValue: 1.0 },
+  { type: 'Unknown', share: 14.8, uValue: 2.8 }
 ];
 
 // Summary Statistics (Derived)
