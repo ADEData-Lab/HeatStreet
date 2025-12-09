@@ -28,7 +28,7 @@ class AdditionalReports:
         df: pd.DataFrame,
         street_name: str = "Shakespeare Crescent",
         output_path: Optional[Path] = None
-    ) -> pd.DataFrame:
+    ) -> Tuple[pd.DataFrame, Dict]:
         """
         Extract and analyze data for a specific case street.
 
@@ -38,7 +38,7 @@ class AdditionalReports:
             output_path: Optional path to save extract
 
         Returns:
-            DataFrame containing case street properties
+            Tuple of (case street DataFrame, summary dictionary)
         """
         logger.info(f"Extracting data for case street: {street_name}")
 
@@ -51,7 +51,7 @@ class AdditionalReports:
 
         if len(case_street_df) == 0:
             logger.warning(f"No properties found on {street_name}")
-            return pd.DataFrame()
+            return pd.DataFrame(), {}
 
         logger.info(f"Found {len(case_street_df):,} properties on {street_name}")
 
@@ -67,7 +67,7 @@ class AdditionalReports:
             summary_path = output_path.parent / f"{output_path.stem}_summary.txt"
             self._save_case_street_summary(summary, summary_path)
 
-        return case_street_df
+        return case_street_df, summary
 
     def _calculate_case_street_summary(
         self,

@@ -2,20 +2,12 @@
 
 ## 📊 What Has Been Created
 
-I've created a comprehensive React dashboard and offline HTML version that addresses **all 12 client requirements** from CLIENT_QUESTIONS_VERIFICATION.md.
+A comprehensive React dashboard that addresses **all 12 client requirements** from CLIENT_QUESTIONS_VERIFICATION.md. The dashboard now ingests results directly from the latest `run_analysis.py` run via a generated `dashboard-data.json` file.
 
-### Files Created
+### Key Directories
 
-1. **`heat-street-dashboard.html`** (613 KB) - **Standalone offline version**
-   - Works completely offline
-   - No installation required
-   - All data embedded
-   - Open directly in any browser
-
-2. **`dashboard/`** directory - **Full React application**
-   - Source code for customization
-   - Development server for live editing
-   - Production build system
+- **`dashboard/`** – React application source, dev server, and production build system.
+- **`data/outputs/dashboard/dashboard-data.json`** – Auto-generated dataset from the analysis pipeline (also copied to `dashboard/public/dashboard-data.json` for the UI).
 
 ## 🎯 Client Requirements Coverage
 
@@ -38,32 +30,28 @@ I've created a comprehensive React dashboard and offline HTML version that addre
 
 ## 🚀 How to Use
 
-### Option 1: Open the Offline HTML (Easiest)
+### 1) Generate fresh dashboard data
+
+Run the full analysis to export the dashboard dataset and copy it into the React app:
 
 ```bash
-# Simply open in your browser
-start heat-street-dashboard.html  # Windows
-open heat-street-dashboard.html   # Mac
-xdg-open heat-street-dashboard.html  # Linux
+python run_analysis.py
+# dashboard-data.json will be written to data/outputs/dashboard/ and dashboard/public/
 ```
 
-Or double-click `heat-street-dashboard.html` in your file explorer.
-
-### Option 2: Run the React Development Server
+### 2) Run the React development server
 
 ```bash
 cd dashboard
 npm install  # Only needed first time
-npm run dev  # Start development server
-# Opens at http://localhost:5173
+npm run dev  # Starts http://localhost:5173 using the latest dashboard-data.json
 ```
 
-### Option 3: Build and Deploy
+### 3) Build for deployment
 
 ```bash
 cd dashboard
 npm run build  # Creates production build in dist/
-npm run build:offline  # Regenerates offline HTML
 ```
 
 ## 📱 Dashboard Structure
@@ -167,18 +155,9 @@ Eye-catching gradient cards showing:
 
 ### Updating Data
 
-Edit `dashboard/src/data/mockData.js` to update:
-- Property counts
-- Cost assumptions
-- Savings calculations
-- Sensitivity parameters
+Run `python run_analysis.py` to regenerate `dashboard-data.json` with the latest validated EPC data, scenario modelling, and spatial summaries. The JSON is copied automatically into `dashboard/public/` for the React app and `data/outputs/dashboard/` for archives.
 
-Then rebuild:
-```bash
-cd dashboard
-npm run build
-npm run build:offline
-```
+For mock/demo tweaks without rerunning the analysis, you can still adjust `dashboard/src/data/mockData.js`; these values are only used if the live dataset is unavailable.
 
 ### Styling Changes
 
@@ -197,7 +176,7 @@ Edit `dashboard/src/index.css` for:
 ## 📤 Sharing the Dashboard
 
 ### Email
-Attach `heat-street-dashboard.html` (613 KB)
+Zip and share the latest `dashboard/dist/` build (after running `npm run build`). Include the companion `dashboard-data.json` from `data/outputs/dashboard/` if you want recipients to view the newest analysis results offline.
 
 ### Cloud Storage
 Upload to Dropbox, Google Drive, OneDrive
@@ -210,7 +189,7 @@ Deploy `dashboard/dist/` to:
 - AWS S3
 
 ### Offline Presentations
-Copy to USB drive or local network share
+Copy the built `dist/` folder plus `dashboard-data.json` to a USB drive or local network share
 
 ## 🎓 Technical Details
 
@@ -227,8 +206,8 @@ Copy to USB drive or local network share
 - All modern browsers
 
 ### Performance
-- 613 KB total size (offline version)
-- Sub-second load time
+- Production build optimized by Vite
+- Data pulled from lightweight JSON (`dashboard-data.json`)
 - Smooth chart interactions
 - Responsive to window resize
 
@@ -255,16 +234,16 @@ Copy to USB drive or local network share
 ## 📞 Next Steps
 
 ### Immediate Use
-1. Open `heat-street-dashboard.html`
-2. Navigate through tabs
-3. Review all 12 sections
-4. Share with stakeholders
+1. Run `python run_analysis.py` to refresh `dashboard-data.json`
+2. Start the dev server with `npm run dev` inside `dashboard/`
+3. Navigate through tabs to review all 12 sections
+4. Share the built `dist/` folder (plus `dashboard-data.json`) with stakeholders
 
 ### Customization
-1. Update mock data with real values
+1. Update mock data for demos (live data comes from `dashboard-data.json`)
 2. Adjust colors/styling to brand
 3. Add additional charts if needed
-4. Rebuild offline version
+4. Rebuild production assets with `npm run build`
 
 ### Deployment
 1. Choose hosting platform
@@ -276,15 +255,14 @@ Copy to USB drive or local network share
 
 You now have:
 - ✅ **Comprehensive dashboard** covering all 12 client requirements
-- ✅ **Offline HTML version** ready to share (613 KB)
 - ✅ **React source code** for customization
-- ✅ **Interactive charts** for all analyses
+- ✅ **Interactive charts** for all analyses powered by the latest analysis outputs
 - ✅ **Professional design** suitable for stakeholder presentations
 
-The dashboard successfully addresses every requirement in CLIENT_QUESTIONS_VERIFICATION.md and provides an accessible, visual interface to all Heat Street analysis outputs.
+The dashboard successfully addresses every requirement in CLIENT_QUESTIONS_VERIFICATION.md and now pulls its visuals from the latest analysis outputs.
 
 ---
 
 **Generated:** 2025-12-08
 **Status:** ✅ Production Ready
-**Files:** heat-street-dashboard.html + dashboard/ directory
+**Files:** dashboard/ directory + data/outputs/dashboard/dashboard-data.json
