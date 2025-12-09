@@ -316,56 +316,64 @@
       "code": "E09000025",
       "count": 89234,
       "meanEPC": 62.1,
-      "energy": 238
+      "energy": 238,
+      "borough_name": "Newham"
     },
     {
       "borough": "Croydon",
       "code": "E09000008",
       "count": 76512,
       "meanEPC": 64.3,
-      "energy": 227
+      "energy": 227,
+      "borough_name": "Croydon"
     },
     {
       "borough": "Lambeth",
       "code": "E09000022",
       "count": 68947,
       "meanEPC": 63.8,
-      "energy": 230
+      "energy": 230,
+      "borough_name": "Lambeth"
     },
     {
       "borough": "Wandsworth",
       "code": "E09000032",
       "count": 64823,
       "meanEPC": 65.2,
-      "energy": 223
+      "energy": 223,
+      "borough_name": "Wandsworth"
     },
     {
       "borough": "Lewisham",
       "code": "E09000023",
       "count": 58392,
       "meanEPC": 63.4,
-      "energy": 232
+      "energy": 232,
+      "borough_name": "Lewisham"
     },
     {
       "borough": "Southwark",
       "code": "E09000028",
       "count": 52167,
       "meanEPC": 62.9,
-      "energy": 235
+      "energy": 235,
+      "borough_name": "Southwark"
     },
     {
       "borough": "Ealing",
       "code": "E09000009",
       "count": 48934,
       "meanEPC": 64.7,
-      "energy": 225
+      "energy": 225,
+      "borough_name": "Ealing"
     },
     {
       "borough": "Brent",
       "code": "E09000005",
       "count": 45621,
       "meanEPC": 63.2,
-      "energy": 233
+      "energy": 233,
+      "borough_name": "Brent"
     }
   ],
   "confidenceBandsData": [

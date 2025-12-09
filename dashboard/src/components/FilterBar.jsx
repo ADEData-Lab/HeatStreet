@@ -25,8 +25,8 @@ export default function FilterBar() {
         <select value={filters.borough} onChange={(e) => updateField('borough', e.target.value)}>
           <option value="all">All boroughs</option>
           {boroughOptions.map((item) => (
-            <option key={item.code || item.borough} value={item.borough}>
-              {item.borough}
+            <option key={item.code || item.borough_name || item.borough} value={item.borough_name || item.borough}>
+              {item.borough_name || item.borough}
             </option>
           ))}
         </select>

@@ -62,8 +62,9 @@ export function DashboardProvider({ children }) {
     const match = (value) => !search || String(value).toLowerCase().includes(search);
 
     const filteredBoroughs = (data.boroughData || []).filter((item) => {
-      const boroughMatch = filters.borough === 'all' || item.borough === filters.borough;
-      return boroughMatch && (match(item.borough) || match(item.code));
+      const name = item.borough_name || item.borough;
+      const boroughMatch = filters.borough === 'all' || name === filters.borough;
+      return boroughMatch && (match(name) || match(item.code));
     });
 
     const filteredScenarios = (data.scenarioData || []).filter((item) => {

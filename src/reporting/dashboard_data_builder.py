@@ -21,6 +21,42 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import json
 import pandas as pd
+
+BOROUGH_NAME_BY_CODE = {
+    "E09000001": "City of London",
+    "E09000002": "Barking and Dagenham",
+    "E09000003": "Barnet",
+    "E09000004": "Bexley",
+    "E09000005": "Brent",
+    "E09000006": "Bromley",
+    "E09000007": "Camden",
+    "E09000008": "Croydon",
+    "E09000009": "Ealing",
+    "E09000010": "Enfield",
+    "E09000011": "Greenwich",
+    "E09000012": "Hackney",
+    "E09000013": "Hammersmith and Fulham",
+    "E09000014": "Haringey",
+    "E09000015": "Harrow",
+    "E09000016": "Havering",
+    "E09000017": "Hillingdon",
+    "E09000018": "Hounslow",
+    "E09000019": "Islington",
+    "E09000020": "Kensington and Chelsea",
+    "E09000021": "Kingston upon Thames",
+    "E09000022": "Lambeth",
+    "E09000023": "Lewisham",
+    "E09000024": "Merton",
+    "E09000025": "Newham",
+    "E09000026": "Redbridge",
+    "E09000027": "Richmond upon Thames",
+    "E09000028": "Southwark",
+    "E09000029": "Sutton",
+    "E09000030": "Tower Hamlets",
+    "E09000031": "Waltham Forest",
+    "E09000032": "Wandsworth",
+    "E09000033": "Westminster",
+}
 import numpy as np
 from loguru import logger
 
@@ -361,10 +397,13 @@ class DashboardDataBuilder:
         borough_data = []
         df = borough_breakdown.reset_index()
         for _, row in df.iterrows():
+            code = str(row.get("LOCAL_AUTHORITY") or row.get("index") or "")
+            borough_name = BOROUGH_NAME_BY_CODE.get(code, row.get("LOCAL_AUTHORITY_NAME") or code)
             borough_data.append(
                 {
-                    "borough": row.get("LOCAL_AUTHORITY") or row.get("index"),
-                    "code": row.get("LOCAL_AUTHORITY") or row.get("index"),
+                    "borough": borough_name,
+                    "borough_name": borough_name,
+                    "code": code,
                     "count": int(row.get("property_count", 0)),
                     "meanEPC": float(row.get("mean_epc_rating", 0)),
                     "energy": float(row.get("mean_energy_kwh_m2_year", 0)),

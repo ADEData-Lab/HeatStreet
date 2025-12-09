@@ -13,7 +13,7 @@ export default function MapView() {
   const joined = boroughGeo
     .map((geo) => ({
       ...geo,
-      metrics: boroughs.find((b) => b.borough === geo.borough),
+      metrics: boroughs.find((b) => (b.borough_name || b.borough) === geo.borough),
     }))
     .filter((item) => item.metrics);
 
