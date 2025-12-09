@@ -522,7 +522,9 @@ class HeatNetworkAnalyzer:
         properties: gpd.GeoDataFrame,
         output_path: Optional[Path] = None,
         image_output_path: Optional[Path] = None,
-        pdf_output_path: Optional[Path] = None
+        pdf_output_path: Optional[Path] = None,
+        heat_networks: Optional[gpd.GeoDataFrame] = None,
+        heat_zones: Optional[gpd.GeoDataFrame] = None
     ):
         """
         Create an interactive map showing heat network tiers.
@@ -541,6 +543,7 @@ class HeatNetworkAnalyzer:
             from reportlab.pdfgen import canvas
             from reportlab.lib.utils import ImageReader
             from datetime import datetime
+            import matplotlib.pyplot as plt
 
         def _generate_static_map_image(properties_wgs84: gpd.GeoDataFrame, output_path: Path):
             """Create a static PNG of the classified properties without folium.
@@ -812,17 +815,67 @@ class HeatNetworkAnalyzer:
 
             if image_output_path:
                 image_output_path.parent.mkdir(parents=True, exist_ok=True)
+                image_created = False
                 try:
                     png_data = m._to_png(delay=3)
                     Image.open(io.BytesIO(png_data)).save(image_output_path)
                     logger.info(f"Map image saved to: {image_output_path}")
-                except ImportError as e:
+                    image_created = True
+                except ImportError:
                     logger.warning(
                         "Unable to render map PNG because rendering dependencies are missing. "
                         "Install folium with map rendering extras (selenium) to enable image export."
                     )
                 except Exception as e:
                     logger.error(f"Error rendering map image: {e}")
+
+                if not image_created:
+                    try:
+                        properties_plot = properties
+                        if properties_plot.crs != 'EPSG:4326':
+                            properties_plot = properties_plot.to_crs('EPSG:4326')
+
+                        _, ax = plt.subplots(figsize=(10, 10))
+
+                        if heat_zones is not None and len(heat_zones) > 0:
+                            zones_plot = heat_zones
+                            if zones_plot.crs != 'EPSG:4326':
+                                zones_plot = zones_plot.to_crs('EPSG:4326')
+                            zones_plot.plot(ax=ax, color='lightblue', alpha=0.3, label='Potential HNZ')
+
+                        if heat_networks is not None and len(heat_networks) > 0:
+                            networks_plot = heat_networks
+                            if networks_plot.crs != 'EPSG:4326':
+                                networks_plot = networks_plot.to_crs('EPSG:4326')
+                            networks_plot.plot(ax=ax, color='red', linewidth=1, alpha=0.5, label='Existing Network')
+
+                        tier_colors = {
+                            1: 'darkred',
+                            2: 'red',
+                            3: 'orange',
+                            4: 'gold',
+                            5: 'lightgreen'
+                        }
+
+                        properties_plot.plot(
+                            ax=ax,
+                            markersize=5,
+                            color=properties_plot['tier_number'].map(tier_colors),
+                            alpha=0.6,
+                            label='Properties'
+                        )
+
+                        ax.set_title('Heat Network Tiers (static rendering)')
+                        ax.set_xlabel('Longitude')
+                        ax.set_ylabel('Latitude')
+                        ax.legend(loc='lower left')
+                        plt.tight_layout()
+                        plt.savefig(image_output_path, dpi=150)
+                        plt.close()
+                        logger.info(f"Static map image saved to: {image_output_path}")
+                        image_created = True
+                    except Exception as e:
+                        logger.error(f"Error creating static map image: {e}")
 
             # Generate PDF layout if requested
             if pdf_output_path is None:
@@ -956,7 +1009,18 @@ class HeatNetworkAnalyzer:
 
             # Step 6: Create interactive map
             logger.info("\nStep 6: Creating interactive heat network tier map...")
-            self.create_heat_network_map(properties_classified)
+            map_output_path = DATA_OUTPUTS_DIR / "maps" / "heat_network_tiers.html"
+            image_output_path = map_output_path.with_suffix('.png')
+            pdf_output_path = map_output_path.with_suffix('.pdf')
+
+            self.create_heat_network_map(
+                properties_classified,
+                output_path=map_output_path,
+                image_output_path=image_output_path,
+                pdf_output_path=pdf_output_path,
+                heat_networks=heat_networks,
+                heat_zones=heat_zones
+            )
             logger.info("✓ Interactive map created")
 
             logger.info("\n" + "=" * 80)
@@ -1034,7 +1098,18 @@ def main():
         logger.info(f"Pathway summary saved to: {pathway_file}")
 
         # Create map
-        analyzer.create_heat_network_map(properties_classified)
+        map_output_path = DATA_OUTPUTS_DIR / "maps" / "heat_network_tiers.html"
+        image_output_path = map_output_path.with_suffix('.png')
+        pdf_output_path = map_output_path.with_suffix('.pdf')
+
+        analyzer.create_heat_network_map(
+            properties_classified,
+            output_path=map_output_path,
+            image_output_path=image_output_path,
+            pdf_output_path=pdf_output_path,
+            heat_networks=heat_networks,
+            heat_zones=heat_zones
+        )
 
         logger.info("Spatial analysis complete!")
     else:
