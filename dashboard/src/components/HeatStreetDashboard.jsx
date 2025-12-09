@@ -4,27 +4,7 @@ import {
   ComposedChart, XAxis, YAxis, CartesianGrid, Tooltip, Legend,
   ResponsiveContainer, Cell, ReferenceLine
 } from 'recharts';
-import {
-  epcBandData,
-  epcComparisonData,
-  wallTypeData,
-  heatingSystemData,
-  scenarioData,
-  tierData,
-  retrofitReadinessData,
-  interventionData,
-  boroughData,
-  confidenceBandsData,
-  sensitivityData,
-  gridPeakData,
-  indoorClimateData,
-  costLeversData,
-  loftInsulationData,
-  costBenefitTierData,
-  costCurveData,
-  glazingData,
-  summaryStats
-} from '../data/dashboardData';
+import useDashboardData from '../data/useDashboardData';
 
 // Color Palette (Section 2)
 const COLORS = {
@@ -52,6 +32,29 @@ const TIER_COLORS = ['#40916c', '#52b788', '#f4a261', '#e76f51', '#d62828'];
 const PIE_COLORS = ['#1e3a5f', '#3d5a80', '#5c7a99', '#7b9ab3'];
 
 export default function HeatStreetDashboard() {
+  const { data, status } = useDashboardData();
+  const {
+    epcBandData = [],
+    epcComparisonData = [],
+    wallTypeData = [],
+    heatingSystemData = [],
+    scenarioData = [],
+    tierData = [],
+    retrofitReadinessData = [],
+    interventionData = [],
+    boroughData = [],
+    confidenceBandsData = [],
+    sensitivityData = [],
+    gridPeakData = [],
+    indoorClimateData = [],
+    costLeversData = [],
+    loftInsulationData = [],
+    costBenefitTierData = [],
+    costCurveData = [],
+    glazingData = [],
+    summaryStats = {},
+  } = data || {};
+
   const [activeTab, setActiveTab] = useState('overview');
 
   const tabs = [
@@ -66,6 +69,14 @@ export default function HeatStreetDashboard() {
     { id: 'grid', label: 'Grid & Climate' },
     { id: 'policy', label: 'Policy' },
   ];
+
+  if (status.loading) {
+    return (
+      <div style={styles.container}>
+        <div style={styles.loading}>Loading latest analysis data...</div>
+      </div>
+    );
+  }
 
   // Styles
   const styles = {
@@ -98,6 +109,17 @@ export default function HeatStreetDashboard() {
       opacity: 0.7,
       margin: '4px 0',
     },
+    statusBadge: {
+      display: 'inline-block',
+      backgroundColor: '#fff',
+      color: '#1e3a5f',
+      padding: '6px 10px',
+      borderRadius: '16px',
+      fontSize: '0.85rem',
+      fontWeight: 600,
+      marginTop: '10px',
+      boxShadow: '0 2px 6px rgba(0,0,0,0.1)',
+    },
     nav: {
       display: 'flex',
       justifyContent: 'center',
@@ -119,6 +141,14 @@ export default function HeatStreetDashboard() {
     navButtonActive: {
       backgroundColor: COLORS.primary,
       color: 'white',
+    },
+    loading: {
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      minHeight: '60vh',
+      fontSize: '1.1rem',
+      color: COLORS.muted,
     },
     navButtonInactive: {
       backgroundColor: 'transparent',
@@ -953,11 +983,15 @@ export default function HeatStreetDashboard() {
       <div style={styles.header}>
         <h1 style={styles.headerTitle}>Heat Street Project</h1>
         <p style={styles.headerSubtitle}>
-          Analysis of 704,483 Edwardian Terraced Properties Across London
+          Analysis of {summaryStats.totalProperties?.toLocaleString?.() || 'London Edwardian terraced'} properties
         </p>
         <p style={styles.headerMeta}>
           ADE Research for Danish Energy Agency & Danish Embassy • December 2025
         </p>
+        <div style={styles.statusBadge}>
+          {status.source === 'analysis' ? 'Live data from latest analysis run' : 'Using fallback dashboard sample data'}
+          {status.error ? ` (fallback reason: ${status.error})` : ''}
+        </div>
       </div>
 
       {/* Navigation */}

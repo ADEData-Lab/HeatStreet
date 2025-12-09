@@ -339,3 +339,25 @@ export const summaryStats = {
   heatDemandReduction: 37.4,
   readyOrNearReady: 33.3
 };
+
+export const defaultDashboardData = {
+  epcBandData,
+  epcComparisonData,
+  wallTypeData,
+  heatingSystemData,
+  scenarioData,
+  tierData,
+  retrofitReadinessData,
+  interventionData,
+  boroughData,
+  confidenceBandsData,
+  sensitivityData,
+  gridPeakData,
+  indoorClimateData,
+  costLeversData,
+  loftInsulationData,
+  costBenefitTierData,
+  costCurveData,
+  glazingData,
+  summaryStats,
+};

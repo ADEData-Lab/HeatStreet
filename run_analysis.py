@@ -848,7 +848,7 @@ def generate_additional_reports(df_raw, df_validated, validation_report, archety
     try:
         console.print("[cyan]Extracting Shakespeare Crescent data...[/cyan]")
         case_street_path = output_dir / "shakespeare_crescent_extract.csv"
-        case_street_df = reporter.extract_case_street(
+        case_street_df, case_street_summary = reporter.extract_case_street(
             df_validated,
             street_name="Shakespeare Crescent",
             output_path=case_street_path
@@ -859,6 +859,7 @@ def generate_additional_reports(df_raw, df_validated, validation_report, archety
             console.print("[yellow]  No properties found on Shakespeare Crescent[/yellow]")
     except Exception as e:
         console.print(f"[yellow]⚠ Could not generate case street extract: {e}[/yellow]")
+        case_street_df, case_street_summary = None, None
 
     # 2. Borough-level Breakdown
     try:
@@ -871,6 +872,7 @@ def generate_additional_reports(df_raw, df_validated, validation_report, archety
         reports_created.append(f"✓ Borough breakdown ({len(borough_df)} boroughs)")
     except Exception as e:
         console.print(f"[yellow]⚠ Could not generate borough breakdown: {e}[/yellow]")
+        borough_df = None
 
     # 3. Data Quality Report
     try:
@@ -934,11 +936,24 @@ def generate_additional_reports(df_raw, df_validated, validation_report, archety
         analysis_logger.add_output("data/outputs/data_quality_report.txt", "report", "Data quality assessment")
         analysis_logger.complete_phase(success=True, message=f"{len(reports_created)} additional specialized reports generated")
 
-    return True
+    return {
+        "case_street_df": case_street_df,
+        "case_street_summary": case_street_summary,
+        "borough_breakdown": borough_df,
+    }
 
 
-def package_dashboard_assets(analysis_logger: AnalysisLogger = None):
-    """Ensure the interactive dashboard is available in outputs and logged."""
+def package_dashboard_assets(
+    archetype_results,
+    scenario_results,
+    readiness_summary,
+    pathway_summary=None,
+    additional_reports=None,
+    subsidy_results=None,
+    df_validated=None,
+    analysis_logger: AnalysisLogger = None,
+):
+    """Export dashboard JSON data into outputs and the React app."""
     console.print()
     console.print(Panel("[bold]Phase 6: Dashboard Packaging[/bold]", border_style="blue"))
     console.print()
@@ -946,34 +961,45 @@ def package_dashboard_assets(analysis_logger: AnalysisLogger = None):
     if analysis_logger:
         analysis_logger.start_phase(
             "Dashboard Packaging",
-            "Copy the offline dashboard into the outputs directory for easy access",
+            "Export latest analysis results for the React dashboard",
         )
 
-    dashboard_source = Path("heat-street-dashboard.html")
-    outputs_dir = Path("data/outputs")
-    outputs_dir.mkdir(parents=True, exist_ok=True)
-    dashboard_target = outputs_dir / dashboard_source.name
-
     try:
-        if dashboard_source.exists():
-            shutil.copy2(dashboard_source, dashboard_target)
-            console.print(f"[green]✓[/green] Dashboard available at {dashboard_target}")
-            if analysis_logger:
-                analysis_logger.add_output(
-                    str(dashboard_target),
-                    "html",
-                    "Offline interactive dashboard copied to outputs",
-                )
-                analysis_logger.complete_phase(success=True, message="Dashboard copied to outputs")
-        else:
-            console.print(
-                f"[yellow]⚠ Dashboard source not found at {dashboard_source}. Skipping copy.[/yellow]"
+        from src.reporting.dashboard_data_builder import DashboardDataBuilder
+
+        builder = DashboardDataBuilder()
+        case_summary = (additional_reports or {}).get("case_street_summary") if additional_reports else None
+        borough_breakdown = (additional_reports or {}).get("borough_breakdown") if additional_reports else None
+
+        dataset = builder.build_dataset(
+            archetype_results,
+            scenario_results,
+            readiness_summary,
+            pathway_summary,
+            borough_breakdown,
+            case_summary,
+            subsidy_results,
+            df_validated,
+        )
+
+        dataset_path = builder.write_dataset(dataset)
+
+        # Copy into dashboard public assets so the React app loads latest data
+        public_dir = Path("dashboard/public")
+        public_dir.mkdir(parents=True, exist_ok=True)
+        public_dataset = public_dir / "dashboard-data.json"
+        shutil.copy2(dataset_path, public_dataset)
+
+        console.print(f"[green]✓[/green] Dashboard data saved to {dataset_path}")
+        console.print(f"[green]✓[/green] React dashboard updated at {public_dataset}")
+
+        if analysis_logger:
+            analysis_logger.add_output(
+                str(dataset_path),
+                "json",
+                "Dashboard dataset for React UI",
             )
-            if analysis_logger:
-                analysis_logger.complete_phase(
-                    success=False,
-                    message=f"Dashboard missing at {dashboard_source}",
-                )
+            analysis_logger.complete_phase(success=True, message="Dashboard data exported")
     except Exception as e:
         console.print(f"[yellow]⚠ Could not package dashboard: {e}[/yellow]")
         if analysis_logger:
@@ -1179,10 +1205,26 @@ def main():
     generate_reports(archetype_results, scenario_results, subsidy_results, df_adjusted, pathway_summary, analysis_logger)
 
     # Phase 5.5: Additional Reports
-    generate_additional_reports(df_raw, df_adjusted, validation_report, archetype_results, scenario_results, analysis_logger)
+    additional_outputs = generate_additional_reports(
+        df_raw,
+        df_adjusted,
+        validation_report,
+        archetype_results,
+        scenario_results,
+        analysis_logger,
+    )
 
     # Phase 6: Package dashboard
-    package_dashboard_assets(analysis_logger)
+    package_dashboard_assets(
+        archetype_results,
+        scenario_results,
+        readiness_summary,
+        pathway_summary,
+        additional_outputs,
+        subsidy_results,
+        df_adjusted,
+        analysis_logger,
+    )
 
     # Complete
     elapsed = time.time() - start_time
