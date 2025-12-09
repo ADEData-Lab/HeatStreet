@@ -41,6 +41,8 @@ This dashboard provides a complete analysis of 704,292 Edwardian terraced proper
    npm run build
    ```
 
+   > ℹ️ **Note on build warnings:** Vite may print a message about some chunks being larger than 500 kB after minification. This is a warning only—the build still succeeds. It appears because the bundled dashboard code and default data are large. If you want to remove the warning, you can either add manual code-splitting (e.g., lazy-load heavier tabs) or raise `build.chunkSizeWarningLimit` in `vite.config.js`.
+
 ## 📊 Dashboard Features
 
 ### Navigation
