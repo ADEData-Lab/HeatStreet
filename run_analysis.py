@@ -962,7 +962,23 @@ def package_dashboard_assets(
     df_validated=None,
     analysis_logger: AnalysisLogger = None,
 ):
-    """Export dashboard JSON data into outputs and the React app."""
+    """Export dashboard JSON data into outputs and the React app.
+
+    This phase consolidates all analysis outputs into a single JSON file
+    that addresses all 12 CLIENT_QUESTIONS sections:
+    1. Fabric Detail Granularity
+    2. Retrofit Measures & Packages
+    3. Radiator Upsizing
+    4. Window Upgrades (Double vs Triple)
+    5. Payback Times
+    6. Pathways & Hybrid Scenarios
+    7. EPC Data Robustness (Anomalies & Uncertainty)
+    8. Fabric Tipping Point Curve
+    9. Load Profiles & System Impacts
+    10. Heat Network Penetration & Price Sensitivity
+    11. Tenure Filtering
+    12. Documentation & Tests
+    """
     console.print()
     console.print(Panel("[bold]Phase 6: Dashboard Packaging[/bold]", border_style="blue"))
     console.print()
@@ -975,10 +991,45 @@ def package_dashboard_assets(
 
     try:
         from src.reporting.dashboard_data_builder import DashboardDataBuilder
+        import pandas as pd
 
         builder = DashboardDataBuilder()
         case_summary = (additional_reports or {}).get("case_street_summary") if additional_reports else None
         borough_breakdown = (additional_reports or {}).get("borough_breakdown") if additional_reports else None
+
+        # Load additional data files if they exist
+        load_profile_summary = None
+        tipping_point_curve = None
+        retrofit_packages_summary = None
+
+        outputs_dir = Path("data/outputs")
+
+        # Load load profiles summary (Section 9)
+        load_profiles_file = outputs_dir / "pathway_load_profile_summary.csv"
+        if load_profiles_file.exists():
+            try:
+                load_profile_summary = pd.read_csv(load_profiles_file)
+                console.print(f"[green]✓[/green] Loaded load profile summary")
+            except Exception as e:
+                logger.debug(f"Could not load load profiles: {e}")
+
+        # Load tipping point curve (Section 8)
+        tipping_point_file = outputs_dir / "fabric_tipping_point_curve.csv"
+        if tipping_point_file.exists():
+            try:
+                tipping_point_curve = pd.read_csv(tipping_point_file)
+                console.print(f"[green]✓[/green] Loaded fabric tipping point curve")
+            except Exception as e:
+                logger.debug(f"Could not load tipping point curve: {e}")
+
+        # Load retrofit packages summary (Section 2, 3, 5)
+        retrofit_packages_file = outputs_dir / "retrofit_packages_summary.csv"
+        if retrofit_packages_file.exists():
+            try:
+                retrofit_packages_summary = pd.read_csv(retrofit_packages_file)
+                console.print(f"[green]✓[/green] Loaded retrofit packages summary")
+            except Exception as e:
+                logger.debug(f"Could not load retrofit packages: {e}")
 
         dataset = builder.build_dataset(
             archetype_results,
@@ -989,6 +1040,9 @@ def package_dashboard_assets(
             case_summary,
             subsidy_results,
             df_validated,
+            load_profile_summary,
+            tipping_point_curve,
+            retrofit_packages_summary,
         )
 
         dataset_path = builder.write_dataset(dataset)
@@ -1002,15 +1056,24 @@ def package_dashboard_assets(
         console.print(f"[green]✓[/green] Dashboard data saved to {dataset_path}")
         console.print(f"[green]✓[/green] React dashboard updated at {public_dataset}")
 
+        # Log summary of data arrays included
+        data_arrays = [k for k in dataset.keys() if isinstance(dataset.get(k), list) and len(dataset.get(k, [])) > 0]
+        console.print(f"[cyan]Data arrays included:[/cyan] {len(data_arrays)}")
+        for arr in data_arrays:
+            count = len(dataset[arr]) if isinstance(dataset[arr], list) else 1
+            console.print(f"    • {arr}: {count} items")
+
         if analysis_logger:
             analysis_logger.add_output(
                 str(dataset_path),
                 "json",
                 "Dashboard dataset for React UI",
             )
+            analysis_logger.add_metric("dashboard_data_arrays", len(data_arrays), "Data arrays in dashboard JSON")
             analysis_logger.complete_phase(success=True, message="Dashboard data exported")
     except Exception as e:
         console.print(f"[yellow]⚠ Could not package dashboard: {e}[/yellow]")
+        logger.exception("Dashboard packaging error")
         if analysis_logger:
             analysis_logger.complete_phase(success=False, message=f"Error: {e}")
         return False
