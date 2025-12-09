@@ -25,6 +25,7 @@ import ComparisonDrawer from './ComparisonDrawer';
 import MapView from './MapView';
 import DrillDownModal from './DrillDownModal';
 import { useDashboard } from '../context/DashboardContext';
+import { defaultDashboardData } from '../data/dashboardData';
 
 const COLORS = {
   primary: '#1e3a5f',
@@ -72,6 +73,101 @@ export default function HeatStreetDashboard() {
     summaryStats = {},
   } = data || {};
 
+  const mergedSummary = {
+    ...defaultDashboardData.summaryStats,
+    ...summaryStats,
+    meanSAPScore: summaryStats.meanSAPScore ?? summaryStats.avgSAPScore ?? defaultDashboardData.summaryStats.meanSAPScore,
+  };
+
+  const totalProperties = mergedSummary.totalProperties;
+  const dhViableShare =
+    mergedSummary.dhViableProperties && totalProperties
+      ? (mergedSummary.dhViableProperties / totalProperties) * 100
+      : null;
+
+  const formatNumber = (value, options = {}) => {
+    if (value === null || value === undefined || Number.isNaN(Number(value))) return '—';
+    return Number(value).toLocaleString(undefined, options);
+  };
+
+  const formatPercent = (value) => {
+    if (value === null || value === undefined || Number.isNaN(Number(value))) return '—';
+    return `${Number(value).toFixed(1)}%`;
+  };
+
+  const summaryMetrics = [
+    {
+      label: 'Total properties',
+      value: formatNumber(totalProperties),
+      caption: 'Section 7 · EPC data robustness',
+    },
+    {
+      label: 'Average SAP score',
+      value: formatNumber(mergedSummary.meanSAPScore, { maximumFractionDigits: 1 }),
+      caption: 'Section 1 · Fabric detail granularity',
+    },
+    {
+      label: 'Wall insulation rate',
+      value: formatPercent(mergedSummary.wallInsulationRate),
+      caption: 'Section 1 · Fabric detail granularity',
+    },
+    {
+      label: 'Below Band C',
+      value: formatPercent(mergedSummary.belowBandC),
+      caption: 'Section 1 · Fabric detail granularity',
+    },
+    {
+      label: 'Most common EPC band',
+      value: mergedSummary.commonEpcBand || 'D',
+      caption: 'Section 1 · Fabric detail granularity',
+    },
+    {
+      label: 'Gas boiler dependency',
+      value: formatPercent(mergedSummary.gasBoilerDependency),
+      caption: 'Section 6 · Pathways & hybrid scenarios',
+    },
+    {
+      label: 'District heating viable',
+      value: `${formatNumber(mergedSummary.dhViableProperties)} (${formatPercent(dhViableShare)})`,
+      caption: 'Section 10 · Heat network penetration & price sensitivity',
+    },
+    {
+      label: 'Cost advantage: DH vs HP',
+      value: `£${formatNumber(mergedSummary.costAdvantageDHvsHP)}`,
+      caption: 'Section 10 · Heat network penetration & price sensitivity',
+    },
+    {
+      label: 'Optimal investment point',
+      value: `£${formatNumber(mergedSummary.optimalInvestmentPoint)}`,
+      caption: 'Section 8 · Fabric tipping point curve',
+    },
+    {
+      label: 'Mean fabric cost',
+      value: `£${formatNumber(mergedSummary.meanFabricCost)}`,
+      caption: 'Section 2 · Retrofit measures & packages',
+    },
+    {
+      label: 'Mean total retrofit cost',
+      value: `£${formatNumber(mergedSummary.meanTotalRetrofitCost)}`,
+      caption: 'Section 5 · Payback times',
+    },
+    {
+      label: 'Heat-demand reduction',
+      value: formatPercent(mergedSummary.heatDemandReduction),
+      caption: 'Section 9 · Load profiles & system impacts',
+    },
+    {
+      label: 'Peak grid reduction',
+      value: formatPercent(mergedSummary.peakGridReduction),
+      caption: 'Section 9 · Load profiles & system impacts',
+    },
+    {
+      label: 'Ready or near-ready homes',
+      value: formatPercent(mergedSummary.readyOrNearReady),
+      caption: 'Section 11 · Tenure filtering',
+    },
+  ];
+
   if (status.loading) {
     return (
       <div style={styles.container} id="dashboard-root">
@@ -104,7 +200,7 @@ export default function HeatStreetDashboard() {
           Latest metrics generated from run_analysis.py with live JSON ingestion and saved-view support.
         </p>
         <p style={styles.headerMeta}>
-          {summaryStats.totalProperties?.toLocaleString?.() || '704,292'} properties · Source: {status.source || 'analysis JSON'}
+          {formatNumber(totalProperties)} properties · Source: {status.source || 'analysis JSON'}
         </p>
         <div style={styles.statusRow}>
           <span style={styles.statusBadge}>Data source: {status.source === 'analysis' ? 'Latest run' : 'Bundled defaults'}</span>
@@ -141,22 +237,13 @@ export default function HeatStreetDashboard() {
         {activeTab === 'overview' && (
           <section>
             <div style={styles.grid}>
-              <div style={styles.statCard}>
-                <div style={styles.statValue}>{summaryStats.totalProperties?.toLocaleString?.() || '704,292'}</div>
-                <div style={styles.statLabel}>Total properties</div>
-              </div>
-              <div style={styles.statCard}>
-                <div style={styles.statValue}>{summaryStats.avgSAPScore || 63.4}</div>
-                <div style={styles.statLabel}>Average SAP score</div>
-              </div>
-              <div style={styles.statCard}>
-                <div style={styles.statValue}>{summaryStats.wallInsulationRate || 33.7}%</div>
-                <div style={styles.statLabel}>Wall insulation rate</div>
-              </div>
-              <div style={styles.statCard}>
-                <div style={styles.statValue}>{summaryStats.commonEpcBand || 'D'}</div>
-                <div style={styles.statLabel}>Most common EPC band</div>
-              </div>
+              {summaryMetrics.map((metric) => (
+                <div style={styles.statCard} key={metric.label}>
+                  <div style={styles.statValue}>{metric.value}</div>
+                  <div style={styles.statLabel}>{metric.label}</div>
+                  <div style={styles.statCaption}>{metric.caption}</div>
+                </div>
+              ))}
             </div>
 
             <div style={styles.gridTwo}>
@@ -611,6 +698,12 @@ const styles = {
   statLabel: {
     fontSize: '0.875rem',
     color: 'var(--muted)',
+  },
+  statCaption: {
+    fontSize: '0.75rem',
+    color: 'var(--muted)',
+    marginTop: 6,
+    letterSpacing: '0.01em',
   },
   grid: {
     display: 'grid',
