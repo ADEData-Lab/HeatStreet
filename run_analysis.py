@@ -659,10 +659,19 @@ def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None):
             console.print(f"    • Interactive Map: data/outputs/maps/heat_network_tiers.html")
 
             if analysis_logger:
+                map_html = Path("data/outputs/maps/heat_network_tiers.html")
+                map_png = map_html.with_suffix('.png')
+                map_pdf = map_html.with_suffix('.pdf')
+
                 analysis_logger.add_metric("properties_geocoded", len(properties_classified), "Properties with spatial classification")
                 analysis_logger.add_output("data/processed/epc_with_heat_network_tiers.geojson", "geojson", "Geocoded properties with heat network tiers")
                 analysis_logger.add_output("data/outputs/pathway_suitability_by_tier.csv", "csv", "Pathway suitability by tier")
                 analysis_logger.add_output("data/outputs/maps/heat_network_tiers.html", "html", "Interactive heat network tier map")
+
+                if map_png.exists():
+                    analysis_logger.add_output(str(map_png), "png", "Heat network tier map (image)")
+                if map_pdf.exists():
+                    analysis_logger.add_output(str(map_pdf), "pdf", "Heat network tier map (PDF)")
                 analysis_logger.complete_phase(success=True, message="Spatial analysis with heat network classification complete")
 
             return properties_classified, pathway_summary
