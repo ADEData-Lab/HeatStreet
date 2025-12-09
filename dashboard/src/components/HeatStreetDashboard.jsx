@@ -236,6 +236,20 @@ export default function HeatStreetDashboard() {
       <main style={styles.content}>
         {activeTab === 'overview' && (
           <section>
+            <div style={styles.introBlock}>
+              <div style={styles.introLabel}>Executive snapshot</div>
+              <h3 style={styles.introTitle}>What the visuals answer</h3>
+              <ul style={styles.introList}>
+                <li>
+                  Band mix and case street vs London chart show the scale of the EPC gap and where the case street diverges most
+                  from the city baseline.
+                </li>
+                <li>Headline stats call out portfolio size, SAP scores, and common band to orient the conversation quickly.</li>
+                <li>
+                  Use this tab when clients ask “how big is the problem and where are we off-trend?” before diving into segments.
+                </li>
+              </ul>
+            </div>
             <div style={styles.grid}>
               {summaryMetrics.map((metric) => (
                 <div style={styles.statCard} key={metric.label}>
@@ -284,6 +298,17 @@ export default function HeatStreetDashboard() {
 
         {activeTab === 'housing' && (
           <section>
+            <div style={styles.introBlock}>
+              <div style={styles.introLabel}>Fabric and systems</div>
+              <h3 style={styles.introTitle}>How this answers client prompts</h3>
+              <ul style={styles.introList}>
+                <li>Wall type and heating system splits show the dominant fabric archetypes driving retrofit complexity.</li>
+                <li>
+                  Glazing and loft insulation visuals highlight where simple measures can unlock SAP gains with minimal disruption.
+                </li>
+                <li>Use when asked “what stock characteristics constrain or accelerate retrofit rollout?”</li>
+              </ul>
+            </div>
             <div style={styles.gridTwo}>
               <div style={styles.card}>
                 <h3 style={styles.cardTitle}>Wall construction types</h3>
@@ -345,6 +370,15 @@ export default function HeatStreetDashboard() {
 
         {activeTab === 'scenarios' && (
           <section>
+            <div style={styles.introBlock}>
+              <div style={styles.introLabel}>Scenario levers</div>
+              <h3 style={styles.introTitle}>What to look for</h3>
+              <ul style={styles.introList}>
+                <li>Capital vs payback overlay surfaces the quickest wins versus longer-horizon investments.</li>
+                <li>Click-to-drill lets you answer “what drives that payback?” in one motion during live discussions.</li>
+                <li>Use this tab for pathway prioritisation and when comparing against budget envelopes.</li>
+              </ul>
+            </div>
             <div style={styles.card}>
               <h3 style={styles.cardTitle}>Scenario modelling</h3>
               <ResponsiveContainer width="100%" height={320}>
@@ -367,6 +401,15 @@ export default function HeatStreetDashboard() {
 
         {activeTab === 'readiness' && (
           <section style={styles.gridTwo}>
+            <div style={styles.introBlock}>
+              <div style={styles.introLabel}>Delivery readiness</div>
+              <h3 style={styles.introTitle}>How it addresses the ask</h3>
+              <ul style={styles.introList}>
+                <li>Tier distribution clarifies which homes are installation-ready versus needing enabling works.</li>
+                <li>Intervention bar chart surfaces the most common blockers for planning resource and sequencing.</li>
+                <li>Use this when stakeholders ask “how deployable is the stock today?”</li>
+              </ul>
+            </div>
             <div style={styles.card}>
               <h3 style={styles.cardTitle}>Retrofit readiness tiers</h3>
               <ResponsiveContainer width="100%" height={320}>
@@ -398,6 +441,15 @@ export default function HeatStreetDashboard() {
 
         {activeTab === 'costbenefit' && (
           <section>
+            <div style={styles.introBlock}>
+              <div style={styles.introLabel}>Value for money</div>
+              <h3 style={styles.introTitle}>Why these visuals matter</h3>
+              <ul style={styles.introList}>
+                <li>Cost curve shows diminishing returns and where spend concentrates for each measure.</li>
+                <li>Tier and lever summaries answer “which packages deliver best £/impact and what drives variance?”</li>
+                <li>Use this tab to brief finance teams on ROI trade-offs and sequencing.</li>
+              </ul>
+            </div>
             <div style={styles.card}>
               <h3 style={styles.cardTitle}>Cost curve</h3>
               <ResponsiveContainer width="100%" height={320}>
@@ -443,6 +495,15 @@ export default function HeatStreetDashboard() {
 
         {activeTab === 'boroughs' && (
           <section>
+            <div style={styles.introBlock}>
+              <div style={styles.introLabel}>Geographic lens</div>
+              <h3 style={styles.introTitle}>How this answers client questions</h3>
+              <ul style={styles.introList}>
+                <li>Table ranks boroughs by EPC and energy so you can spot outliers for targeted engagement.</li>
+                <li>Map pairs the ranking with spatial context to explain clusters and delivery logistics.</li>
+                <li>Use when asked “where should we pilot first and why there?”</li>
+              </ul>
+            </div>
             <div style={styles.card}>
               <h3 style={styles.cardTitle}>Borough performance</h3>
               <table style={styles.table}>
@@ -472,6 +533,15 @@ export default function HeatStreetDashboard() {
 
         {activeTab === 'uncertainty' && (
           <section>
+            <div style={styles.introBlock}>
+              <div style={styles.introLabel}>Robustness checks</div>
+              <h3 style={styles.introTitle}>What the charts convey</h3>
+              <ul style={styles.introList}>
+                <li>Confidence bands show spread around central estimates so you can communicate risk ranges.</li>
+                <li>Sensitivity tornado highlights which assumptions move the business case most.</li>
+                <li>Use this tab when addressing “how certain are these outcomes?” and mitigation plans.</li>
+              </ul>
+            </div>
             <div style={styles.gridTwo}>
               <div style={styles.card}>
                 <h3 style={styles.cardTitle}>Confidence bands</h3>
@@ -506,6 +576,15 @@ export default function HeatStreetDashboard() {
 
         {activeTab === 'grid' && (
           <section style={styles.gridTwo}>
+            <div style={styles.introBlock}>
+              <div style={styles.introLabel}>Systems impact</div>
+              <h3 style={styles.introTitle}>How this answers grid and comfort queries</h3>
+              <ul style={styles.introList}>
+                <li>Peak vs average demand lines reveal how each scenario stresses the grid across seasons.</li>
+                <li>Indoor climate profiles reassure clients on comfort and humidity under modeled upgrades.</li>
+                <li>Use for DNO discussions and to evidence customer experience impacts.</li>
+              </ul>
+            </div>
             <div style={styles.card}>
               <h3 style={styles.cardTitle}>Grid peak demand</h3>
               <ResponsiveContainer width="100%" height={320}>
@@ -735,5 +814,33 @@ const styles = {
     flexDirection: 'column',
     gap: '12px',
     padding: '16px 24px',
+  },
+  introBlock: {
+    backgroundColor: 'var(--panel)',
+    border: '1px solid var(--border)',
+    borderRadius: '12px',
+    padding: '16px 20px',
+    marginBottom: '16px',
+    boxShadow: '0 1px 3px rgba(0,0,0,0.08)',
+  },
+  introLabel: {
+    fontSize: '0.85rem',
+    fontWeight: 700,
+    textTransform: 'uppercase',
+    letterSpacing: '0.4px',
+    color: COLORS.muted,
+    marginBottom: '6px',
+  },
+  introTitle: {
+    fontSize: '1rem',
+    margin: 0,
+    color: 'var(--text)',
+    fontWeight: 700,
+  },
+  introList: {
+    margin: '10px 0 0 18px',
+    padding: 0,
+    color: 'var(--text)',
+    lineHeight: 1.6,
   },
 };
