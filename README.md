@@ -394,6 +394,9 @@ scenarios:
 - `data/outputs/scenario_modeling_results.txt` - Scenario cost-benefit analysis
 - `data/outputs/validation_report.txt` - Data quality report
 - `data/outputs/reports/executive_summary.txt` - Executive summary
+- `data/outputs/comparisons/hn_vs_hp_comparison.csv` - Per-home HP vs HN comparison stats (mean/median/p10/p90/min/max)
+- `data/outputs/comparisons/hn_vs_hp_report_snippet.md` - Markdown summary including sign conventions and tariff/COP/HN connection notes
+- `data/outputs/comparisons/hn_cost_sensitivity.csv` - Optional HN connection-cost sensitivity table (created when `--run-hn-sensitivity` is used)
 
 ### Visualizations
 
@@ -402,7 +405,36 @@ scenarios:
 - `data/outputs/figures/scenario_comparison.png` - Scenario comparison charts
 - `data/outputs/figures/subsidy_sensitivity.png` - Subsidy impact analysis
 - `data/outputs/figures/heat_network_tiers.png` - Tier distribution
+- `data/outputs/figures/hn_vs_hp_comparison.png` - Mean capex/bill/CO₂ savings for HP vs HN pathways
 - `data/outputs/maps/heat_network_tiers.html` - Interactive map
+
+## Generating HP vs HN comparison and sensitivities
+
+- Default runs still use the single heat network connection cost and exclude the shared ground loop proxy.
+- To add the optional proxy pathway and HN connection-cost sensitivity, run the modeling phase with:
+
+```bash
+python main.py --phase model --include-ground-loop-proxy --ground-loop-cop 3.6 \
+  --ground-loop-capex-delta 0 --run-hn-sensitivity
+```
+
+This produces:
+- `data/outputs/comparisons/hn_vs_hp_comparison.csv` and `hn_vs_hp_report_snippet.md` with mean/median/p10/p90/min/max
+  for per-home capex, bill savings/change, CO₂ savings/change, and payback.
+- `data/outputs/figures/hn_vs_hp_comparison.png` bar chart of mean capex, bill saving, and CO₂ saving.
+- `data/outputs/comparisons/hn_cost_sensitivity.csv` summarising base/base+£2k/base+£5k HN connection costs.
+
+Sign convention: savings columns (e.g., `bill_saving_mean`, `co2_saving_p90`) are positive when costs/emissions fall; change
+columns (e.g., `bill_change_mean`) are negative when costs/emissions fall and positive when they rise. The markdown snippet
+reiterates tariff assumptions, the COP used (including the proxy when enabled), and the base HN connection cost used for the
+run.
+
+Example CSV header and row:
+
+```
+pathway_id,pathway_name,n_homes,capex_mean,bill_saving_mean,co2_saving_mean,payback_median
+fabric_plus_hp_only,Fabric + Heat Pump,10000,21000,450,1.8,24.0
+```
 
 ## Decarbonization Scenarios
 

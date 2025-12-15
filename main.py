@@ -151,6 +151,7 @@ def run_modeling_phase(args):
     from src.analysis.load_profiles import LoadProfileGenerator
     from src.analysis.penetration_sensitivity import PenetrationSensitivityAnalyzer
     from src.analysis.fabric_tipping_point import FabricTippingPointAnalyzer
+    from src.reporting.comparisons import ComparisonReporter
 
     input_file = DATA_PROCESSED_DIR / "epc_london_validated.csv"
     if not input_file.exists():
@@ -198,12 +199,24 @@ def run_modeling_phase(args):
 
     # ---- Pathway Modeling (Section 5 & 6) ----
     logger.info("\n🛤️  Running pathway modeling...")
-    pathway_modeler = PathwayModeler()
+    pathway_modeler = PathwayModeler(
+        include_ground_loop_proxy=getattr(args, 'include_ground_loop_proxy', False),
+        ground_loop_scop=getattr(args, 'ground_loop_cop', None),
+        ground_loop_capex_delta=getattr(args, 'ground_loop_capex_delta', 0.0),
+    )
     pathway_results = pathway_modeler.model_all_pathways(df)
     pathway_summary = pathway_modeler.generate_pathway_summary(pathway_results)
-    pathway_modeler.export_results(pathway_results, pathway_summary)
+    property_path, _ = pathway_modeler.export_results(pathway_results, pathway_summary)
+    if getattr(args, 'run_hn_sensitivity', False):
+        pathway_modeler.run_hn_connection_sensitivity(df)
     results['pathways'] = {'results': pathway_results, 'summary': pathway_summary}
     logger.info("✓ Pathway modeling complete")
+
+    # ---- HP vs HN comparison reporting ----
+    logger.info("\n📑 Building HP vs HN comparison outputs...")
+    comparison_reporter = ComparisonReporter()
+    comparison_reporter.generate_comparisons(results_path=property_path)
+    logger.info("✓ Comparison reporting complete")
 
     # ---- Load Profiles (Section 9) ----
     logger.info("\n⚡ Running load profile analysis...")
@@ -349,6 +362,32 @@ def main():
         type=Path,
         default=Path('pipeline.log'),
         help='Path to log file (default: pipeline.log)'
+    )
+
+    parser.add_argument(
+        '--run-hn-sensitivity',
+        action='store_true',
+        help='Run HN connection cost sensitivity alongside pathway modeling'
+    )
+
+    parser.add_argument(
+        '--include-ground-loop-proxy',
+        action='store_true',
+        help='Include shared ground loop proxy pathway in modeling outputs'
+    )
+
+    parser.add_argument(
+        '--ground-loop-cop',
+        type=float,
+        default=None,
+        help='Override COP/SCOP for the ground loop proxy pathway'
+    )
+
+    parser.add_argument(
+        '--ground-loop-capex-delta',
+        type=float,
+        default=0.0,
+        help='Incremental CAPEX (£) applied to the ground loop proxy pathway'
     )
 
     args = parser.parse_args()
