@@ -90,6 +90,13 @@ analysis:
   case_street: "Shakespeare Crescent"
   epc_bands: ["A", "B", "C", "D", "E", "F", "G"]
 
+# Eligibility thresholds (fabric and emitters)
+eligibility:
+  ashp:
+    max_heat_demand_kwh_per_m2: 100   # Typical "HP-ready" intensity (kWh/m²/yr)
+    min_epc_band: "C"                 # EPC C or better assumed to meet fabric standard
+    target_flow_temperature_c: 45      # Low-temp radiator sizing target for emitters
+
   # Heat Network Zone Tiers
   heat_network_tiers:
     tier_1:
@@ -781,12 +788,15 @@ authoritative_sources:
     ---
     
     ## 12. Scenario-Specific Calculations
-    
+
     | ID | Item | Formula | Status | Evidence |
     |----|-------|---------|--------|----------|
     | 81 | Simple Payback Formula | payback_years = capex / annual_saving | **Validated** | [Green Book Discounting Guidance](https://www.gov.uk/government/publications/green-book-supplementary-guidance-discounting) |
     | 82 | Cost per Tonne CO2 (20-year) | (NPV_cost_diff) / (discounted_CO2_savings) | **Validated conceptually** | [HM Treasury Green Book](https://www.gov.uk/government/publications/the-green-book-appraisal-and-evaluation-in-central-government) |
     | 83 | Uptake Rate by Payback Period | piecewise mapping payback → uptake | Behavioural heuristic | [Building and Cities Journal](https://journal-buildingscities.org) |
+    | 84 | ASHP readiness heat demand threshold | HP-eligible if ≤100 kWh/m²/yr heat demand | **Evidence-based** | [Energy Systems Catapult – Electrification of Heat](https://es.catapult.org.uk/reports/electrification-of-heat-demonstration-project-insights-report/) indicates low-flow-temperature operation around 100 kWh/m²/yr; aligns with internal tipping-point curve |
+    | 85 | Minimum EPC band for HP pathway | EPC C or better treated as fabric-ready | Scenario-aligned | [UK Heat and Buildings Strategy](https://www.gov.uk/government/publications/heat-and-buildings-strategy) target for homes to reach EPC C by 2035, used as HP-ready proxy |
+    | 86 | Emitter sizing target flow temperature | Design emitters for 45°C flow | **Validated** | [MCS Heat Pump Design Standard (MIS 3005)](https://mcscertified.com/standards-tools-library/) specifies low-temperature emitter design (≤45–50°C) for efficient ASHPs |
     
     **Notes:**
     - Simple payback is standard definition
@@ -810,8 +820,8 @@ authoritative_sources:
     | EPC Validation | 5 | 0 | 1 | 0 | 4 | 0 |
     | Load Profiles | 3 | 1 | 0 | 0 | 2 | 0 |
     | Spatial Analysis | 4 | 1 | 0 | 0 | 3 | 0 |
-    | Scenario Calcs | 3 | 2 | 0 | 0 | 1 | 0 |
-    | **TOTAL** | **83** | **20** | **5** | **8** | **49** | **1** |
+    | Scenario Calcs | 6 | 3 | 1 | 1 | 1 | 0 |
+    | **TOTAL** | **86** | **21** | **6** | **9** | **49** | **1** |
     
     ---
     

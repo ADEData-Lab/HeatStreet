@@ -89,6 +89,19 @@ def _calculate_property_upgrade_worker(args):
             capital_cost += window_area * costs['double_glazing_per_m2']
             energy_reduction += get_absolute_energy() * 0.10
 
+        elif measure == 'triple_glazing':
+            window_area = floor_area * 0.2
+            capital_cost += costs.get('triple_glazing_upgrade', window_area * costs.get('double_glazing_per_m2', 0))
+            energy_reduction += get_absolute_energy() * 0.15
+
+        elif measure == 'floor_insulation':
+            capital_cost += costs.get('floor_insulation', 0)
+            energy_reduction += get_absolute_energy() * 0.05
+
+        elif measure == 'draught_proofing':
+            capital_cost += costs.get('draught_proofing', 0)
+            energy_reduction += get_absolute_energy() * 0.05
+
         elif measure == 'ashp_installation':
             capital_cost += costs['ashp_installation']
             current_heating = get_absolute_energy() * 0.8
@@ -180,12 +193,19 @@ class ScenarioModeler:
         self.carbon_factors = self.config['carbon_factors']
         self.analysis_horizon_years = get_analysis_horizon_years()
 
+        eligibility_cfg = self.config.get('eligibility', {}).get('ashp', {})
+        self.ashp_heat_demand_threshold = eligibility_cfg.get('max_heat_demand_kwh_per_m2', 100)
+        self.ashp_min_epc_band = eligibility_cfg.get('min_epc_band', 'C')
+
         # Fabric bundles derived from marginal benefit analysis
         tipping_analyzer = FabricTippingPointAnalyzer(output_dir=DATA_OUTPUTS_DIR)
         curve_df, _ = tipping_analyzer.run_analysis()
         self.fabric_bundles = tipping_analyzer.derive_fabric_bundles(
             curve_df,
             typical_annual_heat_demand_kwh=15000
+        )
+        self.fabric_minimum_measures = self._map_fabric_bundle_to_scenario(
+            self.fabric_bundles.get('fabric_minimum_to_ashp', [])
         )
         self.scenarios = self._inject_fabric_bundles(self.scenarios)
 
@@ -206,9 +226,11 @@ class ScenarioModeler:
         """
         logger.info(f"Modeling scenarios for {len(df):,} properties...")
 
+        df_with_flags = self._preprocess_ashp_readiness(df)
+
         for scenario_name, scenario_config in self.scenarios.items():
             logger.info(f"\nModeling scenario: {scenario_name}")
-            self.results[scenario_name] = self.model_scenario(df, scenario_name, scenario_config)
+            self.results[scenario_name] = self.model_scenario(df_with_flags, scenario_name, scenario_config)
 
         logger.info("\nAll scenario modeling complete!")
         return self.results
@@ -236,17 +258,31 @@ class ScenarioModeler:
             # Baseline scenario - no interventions
             return self._model_baseline(df)
 
+        df_with_flags = self._preprocess_ashp_readiness(df)
+
         # Calculate costs and impacts for each property using parallel processing
-        logger.info(f"  Processing {len(df):,} properties in parallel...")
+        logger.info(f"  Processing {len(df_with_flags):,} properties in parallel...")
 
         # Convert DataFrame rows to dictionaries for pickling
-        property_dicts = df.to_dict('records')
+        property_dicts = df_with_flags.to_dict('records')
 
         # Prepare arguments for parallel processing
-        args_list = [
-            (prop_dict, scenario_name, measures, self.costs, self.config)
-            for prop_dict in property_dicts
-        ]
+        args_list = []
+        fabric_applied = 0
+        hp_removed = 0
+
+        for prop_dict in property_dicts:
+            property_measures, applied_fabric, removed_hp = self._build_property_measures(
+                measures,
+                prop_dict
+            )
+
+            fabric_applied += int(applied_fabric)
+            hp_removed += int(removed_hp)
+
+            args_list.append(
+                (prop_dict, scenario_name, property_measures, self.costs, self.config)
+            )
 
         # Use ProcessPoolExecutor for CPU-bound calculations
         # Use max_workers based on CPU count, leave some cores free
@@ -258,9 +294,11 @@ class ScenarioModeler:
         logger.info(f"  Parallel processing complete!")
 
         # Aggregate results
-        results = self._aggregate_scenario_results(property_upgrades, df)
+        results = self._aggregate_scenario_results(property_upgrades, df_with_flags)
         results['scenario_name'] = scenario_name
         results['measures'] = measures
+        results['ashp_fabric_applied_properties'] = fabric_applied
+        results['ashp_not_eligible_properties'] = hp_removed
 
         return results
 
@@ -348,6 +386,91 @@ class ScenarioModeler:
                 mapped.append(mapped_measure)
 
         return mapped
+
+    def _preprocess_ashp_readiness(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Flag properties that meet (or can meet) ASHP readiness thresholds."""
+
+        if 'ashp_ready' in df.columns:
+            return df
+
+        processed = df.copy()
+        heat_demand = processed.get('ENERGY_CONSUMPTION_CURRENT')
+        if heat_demand is None:
+            heat_demand = pd.Series(np.nan, index=processed.index)
+        processed['heat_demand_kwh_m2'] = heat_demand
+
+        processed['ashp_meets_heat_demand'] = heat_demand <= self.ashp_heat_demand_threshold
+
+        processed['ashp_meets_epc'] = processed.get('CURRENT_ENERGY_RATING', pd.Series('', index=processed.index)).apply(
+            lambda band: self._is_band_at_least(str(band), self.ashp_min_epc_band)
+        )
+
+        processed['ashp_ready'] = processed['ashp_meets_heat_demand'] | processed['ashp_meets_epc']
+
+        projected = self._estimate_heat_demand_after_measures(
+            heat_demand,
+            self.fabric_minimum_measures
+        )
+
+        processed['ashp_heat_demand_after_fabric'] = projected
+        processed['ashp_projected_ready'] = projected <= self.ashp_heat_demand_threshold
+        processed['ashp_fabric_needed'] = ~processed['ashp_ready'] & processed['ashp_projected_ready']
+        processed['ashp_not_ready_after_fabric'] = ~processed['ashp_ready'] & ~processed['ashp_projected_ready']
+
+        return processed
+
+    def _build_property_measures(self, measures: List[str], property_dict: Dict) -> Tuple[List[str], bool, bool]:
+        """Insert ASHP-readiness fabric where needed and drop ASHP when infeasible."""
+
+        needs_heat_pump = 'ashp_installation' in measures
+        measure_plan = list(measures)
+        applied_fabric = False
+        removed_hp = False
+
+        if needs_heat_pump:
+            ready = bool(property_dict.get('ashp_ready', False))
+            projected_ready = bool(property_dict.get('ashp_projected_ready', False))
+
+            if not ready and projected_ready:
+                measure_plan = self.fabric_minimum_measures + measure_plan
+                applied_fabric = True
+            elif not ready and not projected_ready:
+                measure_plan = [m for m in measure_plan if m not in ['ashp_installation', 'emitter_upgrades']]
+                removed_hp = True
+
+        return self._dedupe_preserve_order(measure_plan), applied_fabric, removed_hp
+
+    def _dedupe_preserve_order(self, measures: List[str]) -> List[str]:
+        seen = set()
+        deduped: List[str] = []
+        for measure in measures:
+            if measure not in seen:
+                deduped.append(measure)
+                seen.add(measure)
+        return deduped
+
+    def _estimate_heat_demand_after_measures(self, baseline: pd.Series, measures: List[str]) -> pd.Series:
+        """Roughly estimate post-measure heat demand using multiplicative savings."""
+
+        residual = baseline.copy()
+        for measure in measures:
+            saving_pct = self.measure_savings.get(measure, {}).get('kwh_saving_pct')
+            if saving_pct:
+                residual = residual * (1 - saving_pct)
+
+        return residual
+
+    @staticmethod
+    def _is_band_at_least(band: str, minimum: str) -> bool:
+        """Check whether EPC band meets or exceeds the minimum (A best)."""
+        order = ['A', 'B', 'C', 'D', 'E', 'F', 'G']
+        band_upper = band.strip().upper() if band else 'G'
+        minimum_upper = minimum.strip().upper() if minimum else 'G'
+
+        if band_upper not in order or minimum_upper not in order:
+            return False
+
+        return order.index(band_upper) <= order.index(minimum_upper)
 
     def _calculate_property_upgrade(
         self,
@@ -646,6 +769,17 @@ class ScenarioModeler:
             'properties_not_cost_effective': n_not_cost_effective,
             'pct_not_cost_effective': pct_not_cost_effective,
         }
+
+        if {'ashp_ready', 'ashp_fabric_needed', 'ashp_not_ready_after_fabric'}.issubset(df.columns):
+            ready_count = int(df['ashp_ready'].sum())
+            fabric_count = int(df['ashp_fabric_needed'].sum())
+            not_ready_count = int(df['ashp_not_ready_after_fabric'].sum())
+            results.update({
+                'ashp_ready_properties': ready_count,
+                'ashp_ready_pct': (ready_count / total_properties * 100) if total_properties > 0 else 0,
+                'ashp_fabric_required_properties': fabric_count,
+                'ashp_not_ready_properties': not_ready_count,
+            })
 
         # Log payback summary
         if np.isfinite(avg_payback):
