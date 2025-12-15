@@ -7,19 +7,18 @@
 
 ---
 
-> **IMPORTANT: Authoritative Sources Now Available**
+> **IMPORTANT: Authoritative Sources Now Embedded**
 >
 > All 83 calculation parameters, formulas, and assumptions identified in this audit have been
-> validated with authoritative sources. The validated values and evidence are documented in:
+> validated with authoritative sources. The validated values, evidence, and justifications are
+> now embedded directly in **`config/config.yaml`** under the `authoritative_sources` section.
 >
-> **[AUTHORITATIVE_SOURCES.md](AUTHORITATIVE_SOURCES.md)**
->
-> This companion document provides:
+> This embedded block provides:
 > - Source citations for all values (Ofgem, DESNZ, Energy Saving Trust, MCS, CIBSE, academic papers)
 > - Validation status for each parameter (Validated, Scenario-based, Evidence-based, Heuristic)
-> - Notes explaining assumptions and caveats
+> - Notes explaining assumptions, caveats, and hash for provenance
 >
-> **For the current validated values and sources, please refer to AUTHORITATIVE_SOURCES.md.**
+> **For the current validated values and sources, please refer to `config/config.yaml`**.
 
 ---
 
@@ -48,7 +47,7 @@ This document provides a comprehensive audit of all calculation formulas, second
 ### Updated Status (December 2024)
 
 Following external research, all 83 parameters have been validated with authoritative sources.
-See **[AUTHORITATIVE_SOURCES.md](AUTHORITATIVE_SOURCES.md)** for the complete evidence base.
+See **`config/config.yaml` → `authoritative_sources`** for the complete evidence base.
 
 | Validation Status | Count | Percentage |
 |-------------------|-------|------------|
