@@ -293,6 +293,7 @@ total_saving_pct = 1 - remaining_demand
 |----|------|-------|--------|----------|
 | 57 | Real Discount Rate | 0.035 (3.5%) | **Validated** | [HM Treasury Green Book](https://www.gov.uk/government/publications/the-green-book-appraisal-and-evaluation-in-central-government), [Green Book Discounting Guidance](https://www.gov.uk/government/publications/green-book-supplementary-guidance-discounting) |
 | 58 | Discounted Payback Calculation | Cumulative discounted savings vs upfront cost | **Validated conceptually** | [Green Book Discounting Guidance](https://www.gov.uk/government/publications/green-book-supplementary-guidance-discounting) |
+| 59a | Analysis Horizon (years) | 20 years | **Validated conceptually** | [HM Treasury Green Book](https://www.gov.uk/government/publications/the-green-book-appraisal-and-evaluation-in-central-government) |
 | 59 | Project Lifetime | 20 years | **Validated conceptually** | [HM Treasury Green Book](https://www.gov.uk/government/publications/the-green-book-appraisal-and-evaluation-in-central-government) |
 
 **Notes:**

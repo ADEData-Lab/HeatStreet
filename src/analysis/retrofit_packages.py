@@ -29,6 +29,7 @@ from config.config import (
     get_cost_assumptions,
     get_measure_savings,
     get_financial_params,
+    get_analysis_horizon_years,
     get_uncertainty_params,
     DATA_PROCESSED_DIR,
     DATA_OUTPUTS_DIR
@@ -370,6 +371,7 @@ class RetrofitPackageAnalyzer:
         # Load financial parameters
         self.financial = get_financial_params()
         self.discount_rate = self.financial.get('discount_rate', 0.035)
+        self.analysis_horizon_years = get_analysis_horizon_years()
 
         # Load energy prices
         self.energy_prices = self.config.get('energy_prices', {}).get('current', {})
@@ -621,7 +623,7 @@ class RetrofitPackageAnalyzer:
                 # Cost effectiveness
                 'gbp_per_tonne_co2': (
                     pkg_results['capex_per_home'].sum() /
-                    (pkg_results['co2_saving_tonnes'].sum() * 20)  # 20-year lifetime
+                    (pkg_results['co2_saving_tonnes'].sum() * self.analysis_horizon_years)
                 ) if pkg_results['co2_saving_tonnes'].sum() > 0 else np.nan,
             }
 

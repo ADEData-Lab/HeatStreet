@@ -85,7 +85,30 @@ def get_heat_network_params() -> Dict[str, Any]:
 def get_financial_params() -> Dict[str, Any]:
     """Get financial parameters (discount rate, price scenarios) from config."""
     config = load_config()
-    return config.get('financial', {})
+    financial = config.get('financial', {})
+
+    # Validate analysis horizon to avoid silent defaults
+    horizon = financial.get('analysis_horizon_years')
+    if horizon is None:
+        raise ValueError(
+            "Missing analysis horizon in financial parameters (config['financial']['analysis_horizon_years'])."
+        )
+
+    try:
+        horizon_value = float(horizon)
+    except (TypeError, ValueError) as exc:
+        raise ValueError("Analysis horizon must be numeric and greater than zero.") from exc
+
+    if horizon_value <= 0:
+        raise ValueError("Analysis horizon must be greater than zero.")
+
+    financial['analysis_horizon_years'] = horizon_value
+    return financial
+
+
+def get_analysis_horizon_years() -> float:
+    """Return validated analysis horizon (years) from financial parameters."""
+    return get_financial_params()['analysis_horizon_years']
 
 
 def get_uncertainty_params() -> Dict[str, Any]:

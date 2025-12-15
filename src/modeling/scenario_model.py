@@ -21,6 +21,7 @@ from config.config import (
     load_config,
     get_scenario_definitions,
     get_cost_assumptions,
+    get_analysis_horizon_years,
     DATA_PROCESSED_DIR,
     DATA_OUTPUTS_DIR
 )
@@ -174,6 +175,7 @@ class ScenarioModeler:
         self.costs = get_cost_assumptions()
         self.energy_prices = self.config['energy_prices']
         self.carbon_factors = self.config['carbon_factors']
+        self.analysis_horizon_years = get_analysis_horizon_years()
 
         self.results = {}
 
@@ -614,7 +616,9 @@ class ScenarioModeler:
             public_expenditure = (base_results['capital_cost_per_property'] * subsidy_pct/100) * properties_upgraded
 
             # Carbon abatement cost
-            total_co2_saved = base_results['annual_co2_reduction_kg'] * uptake_rate * 20  # 20-year lifetime
+            total_co2_saved = (
+                base_results['annual_co2_reduction_kg'] * uptake_rate * self.analysis_horizon_years
+            )
             carbon_abatement_cost = public_expenditure / (total_co2_saved / 1000) if total_co2_saved > 0 else 0  # £/tCO2
 
             sensitivity_results[f'{subsidy_pct}%'] = {
