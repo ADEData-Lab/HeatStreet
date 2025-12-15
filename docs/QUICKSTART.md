@@ -18,8 +18,8 @@ pip --version
 
 ```bash
 # 1. Clone and navigate
-git clone https://github.com/pipnic1234/HeatStreetEPC.git
-cd HeatStreetEPC
+git clone https://github.com/ADEData-Lab/HeatStreet.git
+cd HeatStreet
 
 # 2. Create virtual environment
 python -m venv venv
@@ -207,7 +207,7 @@ Then run analysis on sample to verify everything works.
 - 📖 Full documentation: `README.md`
 - 🔧 Configuration guide: `config/config.yaml`
 - 📊 Example notebooks: `notebooks/` (to be created)
-- 🐛 Issues: [GitHub Issues](https://github.com/pipnic1234/HeatStreetEPC/issues)
+- 🐛 Issues: [GitHub Issues](https://github.com/ADEData-Lab/HeatStreet/issues)
 
 ## Example Workflow
 

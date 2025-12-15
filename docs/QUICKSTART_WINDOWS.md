@@ -52,8 +52,8 @@ If you prefer to set up manually:
 ### Step 1: Clone the Repository
 
 ```powershell
-git clone https://github.com/pipnic1234/HeatStreetEPC.git
-cd HeatStreetEPC
+git clone https://github.com/ADEData-Lab/HeatStreet.git
+cd HeatStreet
 ```
 
 ### Step 2: Create Virtual Environment
@@ -304,8 +304,8 @@ Here's a complete example of a first-time setup and run:
 
 ```powershell
 # 1. Clone and setup
-git clone https://github.com/pipnic1234/HeatStreetEPC.git
-cd HeatStreetEPC
+git clone https://github.com/ADEData-Lab/HeatStreet.git
+cd HeatStreet
 .\setup.ps1
 
 # 2. Get download instructions
@@ -335,7 +335,7 @@ deactivate
 
 - 📖 **Full documentation**: `README.md`
 - 🔧 **Configuration guide**: `config\config.yaml`
-- 🐛 **Report issues**: https://github.com/pipnic1234/HeatStreetEPC/issues
+- 🐛 **Report issues**: https://github.com/ADEData-Lab/HeatStreet/issues
 
 ## Success Checklist
 

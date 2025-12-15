@@ -24,7 +24,7 @@ This project analyzes approximately 500,000 EPC certificates for Edwardian and l
 ## Project Structure
 
 ```
-HeatStreetEPC/
+HeatStreet/
 ├── config/
 │   ├── config.yaml           # Main configuration file
 │   └── config.py             # Configuration loader
@@ -76,8 +76,8 @@ This method automatically installs GDAL/geopandas via Conda, avoiding Windows in
 
 **Step 2**: Clone and run
 ```bash
-git clone https://github.com/pipnic1234/HeatStreetEPC.git
-cd HeatStreetEPC
+git clone https://github.com/ADEData-Lab/HeatStreet.git
+cd HeatStreet
 
 # Windows Command Prompt
 run-conda.bat
@@ -100,8 +100,8 @@ This single command:
 Works perfectly for EPC analysis, scenarios, charts, and reports (85% of functionality).
 
 ```bash
-git clone https://github.com/pipnic1234/HeatStreetEPC.git
-cd HeatStreetEPC
+git clone https://github.com/ADEData-Lab/HeatStreet.git
+cd HeatStreet
 
 # Windows Command Prompt
 run.bat
@@ -134,14 +134,14 @@ See [Manual Setup](#manual-setup-all-platforms) section below.
 
 **Windows (PowerShell)**:
 ```powershell
-git clone https://github.com/pipnic1234/HeatStreetEPC.git
-cd HeatStreetEPC
+git clone https://github.com/ADEData-Lab/HeatStreet.git
+cd HeatStreet
 ```
 
 **Linux/Mac**:
 ```bash
-git clone https://github.com/pipnic1234/HeatStreetEPC.git
-cd HeatStreetEPC
+git clone https://github.com/ADEData-Lab/HeatStreet.git
+cd HeatStreet
 ```
 
 #### Step 2: Create virtual environment
