@@ -60,30 +60,112 @@ class FabricTippingPointAnalyzer:
 
         logger.info("Initialized FabricTippingPointAnalyzer")
 
-    def generate_fabric_measure_sequence(self) -> List[str]:
+    def build_cost_performance_table(
+        self,
+        typical_annual_heat_demand_kwh: float
+    ) -> pd.DataFrame:
         """
-        Generate an ordered sequence of fabric measures from low to high cost.
+        Build a cost/performance table for each catalogue fabric measure.
 
-        The sequence represents a logical progression of fabric improvements,
-        ordered by typical cost-effectiveness (simple payback).
+        Uses the configured capex and percentage savings to derive the
+        implied kWh reduction, £/kWh saved, and marginal benefit per £.
+
+        Args:
+            typical_annual_heat_demand_kwh: Baseline heat demand to evaluate
 
         Returns:
-            List of measure IDs in recommended order
+            DataFrame with one row per measure
         """
-        # Define typical fabric measures in order of cost-effectiveness
-        # (Based on common retrofit guidance: cheap wins first, then more expensive)
-        fabric_sequence = [
-            'draught_proofing',           # Cheapest, quick win
-            'loft_insulation',             # Low cost, high savings
-            'cavity_wall_insulation',      # Medium cost, good savings
-            'floor_insulation',            # Medium cost, moderate savings
-            'double_glazing_upgrade',      # Higher cost, moderate savings
-            'solid_wall_insulation_ewi',   # High cost, good savings but expensive
-            'triple_glazing_upgrade',      # Highest cost, marginal additional benefit
-        ]
+        rows = []
 
-        # Filter to only include measures that exist in catalogue
-        return [m for m in fabric_sequence if m in self.catalogue]
+        for measure_id, measure in self.catalogue.items():
+            # Skip measures that do not affect fabric heat demand
+            if measure.annual_kwh_saving_pct <= 0:
+                continue
+
+            gross_saving_kwh = typical_annual_heat_demand_kwh * measure.annual_kwh_saving_pct
+            cost_per_kwh = (
+                measure.capex_per_home / gross_saving_kwh
+                if gross_saving_kwh > 0 else np.inf
+            )
+
+            rows.append({
+                'measure_id': measure_id,
+                'measure_name': measure.name,
+                'capex_per_home': measure.capex_per_home,
+                'saving_pct': measure.annual_kwh_saving_pct,
+                'gross_kwh_saved': gross_saving_kwh,
+                'cost_per_kwh_saved': cost_per_kwh,
+                'benefit_per_pound': (
+                    gross_saving_kwh / measure.capex_per_home
+                    if measure.capex_per_home > 0 else np.inf
+                )
+            })
+
+        performance_df = pd.DataFrame(rows)
+        if not performance_df.empty:
+            performance_df = performance_df.sort_values(
+                ['cost_per_kwh_saved', 'capex_per_home']
+            ).reset_index(drop=True)
+
+        output_path = self.output_dir / "fabric_cost_performance.csv"
+        performance_df.to_csv(output_path, index=False, float_format='%.4f')
+        logger.info(f"Saved fabric cost/performance table to {output_path}")
+
+        return performance_df
+
+    def generate_fabric_measure_sequence(
+        self,
+        typical_annual_heat_demand_kwh: float
+    ) -> List[str]:
+        """
+        Rank fabric measures by marginal benefit-per-cost using a greedy approach.
+
+        At each step the measure delivering the highest kWh saved per £ on the
+        *remaining* heat demand is selected, capturing diminishing returns.
+
+        Args:
+            typical_annual_heat_demand_kwh: Baseline heat demand to evaluate
+
+        Returns:
+            List of measure IDs ordered by marginal benefit-per-cost
+        """
+        remaining_demand_fraction = 1.0
+        remaining_measures = set(self.catalogue.keys())
+        ordered_measures: List[str] = []
+
+        while remaining_measures:
+            best_measure = None
+            best_benefit_per_pound = -np.inf
+
+            for measure_id in list(remaining_measures):
+                measure = self.catalogue[measure_id]
+                if measure.annual_kwh_saving_pct <= 0 or measure.capex_per_home <= 0:
+                    remaining_measures.remove(measure_id)
+                    continue
+
+                marginal_kwh_saved = (
+                    typical_annual_heat_demand_kwh
+                    * remaining_demand_fraction
+                    * measure.annual_kwh_saving_pct
+                )
+                benefit_per_pound = marginal_kwh_saved / measure.capex_per_home
+
+                if benefit_per_pound > best_benefit_per_pound:
+                    best_benefit_per_pound = benefit_per_pound
+                    best_measure = measure_id
+
+            if best_measure is None:
+                break
+
+            ordered_measures.append(best_measure)
+            remaining_measures.remove(best_measure)
+
+            # Update remaining demand fraction to capture diminishing returns
+            measure_saving_pct = self.catalogue[best_measure].annual_kwh_saving_pct
+            remaining_demand_fraction *= (1 - measure_saving_pct)
+
+        return ordered_measures
 
     def calculate_tipping_point_curve(
         self,
@@ -110,7 +192,9 @@ class FabricTippingPointAnalyzer:
         logger.info(f"Calculating tipping point curve for {property_archetype}...")
         logger.info(f"  Baseline heating demand: {typical_annual_heat_demand_kwh:,.0f} kWh/year")
 
-        sequence = self.generate_fabric_measure_sequence()
+        sequence = self.generate_fabric_measure_sequence(
+            typical_annual_heat_demand_kwh=typical_annual_heat_demand_kwh
+        )
         logger.info(f"  Measure sequence: {', '.join(sequence)}")
 
         # Track cumulative effects
@@ -308,6 +392,9 @@ class FabricTippingPointAnalyzer:
         """
         logger.info("Running fabric tipping point analysis...")
 
+        # Persist per-measure cost/performance data for transparency
+        self.build_cost_performance_table(typical_annual_heat_demand_kwh)
+
         curve_df = self.calculate_tipping_point_curve(
             typical_annual_heat_demand_kwh=typical_annual_heat_demand_kwh
         )
@@ -317,6 +404,50 @@ class FabricTippingPointAnalyzer:
         logger.info("Fabric tipping point analysis complete!")
 
         return curve_df, summary
+
+    def derive_fabric_bundles(
+        self,
+        curve_df: pd.DataFrame,
+        typical_annual_heat_demand_kwh: float,
+        ashp_target_saving_pct: float = 0.25
+    ) -> Dict[str, List[str]]:
+        """
+        Derive fabric bundles from the tipping point curve.
+
+        Returns two bundles:
+            - fabric_full_to_tipping: All measures up to the diminishing-returns step
+            - fabric_minimum_to_ashp: Smallest set achieving the ASHP-ready demand
+              reduction target (default 25%).
+        """
+        bundles: Dict[str, List[str]] = {}
+
+        tipping_steps = curve_df[
+            curve_df['is_beyond_tipping_point'] & (curve_df['step'] > 0)
+        ]['step']
+        if len(tipping_steps) > 0:
+            cutoff_step = int(tipping_steps.min() - 1)
+        else:
+            cutoff_step = int(curve_df['step'].max())
+
+        bundles['fabric_full_to_tipping'] = curve_df[
+            (curve_df['step'] > 0) & (curve_df['step'] <= cutoff_step)
+        ]['measure_id'].tolist()
+
+        target_kwh = typical_annual_heat_demand_kwh * ashp_target_saving_pct
+        ashp_rows = curve_df[
+            (curve_df['step'] > 0) & (curve_df['cumulative_kwh_saved'] >= target_kwh)
+        ]
+        if len(ashp_rows) > 0:
+            min_step = int(ashp_rows['step'].min())
+            bundles['fabric_minimum_to_ashp'] = curve_df[
+                (curve_df['step'] > 0) & (curve_df['step'] <= min_step)
+            ]['measure_id'].tolist()
+        else:
+            bundles['fabric_minimum_to_ashp'] = curve_df[
+                curve_df['step'] > 0
+            ]['measure_id'].tolist()
+
+        return bundles
 
 
 def main():

@@ -306,7 +306,7 @@ def test_package_and_pathway_ids():
             )
 
         # Check heat_source is valid
-        valid_heat_sources = ['gas', 'hp', 'hn', 'hp+hn']
+        valid_heat_sources = ['gas', 'hp', 'hn', 'hp+hn', 'hp_proxy']
         if pathway.heat_source not in valid_heat_sources:
             errors.append(
                 f"Pathway '{pathway_id}' has invalid heat_source '{pathway.heat_source}'"
