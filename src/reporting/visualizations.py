@@ -627,7 +627,10 @@ class ReportGenerator:
                 'Annual CO2 Reduction (kg)': results['annual_co2_reduction_kg'],
                 'Annual Bill Savings (£)': results['annual_bill_savings'],
                 'Average Payback (years)': results.get('average_payback_years', 0),
-                'Median Payback (years)': results.get('median_payback_years', 0)
+                'Median Payback (years)': results.get('median_payback_years', 0),
+                'ASHP Ready Properties': results.get('ashp_ready_properties', 0),
+                'ASHP Fabric Applied': results.get('ashp_fabric_applied_properties', 0),
+                'ASHP Not Eligible': results.get('ashp_not_ready_properties', 0)
             })
 
         df_scenarios = pd.DataFrame(scenarios)

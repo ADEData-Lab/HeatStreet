@@ -324,6 +324,9 @@ class DashboardDataBuilder:
                     "paybackYears": results.get("average_payback_years")
                     or results.get("median_payback_years")
                     or 0,
+                    "ashpReady": int(results.get("ashp_ready_properties", 0)),
+                    "ashpFabricAssist": int(results.get("ashp_fabric_applied_properties", 0)),
+                    "ashpIneligible": int(results.get("ashp_not_ready_properties", 0)),
                 }
             )
         return scenarios
