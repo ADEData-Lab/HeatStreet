@@ -61,7 +61,7 @@ class Pathway:
     name: str
     description: str
     fabric_package: str  # ID of retrofit package to apply
-    heat_source: str  # 'hp', 'hn', or 'hp+hn'
+    heat_source: str  # 'hp', 'hn', 'hp+hn', or 'hp_proxy'
 
 
 PATHWAYS = {
@@ -104,6 +104,14 @@ PATHWAYS = {
         fabric_package='max_retrofit',
         heat_source='hp+hn'
     ),
+
+    'fabric_plus_shared_ground_loop_proxy': Pathway(
+        pathway_id='fabric_plus_shared_ground_loop_proxy',
+        name='Fabric + Shared Ground Loop (proxy)',
+        description='Full fabric improvements with a higher COP shared ground loop proxy heat pump',
+        fabric_package='max_retrofit',
+        heat_source='hp_proxy'
+    ),
 }
 
 
@@ -119,7 +127,13 @@ class PathwayModeler:
     - Handle hybrid pathway correctly (FIX: ensures HP+HN costs are summed properly)
     """
 
-    def __init__(self, output_dir: Optional[Path] = None):
+    def __init__(
+        self,
+        output_dir: Optional[Path] = None,
+        include_ground_loop_proxy: bool = False,
+        ground_loop_scop: Optional[float] = None,
+        ground_loop_capex_delta: float = 0.0
+    ):
         """Initialize the pathway modeler."""
         self.config = load_config()
         self.costs = get_cost_assumptions()
@@ -129,6 +143,8 @@ class PathwayModeler:
 
         self.output_dir = output_dir or DATA_OUTPUTS_DIR
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.comparisons_dir = self.output_dir / "comparisons"
+        self.comparisons_dir.mkdir(parents=True, exist_ok=True)
 
         # Energy prices
         self.prices = self.config.get('energy_prices', {}).get('current', {})
@@ -143,6 +159,12 @@ class PathwayModeler:
 
         # Heat pump parameters
         self.hp_scop = self.config.get('heat_pump', {}).get('scop', 3.0)
+        self.ground_loop_scop = (
+            ground_loop_scop
+            if ground_loop_scop is not None
+            else self.config.get('heat_pump', {}).get('ground_loop_proxy_scop', 3.6)
+        )
+        self.ground_loop_capex_delta = ground_loop_capex_delta
 
         # Heat network parameters
         self.hn_efficiency = self.hn_params.get('distribution_efficiency', 0.90)
@@ -155,8 +177,25 @@ class PathwayModeler:
         self.package_analyzer = RetrofitPackageAnalyzer(self.output_dir)
         self.packages = get_package_definitions()
 
+        # Pathway configuration (supports optional shared ground loop proxy)
+        self.include_ground_loop_proxy = include_ground_loop_proxy
+        base_pathways = dict(PATHWAYS)
+        if not include_ground_loop_proxy:
+            base_pathways.pop('fabric_plus_shared_ground_loop_proxy', None)
+
+        self.pathways: Dict[str, Pathway] = base_pathways
+        if include_ground_loop_proxy and 'fabric_plus_shared_ground_loop_proxy' not in self.pathways:
+            self.pathways['fabric_plus_shared_ground_loop_proxy'] = Pathway(
+                pathway_id='fabric_plus_shared_ground_loop_proxy',
+                name='Fabric + Shared Ground Loop (proxy)',
+                description='Full fabric improvements with higher COP shared ground loop heat pump proxy',
+                fabric_package='max_retrofit',
+                heat_source='hp_proxy'
+            )
+
         logger.info("Initialized PathwayModeler")
         logger.info(f"  HP SCOP: {self.hp_scop}")
+        logger.info(f"  Shared ground loop COP: {self.ground_loop_scop} (enabled={include_ground_loop_proxy})")
         logger.info(f"  HN tariff: £{self.hn_tariff}/kWh")
         logger.info(f"  HN penetration: {self.hn_penetration * 100:.1f}%")
 
@@ -211,9 +250,15 @@ class PathwayModeler:
         hn_capex = 0.0
         heat_tech_capex = 0.0
 
+        hp_install_cost = self.costs.get('ashp_installation', 12000)
+
         if pathway.heat_source == 'hp':
             # Heat pump for all properties
-            hp_capex = self.costs.get('ashp_installation', 12000)
+            hp_capex = hp_install_cost
+            heat_tech_capex = hp_capex
+
+        elif pathway.heat_source == 'hp_proxy':
+            hp_capex = hp_install_cost + self.ground_loop_capex_delta
             heat_tech_capex = hp_capex
 
         elif pathway.heat_source == 'hn':
@@ -256,6 +301,12 @@ class PathwayModeler:
         elif pathway.heat_source == 'hp':
             # Heat pump (electricity)
             hp_demand = post_fabric_demand / self.hp_scop  # Electricity used
+            annual_demand = hp_demand
+            annual_bill = hp_demand * self.elec_price
+            annual_co2 = (hp_demand * self.elec_carbon) / 1000
+
+        elif pathway.heat_source == 'hp_proxy':
+            hp_demand = post_fabric_demand / self.ground_loop_scop
             annual_demand = hp_demand
             annual_bill = hp_demand * self.elec_price
             annual_co2 = (hp_demand * self.elec_carbon) / 1000
@@ -351,6 +402,39 @@ class PathwayModeler:
 
         return np.inf
 
+    def _get_hn_access(self, df: pd.DataFrame, hn_access_column: Optional[str] = None) -> pd.Series:
+        """Determine which properties have heat network access."""
+        if hn_access_column and hn_access_column in df.columns:
+            hn_access = df[hn_access_column].fillna(False).astype(bool)
+        else:
+            np.random.seed(42)
+            hn_access = pd.Series(
+                np.random.random(len(df)) < self.hn_penetration,
+                index=df.index
+            )
+            logger.info(
+                f"  Assigned HN access to {hn_access.sum():,} properties "
+                f"({hn_access.mean()*100:.1f}%)"
+            )
+
+        return hn_access
+
+    @staticmethod
+    def _summarize_series(series: pd.Series) -> Dict[str, float]:
+        """Return common summary statistics for a series."""
+        clean = series.replace([np.inf, -np.inf], np.nan).dropna()
+        if len(clean) == 0:
+            return {k: np.nan for k in ['mean', 'median', 'p10', 'p90', 'min', 'max']}
+
+        return {
+            'mean': clean.mean(),
+            'median': clean.median(),
+            'p10': clean.quantile(0.10),
+            'p90': clean.quantile(0.90),
+            'min': clean.min(),
+            'max': clean.max(),
+        }
+
     def analyze_all_pathways(
         self,
         df: pd.DataFrame,
@@ -368,17 +452,7 @@ class PathwayModeler:
         """
         logger.info(f"Analyzing pathways for {len(df):,} properties...")
 
-        # Determine HN access for each property
-        if hn_access_column and hn_access_column in df.columns:
-            hn_access = df[hn_access_column].fillna(False).astype(bool)
-        else:
-            # Assign HN access randomly based on penetration rate
-            np.random.seed(42)  # Reproducibility
-            hn_access = pd.Series(
-                np.random.random(len(df)) < self.hn_penetration,
-                index=df.index
-            )
-            logger.info(f"  Assigned HN access to {hn_access.sum():,} properties ({hn_access.mean()*100:.1f}%)")
+        hn_access = self._get_hn_access(df, hn_access_column=hn_access_column)
 
         results = []
 
@@ -388,7 +462,7 @@ class PathwayModeler:
 
             has_hn = hn_access.loc[row_idx]
 
-            for pathway_id, pathway in PATHWAYS.items():
+            for pathway_id, pathway in self.pathways.items():
                 result = self.calculate_property_pathway(
                     property_data, pathway, has_hn_access=has_hn
                 )
@@ -398,6 +472,14 @@ class PathwayModeler:
         logger.info(f"Generated {len(results_df):,} pathway results")
 
         return results_df
+
+    def model_all_pathways(
+        self,
+        df: pd.DataFrame,
+        hn_access_column: str = None
+    ) -> pd.DataFrame:
+        """Alias for analyze_all_pathways for backwards compatibility."""
+        return self.analyze_all_pathways(df, hn_access_column=hn_access_column)
 
     def generate_pathway_summary(self, results_df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -417,7 +499,7 @@ class PathwayModeler:
             pathway_results = results_df[results_df['pathway_id'] == pathway_id]
 
             # Get pathway object
-            pathway = PATHWAYS.get(pathway_id)
+            pathway = self.pathways.get(pathway_id, PATHWAYS.get(pathway_id))
             pathway_name = pathway.name if pathway else pathway_id
 
             # Filter finite paybacks
@@ -466,6 +548,66 @@ class PathwayModeler:
 
         summary_df = pd.DataFrame(summary_rows)
         return summary_df
+
+    def run_hn_connection_sensitivity(
+        self,
+        df: pd.DataFrame,
+        hn_access_column: Optional[str] = None,
+        deltas: Tuple[int, ...] = (0, 2000, 5000)
+    ) -> pd.DataFrame:
+        """Run sensitivity on district heating connection costs."""
+        base_cost = self.costs.get('district_heating_connection', 5000)
+        hn_access = self._get_hn_access(df, hn_access_column=hn_access_column)
+
+        rows = []
+        hn_pathway = self.pathways.get('fabric_plus_hn_only', PATHWAYS.get('fabric_plus_hn_only'))
+
+        for delta in deltas:
+            self.costs['district_heating_connection'] = base_cost + delta
+            scenario_results = []
+
+            for row_idx, property_data in df.iterrows():
+                scenario_results.append(
+                    self.calculate_property_pathway(
+                        property_data,
+                        hn_pathway,
+                        has_hn_access=hn_access.loc[row_idx]
+                    )
+                )
+
+            scenario_df = pd.DataFrame(scenario_results)
+            capex_stats = self._summarize_series(scenario_df['total_capex'])
+            bill_saving_stats = self._summarize_series(scenario_df['annual_bill_saving'])
+            bill_change_stats = self._summarize_series(
+                scenario_df['annual_bill'] - scenario_df['baseline_bill']
+            )
+            co2_saving_stats = self._summarize_series(scenario_df['co2_saving_tonnes'])
+            co2_change_stats = self._summarize_series(
+                scenario_df['annual_co2_tonnes'] - scenario_df['baseline_co2_tonnes']
+            )
+            payback_stats = self._summarize_series(scenario_df['simple_payback_years'])
+
+            rows.append({
+                'scenario': f'hn_cost_{int(base_cost + delta)}',
+                'hn_connection_cost_per_home': base_cost + delta,
+                'n_properties': len(scenario_df),
+                **{f'capex_{k}': v for k, v in capex_stats.items()},
+                **{f'bill_saving_{k}': v for k, v in bill_saving_stats.items()},
+                **{f'bill_change_{k}': v for k, v in bill_change_stats.items()},
+                **{f'co2_saving_{k}': v for k, v in co2_saving_stats.items()},
+                **{f'co2_change_{k}': v for k, v in co2_change_stats.items()},
+                **{f'payback_{k}': v for k, v in payback_stats.items()},
+            })
+
+        # Restore base cost
+        self.costs['district_heating_connection'] = base_cost
+
+        sensitivity_df = pd.DataFrame(rows)
+        output_path = self.comparisons_dir / "hn_cost_sensitivity.csv"
+        sensitivity_df.to_csv(output_path, index=False)
+        logger.info(f"Saved HN cost sensitivity results to {output_path}")
+
+        return sensitivity_df
 
     def verify_hybrid_cost_fix(self, results_df: pd.DataFrame) -> bool:
         """
