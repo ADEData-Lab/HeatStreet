@@ -8,6 +8,7 @@ with interactive prompts and progress indicators.
 import os
 import shutil
 import sys
+import subprocess
 from pathlib import Path
 from loguru import logger
 import questionary
@@ -657,6 +658,68 @@ def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None):
     console.print("This phase requires GDAL/geopandas for spatial analysis.")
     console.print("If not installed, this phase will be skipped.")
     console.print()
+
+    def check_spatial_dependencies():
+        """Check for required spatial libraries before running analysis."""
+        try:
+            import geopandas  # noqa: F401
+            import fiona  # noqa: F401
+            import shapely  # noqa: F401
+            import pyproj  # noqa: F401
+            return True
+        except ImportError:
+            console.print("[yellow]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/yellow]")
+            console.print("[yellow]⚠ Spatial libraries missing[/yellow]")
+            console.print("[yellow]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/yellow]")
+            console.print()
+            console.print("Map outputs require installing [bold]requirements-spatial.txt[/bold] or using the Conda launcher.")
+            console.print("Without these libraries, the spatial phase will be skipped and maps will be absent.")
+            console.print()
+
+            choice = questionary.select(
+                "How would you like to proceed?",
+                choices=[
+                    questionary.Choice("Attempt to install requirements-spatial.txt now (pip)", value="install"),
+                    questionary.Choice("Pause/abort to install manually (e.g., via Conda launcher)", value="abort"),
+                    questionary.Choice("Continue without spatial results", value="skip"),
+                ],
+            ).ask()
+
+            if choice == "install":
+                console.print()
+                console.print("[cyan]Attempting to install spatial dependencies...[/cyan]")
+                result = subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "-r", "requirements-spatial.txt"],
+                    capture_output=True,
+                    text=True,
+                )
+
+                if result.returncode == 0:
+                    console.print("[green]✓[/green] Spatial dependencies installed. Re-checking...")
+                    return check_spatial_dependencies()
+
+                console.print("[yellow]⚠ Could not install spatial dependencies automatically.[/yellow]")
+                console.print("Install manually with: pip install -r requirements-spatial.txt or use the Conda launcher.")
+
+            if choice == "abort":
+                console.print("[yellow]Analysis paused. Install the spatial dependencies and re-run the spatial phase.[/yellow]")
+                if analysis_logger:
+                    analysis_logger.skip_phase(
+                        "Spatial Analysis", "User paused to install GIS dependencies before continuing",
+                    )
+                raise SystemExit(0)
+
+            console.print("[yellow]Continuing without spatial analysis. Map outputs will be absent.[/yellow]")
+            if analysis_logger:
+                analysis_logger.skip_phase(
+                    "Spatial Analysis", "Spatial dependencies missing; map outputs will not be generated",
+                )
+            return False
+
+        return True
+
+    if not check_spatial_dependencies():
+        return None, None
 
     try:
         from src.spatial.heat_network_analysis import HeatNetworkAnalyzer
