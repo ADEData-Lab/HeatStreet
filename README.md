@@ -448,6 +448,11 @@ The project models five scenarios:
 | **Heat Network** | Modest fabric + DH connection | £7,000-12,000 | 50-70% |
 | **Hybrid** | Heat network where viable, ASHP elsewhere | Varies | 60-75% |
 
+### Targeting and shared-package assumptions
+
+- Hybrid heat-network targeting currently uses the existing `has_hn_access` flag or the configured heat-network penetration rate. It does **not** dynamically select properties from the spatial tier outputs; add geospatial filtering first if you want the hybrid run to follow map-derived tiers.
+- Fabric packages are shared across scenarios by design. If you want differentiated fabric measures (e.g., lighter fabric for heat networks vs deeper fabric for heat pumps), add explicit branching logic before the packages are applied.
+
 ## Heat Network Tier Classification
 
 Properties are classified into five tiers:
