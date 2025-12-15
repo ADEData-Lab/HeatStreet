@@ -26,6 +26,8 @@ from src.acquisition.london_gis_downloader import LondonGISDownloader
 from src.cleaning.data_validator import EPCDataValidator
 from src.analysis.archetype_analysis import ArchetypeAnalyzer
 from src.modeling.scenario_model import ScenarioModeler
+from src.modeling.pathway_model import PathwayModeler
+from src.reporting.comparisons import ComparisonReporter
 from src.utils.analysis_logger import AnalysisLogger
 
 
@@ -512,6 +514,45 @@ def model_scenarios(df, analysis_logger: AnalysisLogger = None):
 
     modeler.save_results()
     console.print(f"[green]✓[/green] Results saved")
+
+    # Generate pathway-level outputs and HP vs HN comparisons (aligns with main pipeline)
+    console.print()
+    console.print("[cyan]Building pathway modeling outputs and HP vs HN comparisons...[/cyan]")
+    try:
+        import pandas as pd
+
+        pathway_modeler = PathwayModeler()
+        property_results_path = pathway_modeler.output_dir / "pathway_results_by_property.parquet"
+        summary_path = pathway_modeler.output_dir / "pathway_results_summary.csv"
+
+        if property_results_path.exists() and summary_path.exists():
+            console.print("[cyan]Loading existing pathway modeling results...[/cyan]")
+            pathway_results = pd.read_parquet(property_results_path)
+            pathway_summary = pd.read_csv(summary_path)
+        else:
+            console.print("[cyan]Running pathway modeling to generate comparison inputs...[/cyan]")
+            pathway_results = pathway_modeler.model_all_pathways(df)
+            pathway_summary = pathway_modeler.generate_pathway_summary(pathway_results)
+            property_results_path, summary_path = pathway_modeler.export_results(pathway_results, pathway_summary)
+
+        comparison_reporter = ComparisonReporter()
+        comparison_reporter.generate_comparisons(results_path=property_results_path)
+
+        comparisons_dir = comparison_reporter.comparisons_dir
+        console.print(f"[green]✓[/green] HP vs HN comparison artefacts saved to: {comparisons_dir}")
+        console.print(f"    • Property results: {property_results_path}")
+        console.print(f"    • Pathway summary: {summary_path}")
+        console.print(f"    • Comparison CSV: {comparisons_dir / 'hn_vs_hp_comparison.csv'}")
+        console.print(f"    • Comparison snippet: {comparisons_dir / 'hn_vs_hp_report_snippet.md'}")
+
+        if analysis_logger:
+            analysis_logger.add_output(str(property_results_path), "parquet", "Pathway results by property")
+            analysis_logger.add_output(str(summary_path), "csv", "Pathway results summary")
+            analysis_logger.add_output(str(comparisons_dir / 'hn_vs_hp_comparison.csv'), "csv", "HP vs HN comparison table")
+            analysis_logger.add_output(str(comparisons_dir / 'hn_vs_hp_report_snippet.md'), "md", "HP vs HN markdown snippet")
+    except Exception as e:
+        console.print(f"[yellow]⚠ Could not generate pathway comparisons: {e}[/yellow]")
+        logger.exception("Pathway comparison generation failed")
 
     if analysis_logger:
         analysis_logger.add_metric("scenarios_modeled", len(scenario_results), "Decarbonization scenarios analyzed")
