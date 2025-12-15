@@ -19,8 +19,8 @@
 
 2. **Clone repository**
    ```bash
-   git clone https://github.com/pipnic1234/HeatStreetEPC.git
-   cd HeatStreetEPC
+   git clone https://github.com/ADEData-Lab/HeatStreet.git
+   cd HeatStreet
    ```
 
 3. **Run Conda launcher**
@@ -48,8 +48,8 @@
 
 1. **Clone repository**
    ```bash
-   git clone https://github.com/pipnic1234/HeatStreetEPC.git
-   cd HeatStreetEPC
+   git clone https://github.com/ADEData-Lab/HeatStreet.git
+   cd HeatStreet
    ```
 
 2. **Run standard launcher**

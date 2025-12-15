@@ -53,7 +53,7 @@ This single command installs:
 
 ```bash
 # Navigate to your project directory
-cd "path\to\HeatStreetEPC"
+cd "path\to\HeatStreet"
 
 # Install core requirements
 pip install -r requirements.txt
