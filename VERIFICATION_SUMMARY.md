@@ -218,7 +218,7 @@ energy_prices:
 carbon_factors:
   current:
     gas: 0.183  # Updated from 0.210 to match DESNZ 2024 (0.18296 kgCO₂e/kWh)
-    electricity: 0.233  # Matches SAP 10.0 (DESNZ 2024: 0.225)
+    electricity: 0.225  # Matches DESNZ 2024 grid factor (gross CV basis)
   projected_2030:
     gas: 0.183
     electricity: 0.100  # Updated from 0.150 to align with National Grid FES (range: 0.05-0.10)

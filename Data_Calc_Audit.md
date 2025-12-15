@@ -7,7 +7,7 @@ This document catalogs every formula, parameter, and external datapoint used whe
   - Current cap: gas £0.0624, electricity £0.245 (Ofgem Q4 2024 price cap).【F:config/config.yaml†L214-L229】
   - Projections: gas £0.07/£0.08 and electricity £0.22/£0.18 for 2030/2040 scenarios respectively.【F:config/config.yaml†L223-L229】
 - **Carbon intensity (kgCO₂/kWh)**
-  - Current factors: gas 0.183, electricity 0.233 (DESNZ 2024 & SAP 10.0).【F:config/config.yaml†L230-L244】
+- Current factors: gas 0.183, electricity 0.225 (DESNZ 2024 grid factor).【F:config/config.yaml†L230-L244】
   - Future grid factors: electricity 0.100 (2030) and 0.050 (2040); gas held at 0.183.【F:config/config.yaml†L239-L244】
 - **Heat network assumptions**
   - Tariff £0.08/kWh delivered; distribution efficiency 0.90 (10% losses); penetration scenarios 0.2–10%.【F:config/config.yaml†L255-L263】

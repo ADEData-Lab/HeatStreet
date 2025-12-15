@@ -155,7 +155,7 @@ class PathwayModeler:
         # Carbon factors
         self.carbon = self.config.get('carbon_factors', {}).get('current', {})
         self.gas_carbon = self.carbon.get('gas', 0.183)
-        self.elec_carbon = self.carbon.get('electricity', 0.233)
+        self.elec_carbon = self.carbon.get('electricity', 0.225)
 
         # Heat pump parameters
         self.hp_scop = self.config.get('heat_pump', {}).get('scop', 3.0)

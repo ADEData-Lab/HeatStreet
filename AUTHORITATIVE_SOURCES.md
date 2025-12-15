@@ -95,11 +95,11 @@ This document serves as the **single source of truth** for all calculation param
 | ID | Item | Value | Status | Evidence |
 |----|------|-------|--------|----------|
 | 8 | Gas Carbon Factor (Current) | 0.183 kgCO2e/kWh | **Validated** | [UK GHG Conversion Factors 2024](https://www.gov.uk/government/publications/greenhouse-gas-reporting-conversion-factors-2024), [ITP Energised Grid Factors](https://www.itpenergised.com/new-2024-uk-grid-emissions-factors/) |
-| 9 | Electricity Grid Carbon Factor (Current) | 0.233 kgCO2e/kWh | Conservative but acceptable | [UK GHG Conversion Factors 2024](https://www.gov.uk/government/publications/greenhouse-gas-reporting-conversion-factors-2024), [ITP Energised Grid Factors](https://www.itpenergised.com/new-2024-uk-grid-emissions-factors/) |
+| 9 | Electricity Grid Carbon Factor (Current) | 0.225 kgCO2e/kWh | **Validated** | [UK GHG Conversion Factors 2024](https://www.gov.uk/government/publications/greenhouse-gas-reporting-conversion-factors-2024), [HeatStreet Data Sources Validation](HeatStreet_Data_Sources_Validation.md#grid-electricity-co2-factor-2024) |
 
 **Notes:**
 - Gas factor matches 2024 UK Government GHG conversion factor for natural gas (gross CV)
-- Electricity factor slightly above 2024 official grid factor (~0.225); errs on side of under-claiming savings
+- Electricity factor matches 2024 DESNZ/UK Government grid factor on a gross CV basis (0.225 kgCO2e/kWh)
 
 ### Projected Factors
 

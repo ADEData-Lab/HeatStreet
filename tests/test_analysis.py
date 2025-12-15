@@ -7,10 +7,12 @@ Contains lightweight tests and assertions to verify:
 3. Package/pathway ID resolution - all IDs resolve to known definitions
 """
 
+import copy
 import pandas as pd
 import numpy as np
 from pathlib import Path
 import sys
+import pytest
 
 # Add project root to path
 sys.path.append(str(Path(__file__).parent.parent))
@@ -137,6 +139,30 @@ def test_hybrid_cost_bug_fix():
         assert False, "\n".join(errors)
 
     logger.info("PASS: All hybrid cost bug tests passed!")
+
+
+def test_carbon_factor_fallback_matches_authoritative(monkeypatch):
+    """Ensure hardcoded electricity carbon fallback matches the authoritative config value."""
+
+    from config.config import load_config
+    from src.modeling import pathway_model
+    from src.modeling.pathway_model import PathwayModeler
+
+    base_config = load_config()
+    expected_electricity_factor = base_config['carbon_factors']['current']['electricity']
+
+    def fake_load_config():
+        config_copy = copy.deepcopy(base_config)
+        config_copy['carbon_factors']['current'].pop('electricity', None)
+        return config_copy
+
+    monkeypatch.setattr(pathway_model, 'load_config', fake_load_config)
+
+    modeler = PathwayModeler()
+
+    assert modeler.elec_carbon == expected_electricity_factor, (
+        "Fallback electricity carbon factor should align with authoritative config"
+    )
 
 
 def test_epc_anomaly_flagging():
