@@ -121,6 +121,18 @@ scenarios:
       - "wall_insulation"
       - "double_glazing"
 
+  fabric_to_tipping_point:
+    name: "Fabric bundle to tipping point"
+    measures:
+      - "fabric_bundle_tipping_point"
+
+  minimum_fabric_hp_ready:
+    name: "Minimum fabric + ASHP"
+    measures:
+      - "fabric_bundle_minimum_ashp"
+      - "ashp_installation"
+      - "emitter_upgrades"
+
   heat_pump:
     name: "Heat pump pathway"
     measures:

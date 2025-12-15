@@ -22,9 +22,11 @@ from config.config import (
     get_scenario_definitions,
     get_cost_assumptions,
     get_analysis_horizon_years,
+    get_measure_savings,
     DATA_PROCESSED_DIR,
     DATA_OUTPUTS_DIR
 )
+from src.analysis.fabric_tipping_point import FabricTippingPointAnalyzer
 
 
 @dataclass
@@ -173,9 +175,19 @@ class ScenarioModeler:
         self.config = load_config()
         self.scenarios = get_scenario_definitions()
         self.costs = get_cost_assumptions()
+        self.measure_savings = get_measure_savings()
         self.energy_prices = self.config['energy_prices']
         self.carbon_factors = self.config['carbon_factors']
         self.analysis_horizon_years = get_analysis_horizon_years()
+
+        # Fabric bundles derived from marginal benefit analysis
+        tipping_analyzer = FabricTippingPointAnalyzer(output_dir=DATA_OUTPUTS_DIR)
+        curve_df, _ = tipping_analyzer.run_analysis()
+        self.fabric_bundles = tipping_analyzer.derive_fabric_bundles(
+            curve_df,
+            typical_annual_heat_demand_kwh=15000
+        )
+        self.scenarios = self._inject_fabric_bundles(self.scenarios)
 
         self.results = {}
 
@@ -280,6 +292,63 @@ class ScenarioModeler:
             'average_payback_years': 0
         }
 
+    def _inject_fabric_bundles(self, scenarios: Dict[str, Dict]) -> Dict[str, Dict]:
+        """Replace fabric bundle placeholders with concrete measure lists."""
+        expanded = {}
+        for scenario_name, scenario_cfg in scenarios.items():
+            measures = scenario_cfg.get('measures', [])
+            expanded_measures: List[str] = []
+
+            for measure in measures:
+                if measure == 'fabric_bundle_tipping_point':
+                    expanded_measures.extend(
+                        self._map_fabric_bundle_to_scenario(
+                            self.fabric_bundles.get('fabric_full_to_tipping', [])
+                        )
+                    )
+                elif measure == 'fabric_bundle_minimum_ashp':
+                    expanded_measures.extend(
+                        self._map_fabric_bundle_to_scenario(
+                            self.fabric_bundles.get('fabric_minimum_to_ashp', [])
+                        )
+                    )
+                else:
+                    expanded_measures.append(measure)
+
+            # Preserve order while removing duplicates
+            deduped: List[str] = []
+            for item in expanded_measures:
+                if item not in deduped:
+                    deduped.append(item)
+
+            expanded[scenario_name] = {
+                **scenario_cfg,
+                'measures': deduped
+            }
+
+        return expanded
+
+    def _map_fabric_bundle_to_scenario(self, bundle: List[str]) -> List[str]:
+        """Translate catalogue measure IDs to scenario measure names."""
+        mapping = {
+            'loft_insulation': 'loft_insulation_topup',
+            'cavity_wall_insulation': 'wall_insulation',
+            'solid_wall_insulation_ewi': 'wall_insulation',
+            'solid_wall_insulation_iwi': 'wall_insulation',
+            'floor_insulation': 'floor_insulation',
+            'double_glazing_upgrade': 'double_glazing',
+            'triple_glazing_upgrade': 'triple_glazing',
+            'draught_proofing': 'draught_proofing'
+        }
+
+        mapped: List[str] = []
+        for measure in bundle:
+            mapped_measure = mapping.get(measure)
+            if mapped_measure:
+                mapped.append(mapped_measure)
+
+        return mapped
+
     def _calculate_property_upgrade(
         self,
         property_data: pd.Series,
@@ -316,6 +385,18 @@ class ScenarioModeler:
             elif measure == 'double_glazing':
                 capital_cost += self._cost_glazing(property_data)
                 energy_reduction += self._savings_glazing(property_data)
+
+            elif measure == 'triple_glazing':
+                capital_cost += self._cost_triple_glazing(property_data)
+                energy_reduction += self._savings_triple_glazing(property_data)
+
+            elif measure == 'floor_insulation':
+                capital_cost += self._cost_floor_insulation(property_data)
+                energy_reduction += self._savings_floor_insulation(property_data)
+
+            elif measure == 'draught_proofing':
+                capital_cost += self._cost_draught_proofing(property_data)
+                energy_reduction += self._savings_draught_proofing(property_data)
 
             elif measure == 'ashp_installation':
                 capital_cost += self.costs['ashp_installation']
@@ -385,9 +466,9 @@ class ScenarioModeler:
 
     def _savings_loft_insulation(self, property_data: pd.Series) -> float:
         """Calculate energy savings from loft insulation."""
-        # Typical savings: 15-25% of heating energy for uninsulated loft
         current_energy = self._get_absolute_energy(property_data)
-        return current_energy * 0.15  # Conservative estimate
+        saving_pct = self.measure_savings.get('loft_insulation_topup', {}).get('kwh_saving_pct', 0.15)
+        return current_energy * saving_pct
 
     def _cost_wall_insulation(self, property_data: pd.Series) -> float:
         """Calculate cost of wall insulation."""
@@ -404,14 +485,17 @@ class ScenarioModeler:
 
     def _savings_wall_insulation(self, property_data: pd.Series) -> float:
         """Calculate energy savings from wall insulation."""
-        # Typical savings: 20-35% of heating energy for uninsulated walls
         current_energy = self._get_absolute_energy(property_data)
         wall_type = property_data.get('wall_type', 'Solid')
 
+        wall_savings = self.measure_savings.get('wall_insulation', {})
+        cavity_pct = wall_savings.get('cavity_kwh_saving_pct', 0.20)
+        solid_pct = wall_savings.get('solid_kwh_saving_pct', 0.30)
+
         if wall_type == 'Cavity':
-            return current_energy * 0.20
+            return current_energy * cavity_pct
         else:
-            return current_energy * 0.30  # Higher savings for solid walls
+            return current_energy * solid_pct  # Higher savings for solid walls
 
     def _cost_glazing(self, property_data: pd.Series) -> float:
         """Calculate cost of window glazing upgrade."""
@@ -422,9 +506,39 @@ class ScenarioModeler:
 
     def _savings_glazing(self, property_data: pd.Series) -> float:
         """Calculate energy savings from window glazing."""
-        # Typical savings: 10-15% of heating energy
         current_energy = self._get_absolute_energy(property_data)
-        return current_energy * 0.10
+        saving_pct = self.measure_savings.get('double_glazing', {}).get('kwh_saving_pct', 0.10)
+        return current_energy * saving_pct
+
+    def _cost_triple_glazing(self, property_data: pd.Series) -> float:
+        """Calculate cost of triple glazing upgrade."""
+        return self.costs.get('triple_glazing_upgrade', self.costs.get('double_glazing_upgrade', 0))
+
+    def _savings_triple_glazing(self, property_data: pd.Series) -> float:
+        """Calculate energy savings from triple glazing."""
+        current_energy = self._get_absolute_energy(property_data)
+        saving_pct = self.measure_savings.get('triple_glazing', {}).get('kwh_saving_pct', 0.15)
+        return current_energy * saving_pct
+
+    def _cost_floor_insulation(self, property_data: pd.Series) -> float:
+        """Calculate cost of suspended timber floor insulation."""
+        return self.costs.get('floor_insulation', 0)
+
+    def _savings_floor_insulation(self, property_data: pd.Series) -> float:
+        """Calculate savings from insulating suspended timber floors."""
+        current_energy = self._get_absolute_energy(property_data)
+        saving_pct = self.measure_savings.get('floor_insulation', {}).get('kwh_saving_pct', 0.05)
+        return current_energy * saving_pct
+
+    def _cost_draught_proofing(self, property_data: pd.Series) -> float:
+        """Calculate cost of draught proofing."""
+        return self.costs.get('draught_proofing', 0)
+
+    def _savings_draught_proofing(self, property_data: pd.Series) -> float:
+        """Calculate savings from draught proofing."""
+        current_energy = self._get_absolute_energy(property_data)
+        saving_pct = self.measure_savings.get('draught_proofing', {}).get('kwh_saving_pct', 0.05)
+        return current_energy * saving_pct
 
     def _savings_heat_pump(self, property_data: pd.Series) -> float:
         """Calculate energy savings from heat pump (accounting for COP)."""
