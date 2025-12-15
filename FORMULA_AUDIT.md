@@ -126,7 +126,7 @@ This document catalogs **every formula, constant, assumption, and derived calcul
 | Fuel | Current (2024) | Projected 2030 | Projected 2040 | Source/Basis |
 |------|----------------|----------------|----------------|--------------|
 | Gas | **0.183** ✅ | **0.183** ✅ | **0.183** ✅ | DESNZ Conversion Factors 2024 |
-| Electricity | **0.233** ✅ | **0.100** ✅ | **0.050** ✅ | SAP 10.0 / National Grid FES 2025 |
+| Electricity | **0.225** ✅ | **0.100** ✅ | **0.050** ✅ | DESNZ GHG 2024 / National Grid FES 2025 |
 
 **✅ VERIFIED 2025-12-04:**
 - **Gas:** Updated from 0.210 to **0.183 kgCO₂/kWh** (DESNZ 2024: 0.18296 kgCO₂e/kWh)
@@ -135,7 +135,7 @@ This document catalogs **every formula, constant, assumption, and derived calcul
 - **Electricity 2030:** Updated from 0.150 to **0.100 kgCO₂/kWh**
   - Previous value was conservative; National Grid FES 2025 projects 50-100 gCO₂/kWh
   - Source: https://www.nationalgrideso.com/future-energy/future-energy-scenarios-fes
-- **Electricity current:** 0.233 matches SAP 10.0 (DESNZ 2024: 0.225)
+- **Electricity current:** 0.225 matches DESNZ/UK Government GHG 2024 factor
 - **Electricity 2040:** 0.050 verified within NESO projection range (41-67 gCO₂/kWh)
 
 **⚠️ KEY ASSUMPTIONS:**

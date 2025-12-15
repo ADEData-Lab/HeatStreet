@@ -167,10 +167,10 @@ See **[AUTHORITATIVE_SOURCES.md](AUTHORITATIVE_SOURCES.md)** for the complete ev
 
 #### 2.1.2 Electricity Grid Carbon Factor
 - **Location:** `config/config.yaml:216`
-- **Value:** 0.233 kgCO₂e/kWh
+- **Value:** 0.225 kgCO₂e/kWh
 - **Description:** Grid electricity carbon intensity
 - **Source:** ✅ **PARTIALLY EVIDENCED** - SAP 10.0 value cited
-- **Note:** DESNZ 2024 factor is 0.225 kgCO₂e/kWh, but SAP 10.0 value (0.233) used for consistency with EPC methodology
+- **Note:** DESNZ 2024 factor is 0.225 kgCO₂e/kWh (gross CV basis) and is used directly
 - **Last Updated:** 2025-12-04
 - **Assumptions:**
   - UK grid average
