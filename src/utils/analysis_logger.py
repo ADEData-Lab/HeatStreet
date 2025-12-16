@@ -546,7 +546,42 @@ class AnalysisLogger:
             elif path.suffix.lower() == '.feather':
                 df = pd.read_feather(path).head(max_rows)
             elif path.suffix.lower() == '.json':
-                df = pd.read_json(path).head(max_rows)
+                with path.open('r', encoding='utf-8') as f:
+                    data = json.load(f)
+
+                df = None
+                if isinstance(data, list):
+                    # Standard list-of-records JSON
+                    df = pd.json_normalize(data)
+                elif isinstance(data, dict):
+                    # Handle dict-of-lists, potentially with inconsistent lengths
+                    if all(isinstance(v, list) for v in data.values()):
+                        lengths = {len(v) for v in data.values()}
+                        max_length = max(lengths) if lengths else 0
+
+                        if len(lengths) > 1:
+                            logger.info(
+                                f"Normalizing JSON with mismatched list lengths for {path} "
+                                "using records orientation."
+                            )
+
+                        records = []
+                        for idx in range(max_length):
+                            record = {
+                                key: values[idx] if idx < len(values) else None
+                                for key, values in data.items()
+                            }
+                            records.append(record)
+                        df = pd.DataFrame.from_records(records)
+                    else:
+                        # Nested dict structure; flatten with json_normalize
+                        df = pd.json_normalize(data)
+
+                if df is None:
+                    logger.info(f"Skipping JSON output {path}: unsupported structure for tabular preview")
+                    return None
+
+                df = df.head(max_rows)
             else:
                 return None
 
