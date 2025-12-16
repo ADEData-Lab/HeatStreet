@@ -15,6 +15,7 @@ from loguru import logger
 import numpy as np
 from concurrent.futures import ProcessPoolExecutor
 import multiprocessing
+from tqdm import tqdm
 
 import sys
 sys.path.append(str(Path(__file__).parent.parent.parent))
@@ -36,7 +37,24 @@ class HeatNetworkAnalyzer:
     def __init__(self):
         """Initialize the heat network analyzer."""
         self.config = load_config()
-        self.heat_network_tiers = self.config['analysis']['heat_network_tiers']
+
+        # Heat network tier definitions were originally stored under
+        # analysis. The config now keeps them under eligibility, so allow
+        # both locations to avoid a hard failure when the analysis block
+        # omits them.
+        analysis_cfg = self.config.get('analysis', {})
+        eligibility_cfg = self.config.get('eligibility', {})
+        self.heat_network_tiers = (
+            analysis_cfg.get('heat_network_tiers')
+            or eligibility_cfg.get('heat_network_tiers')
+        )
+
+        if not self.heat_network_tiers:
+            raise KeyError(
+                "Missing heat network tier configuration. Expected at "
+                "config['analysis']['heat_network_tiers'] or "
+                "config['eligibility']['heat_network_tiers']."
+            )
         self.readiness_config = self.config.get('heat_network', {}).get('readiness', {})
         self.gis_downloader = LondonGISDownloader()
 
@@ -481,7 +499,10 @@ class HeatNetworkAnalyzer:
             unclassified_buffered['_buffer_idx'] = unclassified_buffered.index
 
             # Spatial join to find all properties within each buffer
-            logger.info(f"  Step 3/4: Performing spatial join (this is the slowest step, ~1-3 min for 10K properties)...")
+            logger.info(
+                "  Step 3/4: Performing spatial join (slowest step; scales with property count, ~1-3 min per 10K properties — "
+                "large runs can take tens of minutes)..."
+            )
             import time
             start_time = time.time()
 
@@ -503,8 +524,18 @@ class HeatNetworkAnalyzer:
             heat_density_gwh_km2 = (heat_density_by_buffer / 1_000_000) / buffer_area_km2
 
             # Classify tiers based on heat density
-            logger.info(f"  Classifying {len(heat_density_gwh_km2):,} properties into heat density tiers...")
-            for idx, density in heat_density_gwh_km2.items():
+            logger.info(
+                f"  Classifying {len(heat_density_gwh_km2):,} properties into heat density tiers "
+                "(progress bar updates every ~10s)..."
+            )
+            for idx, density in tqdm(
+                heat_density_gwh_km2.items(),
+                total=len(heat_density_gwh_km2),
+                desc="Heat density tiering",
+                mininterval=10,
+                unit="properties",
+                leave=False,
+            ):
                 if density >= self.heat_network_tiers['tier_3']['min_heat_density_gwh_km2']:
                     properties.loc[idx, 'heat_network_tier'] = 'Tier 3: High heat density'
                     properties.loc[idx, 'tier_number'] = 3
