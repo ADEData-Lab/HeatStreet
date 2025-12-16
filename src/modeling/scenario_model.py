@@ -27,6 +27,7 @@ from config.config import (
     DATA_OUTPUTS_DIR
 )
 from src.analysis.fabric_tipping_point import FabricTippingPointAnalyzer
+from src.spatial.heat_network_analysis import HeatNetworkAnalyzer
 
 
 @dataclass
@@ -239,8 +240,34 @@ class ScenarioModeler:
 
         self.results = {}
 
+        self.hn_analyzer = HeatNetworkAnalyzer()
+
         logger.info("Initialized Scenario Modeler")
         logger.info(f"Loaded {len(self.scenarios)} scenarios")
+
+    def _apply_heat_network_readiness(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Add deterministic heat network readiness columns to the EPC dataset."""
+
+        required_cols = {'hn_ready', 'tier_number', 'distance_to_network_m', 'in_heat_zone'}
+
+        if required_cols.issubset(df.columns):
+            return df
+
+        try:
+            logger.info("Enriching EPC data with heat network readiness flags...")
+            annotated = self.hn_analyzer.annotate_heat_network_readiness(df)
+            if annotated is not None:
+                return annotated
+        except Exception as exc:
+            logger.warning(f"Heat network readiness annotation failed: {exc}")
+
+        fallback = df.copy()
+        fallback['hn_ready'] = False
+        fallback['tier_number'] = fallback.get('tier_number', 5)
+        fallback['distance_to_network_m'] = np.nan
+        fallback['in_heat_zone'] = False
+        fallback['tier_number'] = pd.to_numeric(fallback['tier_number'], errors='coerce').fillna(5).astype(int)
+        return fallback
 
     def model_all_scenarios(self, df: pd.DataFrame) -> Dict:
         """
@@ -451,6 +478,8 @@ class ScenarioModeler:
     def _preprocess_ashp_readiness(self, df: pd.DataFrame) -> pd.DataFrame:
         """Flag properties that meet (or can meet) ASHP readiness thresholds."""
 
+        df = self._apply_heat_network_readiness(df)
+
         if 'ashp_ready' in df.columns:
             return df
 
@@ -460,13 +489,14 @@ class ScenarioModeler:
             heat_demand = pd.Series(np.nan, index=processed.index)
         processed['heat_demand_kwh_m2'] = heat_demand
 
-        tier_values = processed.get('heat_network_tier')
-        if tier_values is None:
-            processed['hn_ready'] = False
-        else:
-            processed['hn_ready'] = tier_values.fillna('').apply(
-                lambda tier: isinstance(tier, str) and not str(tier).startswith('Tier 5') and str(tier).strip() != ''
-            )
+        if 'hn_ready' not in processed.columns:
+            tier_values = processed.get('heat_network_tier')
+            if tier_values is None:
+                processed['hn_ready'] = False
+            else:
+                processed['hn_ready'] = tier_values.fillna('').apply(
+                    lambda tier: isinstance(tier, str) and not str(tier).startswith('Tier 5') and str(tier).strip() != ''
+                )
 
         processed['ashp_meets_heat_demand'] = heat_demand <= self.ashp_heat_demand_threshold
 

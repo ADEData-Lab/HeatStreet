@@ -37,6 +37,7 @@ class HeatNetworkAnalyzer:
         """Initialize the heat network analyzer."""
         self.config = load_config()
         self.heat_network_tiers = self.config['analysis']['heat_network_tiers']
+        self.readiness_config = self.config.get('heat_network', {}).get('readiness', {})
         self.gis_downloader = LondonGISDownloader()
 
         # Initialize postcode geocoder with caching
@@ -304,6 +305,104 @@ class HeatNetworkAnalyzer:
             logger.info(f"  {tier}: {count:,} ({count/len(properties)*100:.1f}%)")
 
         return properties
+
+    def annotate_heat_network_readiness(
+        self,
+        df: pd.DataFrame,
+        auto_download_gis: bool = True
+    ) -> Optional[pd.DataFrame]:
+        """
+        Append deterministic heat network readiness flags to the EPC DataFrame.
+
+        Adds:
+        - ``hn_ready``: Boolean flag for HN eligibility
+        - ``tier_number``: Integer tier classification (1-5)
+        - ``distance_to_network_m``: Distance to nearest existing network (meters)
+        - ``in_heat_zone``: Whether property lies inside a heat network zone polygon
+
+        Returns the input DataFrame with the above columns populated. If spatial
+        artefacts (coordinates or GIS data) are unavailable, the original
+        DataFrame is returned with default "not ready" flags.
+        """
+
+        readiness_cols = ['hn_ready', 'tier_number', 'distance_to_network_m', 'in_heat_zone']
+
+        # Avoid rework if already annotated
+        if set(readiness_cols).issubset(df.columns):
+            return df
+
+        properties_gdf = self.geocode_properties(df)
+
+        if properties_gdf is None or len(properties_gdf) == 0:
+            logger.warning("Heat network readiness skipped: no geocoded properties available.")
+            fallback = df.copy()
+            fallback['hn_ready'] = False
+            fallback['tier_number'] = fallback.get('tier_number', 5)
+            fallback['distance_to_network_m'] = np.nan
+            fallback['in_heat_zone'] = False
+            return fallback
+
+        heat_networks, heat_zones = self.load_london_heat_map_data(auto_download=auto_download_gis)
+
+        if heat_networks is None and heat_zones is None:
+            logger.warning("Heat network readiness skipped: GIS network/zone layers unavailable.")
+            fallback = df.copy()
+            fallback['hn_ready'] = False
+            fallback['tier_number'] = fallback.get('tier_number', 5)
+            fallback['distance_to_network_m'] = np.nan
+            fallback['in_heat_zone'] = False
+            return fallback
+
+        classified = self.classify_heat_network_tiers(properties_gdf, heat_networks, heat_zones)
+
+        # Compute distance to nearest existing network (meters)
+        classified['distance_to_network_m'] = np.nan
+        if heat_networks is not None and len(heat_networks) > 0:
+            networks_27700 = heat_networks.to_crs('EPSG:27700') if heat_networks.crs != 'EPSG:27700' else heat_networks
+            network_union = networks_27700.unary_union
+            classified_27700 = classified.to_crs('EPSG:27700')
+            classified['distance_to_network_m'] = classified_27700.geometry.apply(
+                lambda geom: geom.distance(network_union) if network_union else np.nan
+            )
+
+        # Flag whether property sits inside a heat network zone polygon
+        classified['in_heat_zone'] = False
+        if heat_zones is not None and len(heat_zones) > 0:
+            zones_27700 = heat_zones.to_crs('EPSG:27700') if heat_zones.crs != 'EPSG:27700' else heat_zones
+            classified_27700 = classified.to_crs('EPSG:27700')
+            zone_join = gpd.sjoin(
+                classified_27700[['geometry']],
+                zones_27700[['geometry']],
+                how='left',
+                predicate='within'
+            )
+            classified.loc[zone_join.index, 'in_heat_zone'] = zone_join.index_right.notna().values
+
+        # Derive deterministic readiness flag
+        max_distance = self.readiness_config.get('max_distance_to_network_m', 250)
+        min_density = self.readiness_config.get('min_density_gwh_km2', 5)
+        ready_tier_max = self.readiness_config.get('ready_tier_max', 4)
+        include_zones = self.readiness_config.get('heat_zone_ready', True)
+
+        classified['hn_ready'] = (
+            (classified.get('tier_number', 5) <= ready_tier_max) |
+            (classified['distance_to_network_m'] <= max_distance) |
+            (classified.get('heat_density_gwh_km2', np.nan) >= min_density) |
+            (classified['in_heat_zone'] if include_zones else False)
+        )
+
+        readiness_df = classified[readiness_cols]
+        readiness_df['tier_number'] = pd.to_numeric(readiness_df['tier_number'], errors='coerce').fillna(5).astype(int)
+
+        merged = df.copy()
+        for col in readiness_cols:
+            merged[col] = readiness_df.get(col)
+
+        merged['hn_ready'] = merged['hn_ready'].fillna(False).astype(bool)
+        merged['in_heat_zone'] = merged['in_heat_zone'].fillna(False).astype(bool)
+        merged['tier_number'] = merged['tier_number'].fillna(5).astype(int)
+
+        return merged
 
     def _classify_heat_density_tiers(
         self,

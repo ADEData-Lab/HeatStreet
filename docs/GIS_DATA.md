@@ -37,6 +37,17 @@ The GIS dataset from London Datastore contains:
 - Last Updated: April 2012
 - Format: ESRI Shapefiles (.shp)
 
+## Heat network readiness flags
+
+`ScenarioModeler` now asks the spatial analyzer to compute deterministic heat network flags before scenarios run. The pipeline in `src/spatial/heat_network_analysis.py` geocodes EPC rows, loads the London Heat Map layers, and appends four columns to the EPC DataFrame:
+
+- `tier_number` – tier classification (1–5) driven by distance to existing networks, whether the point falls inside a heat-network zone polygon, and buffered heat density.
+- `distance_to_network_m` – metres to the nearest existing network (EPSG:27700).
+- `in_heat_zone` – `True` if the property intersects a zone polygon.
+- `hn_ready` – readiness flag based on the thresholds exposed in `config/config.yaml` under `heat_network.readiness` (`max_distance_to_network_m`, `heat_zone_ready`, `min_density_gwh_km2`, `ready_tier_max`).
+
+These columns are consumed by both the hybrid scenario builder and `PathwayModeler`, replacing any random assignment of heat network access.
+
 ## How to Download
 
 ### Option 1: Manual Download (Most Reliable)

@@ -107,13 +107,13 @@ eligibility:
       criteria: "inside_hnz_boundary"
     tier_3:
       name: "High heat density"
-      threshold_kwh_per_m: 3000
+      min_heat_density_gwh_km2: 15
     tier_4:
       name: "Moderate heat density"
-      threshold_kwh_per_m: 1500
+      min_heat_density_gwh_km2: 5
     tier_5:
       name: "Low heat density"
-      threshold_kwh_per_m: 0
+      min_heat_density_gwh_km2: 0
 
 # Scenario Modeling
 scenarios:
@@ -277,6 +277,19 @@ heat_network:
   tariff_per_kwh: 0.08
   # Heat network efficiency (losses)
   distribution_efficiency: 0.90  # 10% distribution losses
+
+  # Deterministic heat network readiness flags (used by ScenarioModeler & PathwayModeler)
+  readiness:
+    # Within this distance of an existing network counts as "ready"
+    max_distance_to_network_m: 250
+    # Any property intersecting a heat network zone polygon is treated as "in zone"
+    heat_zone_ready: true
+    # Minimum buffered heat density (GWh/km²) to consider an area viable for HN expansion
+    min_density_gwh_km2: 5
+    # Tiers 1 through this value are treated as "ready" (Tier 5 is excluded)
+    ready_tier_max: 4
+    # Column used for deterministic access checks throughout the pipeline
+    access_column: "hn_ready"
 
 # Financial Parameters
 # See authoritative_sources.sections.financial_parameters
