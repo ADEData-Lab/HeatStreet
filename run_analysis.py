@@ -1410,6 +1410,9 @@ def main():
     console.print("[cyan]Saving analysis log...[/cyan]")
     log_path = analysis_logger.save_log()
     console.print(f"[green]✓[/green] Analysis log saved to: {log_path}")
+    combined_workbook = analysis_logger.metadata.get('combined_workbook')
+    if combined_workbook:
+        console.print(f"[green]✓[/green] Combined outputs workbook saved to: {combined_workbook}")
 
     # Show summary statistics
     summary_stats = analysis_logger.get_summary_stats()
@@ -1428,7 +1431,8 @@ def main():
         f"[cyan]Results saved to:[/cyan]\n"
         f"  • data/processed/ (validated data)\n"
         f"  • data/outputs/ (reports and charts)\n"
-        f"  • data/outputs/analysis_log.txt (analysis log)",
+        f"  • data/outputs/analysis_log.txt (analysis log)\n"
+        f"  • data/outputs/analysis_outputs_compendium.xlsx (combined workbook)",
         border_style="green"
     ))
     console.print()

@@ -6,6 +6,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 import json
+import re
+
 import numpy as np
 from loguru import logger
 
@@ -490,7 +492,146 @@ class AnalysisLogger:
 
         logger.info(f"Analysis log (JSON) saved to: {json_path}")
 
+        combined_path = self.build_combined_workbook()
+        if combined_path:
+            self.metadata['combined_workbook'] = str(combined_path)
+            logger.info(f"Combined analysis workbook saved to: {combined_path}")
+        else:
+            logger.info("Combined analysis workbook not created (no tabular outputs found)")
+
         return log_path
+
+    def _gather_all_outputs(self) -> List[Dict[str, Any]]:
+        """Return a flat list of all recorded outputs across phases."""
+        outputs: List[Dict[str, Any]] = []
+        for phase in self.phases:
+            outputs.extend(phase.get('outputs', []))
+        return outputs
+
+    def _is_tabular_output(self, path: Path, output_type: str) -> bool:
+        """Determine whether the file is a tabular dataset we can export to Excel."""
+        tabular_suffixes = {'.csv', '.parquet', '.feather', '.json'}
+        if path.suffix.lower() in tabular_suffixes:
+            return True
+
+        # Respect explicit output type if provided
+        if output_type:
+            return output_type.lower() in {'csv', 'parquet', 'table', 'data'}
+
+        return False
+
+    def _safe_sheet_name(self, base_name: str, existing_counts: Dict[str, int]) -> str:
+        """Create a unique, Excel-safe sheet name."""
+        cleaned = re.sub(r"[^A-Za-z0-9 _\-]", "", base_name).strip() or "Sheet"
+        truncated = cleaned[:28]  # leave room for suffix
+
+        count = existing_counts.get(truncated, 0)
+        existing_counts[truncated] = count + 1
+
+        if count == 0:
+            return truncated[:31]
+
+        suffix = f"_{count}"
+        return f"{truncated[:31 - len(suffix)]}{suffix}"
+
+    def _load_tabular_preview(self, path: Path, max_rows: int):
+        """Load a preview of a tabular dataset, limiting the number of rows."""
+        try:
+            import pandas as pd
+
+            if path.suffix.lower() == '.csv':
+                df = pd.read_csv(path, nrows=max_rows)
+            elif path.suffix.lower() == '.parquet':
+                df = pd.read_parquet(path).head(max_rows)
+            elif path.suffix.lower() == '.feather':
+                df = pd.read_feather(path).head(max_rows)
+            elif path.suffix.lower() == '.json':
+                df = pd.read_json(path).head(max_rows)
+            else:
+                return None
+
+            return df
+        except Exception as e:
+            logger.warning(f"Could not load tabular output {path}: {e}")
+            return None
+
+    def build_combined_workbook(self, filename: str = "analysis_outputs_compendium.xlsx", max_rows: int = 2000) -> Optional[Path]:
+        """
+        Combine all tabular outputs and their Markdown explainers into a multi-sheet Excel workbook.
+
+        Args:
+            filename: Name of the combined Excel file to create
+            max_rows: Maximum number of rows to include from each dataset
+
+        Returns:
+            Path to the created workbook, or None if no workbook was created
+        """
+        outputs = self._gather_all_outputs()
+        if not outputs:
+            return None
+
+        try:
+            import pandas as pd
+        except Exception:
+            logger.warning("pandas is required to build the combined workbook")
+            return None
+
+        output_path = self.output_dir / filename
+
+        # Avoid trying to read the workbook while it is being written
+        existing_counts: Dict[str, int] = {}
+        summary_rows: List[Dict[str, Any]] = []
+        doc_rows: List[Dict[str, Any]] = []
+
+        with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
+            for output in outputs:
+                path = Path(output.get('path', ''))
+                output_type = output.get('type', '')
+                description = output.get('description', '')
+                documentation = output.get('documentation')
+                documentation_path = Path(documentation) if documentation else None
+
+                sheet_name = ""
+                rows_exported: Optional[int] = None
+
+                if path.exists() and self._is_tabular_output(path, output_type) and path.resolve() != output_path.resolve():
+                    df = self._load_tabular_preview(path, max_rows)
+                    if df is not None:
+                        sheet_name = self._safe_sheet_name(path.stem, existing_counts)
+                        df.to_excel(writer, sheet_name=sheet_name, index=False)
+                        rows_exported = len(df)
+
+                if documentation_path and documentation_path.exists():
+                    try:
+                        doc_text = documentation_path.read_text(encoding='utf-8')
+                        doc_rows.append({
+                            'Output file': path.name or 'Unknown',
+                            'Documentation file': str(documentation_path),
+                            'Description': description,
+                            'Notes': doc_text
+                        })
+                    except Exception as e:
+                        logger.warning(f"Could not read documentation for {path}: {e}")
+
+                summary_rows.append({
+                    'Output file': path.name or 'Unknown',
+                    'Type': output_type,
+                    'Description': description,
+                    'Exists': path.exists(),
+                    'Sheet name': sheet_name,
+                    'Rows exported': rows_exported,
+                    'Documentation': str(documentation_path) if documentation_path else ''
+                })
+
+            if summary_rows:
+                summary_df = pd.DataFrame(summary_rows)
+                summary_df.to_excel(writer, sheet_name='Outputs Overview', index=False)
+
+            if doc_rows:
+                docs_df = pd.DataFrame(doc_rows)
+                docs_df.to_excel(writer, sheet_name='Output Documentation', index=False)
+
+        return output_path
 
     def get_summary_stats(self) -> Dict[str, Any]:
         """
