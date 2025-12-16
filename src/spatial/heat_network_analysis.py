@@ -544,6 +544,12 @@ class HeatNetworkAnalyzer:
             from reportlab.lib.utils import ImageReader
             from datetime import datetime
             import matplotlib.pyplot as plt
+        except ImportError as e:
+            logger.warning(
+                "Required mapping dependencies are missing; skipping map creation. "
+                f"Install the needed packages to enable mapping. Details: {e}"
+            )
+            return
 
         def _generate_static_map_image(properties_wgs84: gpd.GeoDataFrame, output_path: Path):
             """Create a static PNG of the classified properties without folium.
@@ -625,8 +631,6 @@ class HeatNetworkAnalyzer:
             png_generated = False
 
             try:
-                import folium
-
                 m = folium.Map(
                     location=[center_lat, center_lon],
                     zoom_start=12,
@@ -729,11 +733,6 @@ class HeatNetworkAnalyzer:
                     if not image_output_path or not image_output_path.exists():
                         logger.warning("Map image not available; skipping PDF export.")
                     else:
-                        from reportlab.lib.pagesizes import A4
-                        from reportlab.pdfgen import canvas
-                        from reportlab.lib.utils import ImageReader
-                        from datetime import datetime
-
                         c = canvas.Canvas(str(pdf_output_path), pagesize=A4)
                         width, height = A4
 
@@ -770,161 +769,6 @@ class HeatNetworkAnalyzer:
                 except Exception as e:
                     logger.error(f"Error creating PDF layout: {e}")
 
-            # Add properties as markers (sample if too many)
-            sample_size = min(1000, len(properties))
-            if len(properties) > sample_size:
-                logger.info(f"Sampling {sample_size} properties for map visualization")
-                properties_sample = properties.sample(sample_size)
-            else:
-                properties_sample = properties
-
-            for idx, row in properties_sample.iterrows():
-                if row.geometry is not None:
-                    tier_num = row.get('tier_number', 5)
-                    folium.CircleMarker(
-                        location=[row.geometry.y, row.geometry.x],
-                        radius=3,
-                        color=tier_colors.get(tier_num, 'gray'),
-                        fill=True,
-                        fillOpacity=0.6,
-                        popup=f"Tier {tier_num}: {row.get('heat_network_tier', 'Unknown')}"
-                    ).add_to(m)
-
-            # Add legend
-            legend_html = '''
-            <div style="position: fixed; bottom: 50px; left: 50px; width: 300px; height: 180px;
-                        background-color: white; border:2px solid grey; z-index:9999; font-size:14px;
-                        padding: 10px">
-            <p><strong>Heat Network Tiers</strong></p>
-            <p><i class="fa fa-circle" style="color:darkred"></i> Tier 1: Adjacent to existing network</p>
-            <p><i class="fa fa-circle" style="color:red"></i> Tier 2: Within planned HNZ</p>
-            <p><i class="fa fa-circle" style="color:orange"></i> Tier 3: High heat density</p>
-            <p><i class="fa fa-circle" style="color:yellow"></i> Tier 4: Moderate heat density</p>
-            <p><i class="fa fa-circle" style="color:lightgreen"></i> Tier 5: Low heat density</p>
-            </div>
-            '''
-            m.get_root().html.add_child(folium.Element(legend_html))
-
-            # Save map
-            m.save(str(output_path))
-            logger.info(f"Map saved to: {output_path}")
-
-            # Render to PNG if requested
-            if image_output_path is None:
-                image_output_path = output_path.with_suffix('.png')
-
-            if image_output_path:
-                image_output_path.parent.mkdir(parents=True, exist_ok=True)
-                image_created = False
-                try:
-                    png_data = m._to_png(delay=3)
-                    Image.open(io.BytesIO(png_data)).save(image_output_path)
-                    logger.info(f"Map image saved to: {image_output_path}")
-                    image_created = True
-                except ImportError:
-                    logger.warning(
-                        "Unable to render map PNG because rendering dependencies are missing. "
-                        "Install folium with map rendering extras (selenium) to enable image export."
-                    )
-                except Exception as e:
-                    logger.error(f"Error rendering map image: {e}")
-
-                if not image_created:
-                    try:
-                        properties_plot = properties
-                        if properties_plot.crs != 'EPSG:4326':
-                            properties_plot = properties_plot.to_crs('EPSG:4326')
-
-                        _, ax = plt.subplots(figsize=(10, 10))
-
-                        if heat_zones is not None and len(heat_zones) > 0:
-                            zones_plot = heat_zones
-                            if zones_plot.crs != 'EPSG:4326':
-                                zones_plot = zones_plot.to_crs('EPSG:4326')
-                            zones_plot.plot(ax=ax, color='lightblue', alpha=0.3, label='Potential HNZ')
-
-                        if heat_networks is not None and len(heat_networks) > 0:
-                            networks_plot = heat_networks
-                            if networks_plot.crs != 'EPSG:4326':
-                                networks_plot = networks_plot.to_crs('EPSG:4326')
-                            networks_plot.plot(ax=ax, color='red', linewidth=1, alpha=0.5, label='Existing Network')
-
-                        tier_colors = {
-                            1: 'darkred',
-                            2: 'red',
-                            3: 'orange',
-                            4: 'gold',
-                            5: 'lightgreen'
-                        }
-
-                        properties_plot.plot(
-                            ax=ax,
-                            markersize=5,
-                            color=properties_plot['tier_number'].map(tier_colors),
-                            alpha=0.6,
-                            label='Properties'
-                        )
-
-                        ax.set_title('Heat Network Tiers (static rendering)')
-                        ax.set_xlabel('Longitude')
-                        ax.set_ylabel('Latitude')
-                        ax.legend(loc='lower left')
-                        plt.tight_layout()
-                        plt.savefig(image_output_path, dpi=150)
-                        plt.close()
-                        logger.info(f"Static map image saved to: {image_output_path}")
-                        image_created = True
-                    except Exception as e:
-                        logger.error(f"Error creating static map image: {e}")
-
-            # Generate PDF layout if requested
-            if pdf_output_path is None:
-                pdf_output_path = output_path.with_suffix('.pdf')
-
-            if pdf_output_path:
-                pdf_output_path.parent.mkdir(parents=True, exist_ok=True)
-                try:
-                    if not image_output_path or not image_output_path.exists():
-                        logger.warning("Map image not available; skipping PDF export.")
-                    else:
-                        c = canvas.Canvas(str(pdf_output_path), pagesize=A4)
-                        width, height = A4
-
-                        title_text = "Heat Network Tier Map"
-                        subtitle_text = f"Generated: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
-
-                        c.setFont("Helvetica-Bold", 16)
-                        c.drawString(40, height - 60, title_text)
-                        c.setFont("Helvetica", 10)
-                        c.drawString(40, height - 80, subtitle_text)
-
-                        img_reader = ImageReader(str(image_output_path))
-                        img_width, img_height = img_reader.getSize()
-
-                        max_width = width - 80
-                        max_height = height - 160
-                        scale = min(max_width / img_width, max_height / img_height)
-
-                        display_width = img_width * scale
-                        display_height = img_height * scale
-
-                        x_pos = (width - display_width) / 2
-                        y_pos = (height - display_height) / 2 - 20
-
-                        c.drawImage(img_reader, x_pos, y_pos, width=display_width, height=display_height)
-                        c.showPage()
-                        c.save()
-                        logger.info(f"Map PDF saved to: {pdf_output_path}")
-                except ImportError:
-                    logger.warning(
-                        "Unable to generate PDF layout because reportlab is not installed. "
-                        "Install reportlab to enable PDF export."
-                    )
-                except Exception as e:
-                    logger.error(f"Error creating PDF layout: {e}")
-
-        except ImportError:
-            logger.warning("folium not available, skipping map creation")
         except Exception as e:
             logger.error(f"Error creating map outputs: {e}")
 
