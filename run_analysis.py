@@ -513,8 +513,12 @@ def model_scenarios(df, analysis_logger: AnalysisLogger = None):
     console.print("[cyan]Running subsidy sensitivity analysis...[/cyan]")
     subsidy_results = modeler.model_subsidy_sensitivity(df, 'heat_pump')
 
-    modeler.save_results()
+    save_paths = modeler.save_results()
     console.print(f"[green]✓[/green] Results saved")
+    if save_paths.get('property_path'):
+        console.print(f"    • Property-level results: {save_paths['property_path']}")
+    if save_paths.get('summary_path'):
+        console.print(f"    • Scenario summary: {save_paths['summary_path']}")
 
     # Generate pathway-level outputs and HP vs HN comparisons (aligns with main pipeline)
     console.print()
@@ -558,6 +562,10 @@ def model_scenarios(df, analysis_logger: AnalysisLogger = None):
     if analysis_logger:
         analysis_logger.add_metric("scenarios_modeled", len(scenario_results), "Decarbonization scenarios analyzed")
         analysis_logger.add_output("data/outputs/scenario_modeling_results.txt", "report", "Scenario modeling results")
+        if save_paths.get('property_path'):
+            analysis_logger.add_output(str(save_paths['property_path']), "parquet", "Scenario results by property")
+        if save_paths.get('summary_path'):
+            analysis_logger.add_output(str(save_paths['summary_path']), "csv", "Scenario results summary")
         analysis_logger.complete_phase(success=True, message=f"{len(scenario_results)} scenarios modeled successfully")
 
     return scenario_results, subsidy_results

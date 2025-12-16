@@ -327,6 +327,13 @@ class DashboardDataBuilder:
                     "ashpReady": int(results.get("ashp_ready_properties", 0)),
                     "ashpFabricAssist": int(results.get("ashp_fabric_applied_properties", 0)),
                     "ashpIneligible": int(results.get("ashp_not_ready_properties", 0)),
+                    "hnReady": int(results.get("hn_ready_properties", 0)),
+                    "hnAssignments": int(results.get("hn_assigned_properties", 0)),
+                    "ashpAssignments": int(results.get("ashp_assigned_properties", 0)),
+                    "baselineBill": float(results.get("baseline_bill_total", 0)),
+                    "postMeasureBill": float(results.get("post_measure_bill_total", 0)),
+                    "baselineCo2": float(results.get("baseline_co2_total_kg", 0)),
+                    "postMeasureCo2": float(results.get("post_measure_co2_total_kg", 0)),
                 }
             )
         return scenarios

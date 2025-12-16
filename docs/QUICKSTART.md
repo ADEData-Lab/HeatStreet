@@ -122,6 +122,8 @@ xdg-open data/outputs/maps/heat_network_tiers.html  # Linux
 | `epc_london_validated.csv` | Your cleaned dataset |
 | `archetype_analysis_results.txt` | Summary statistics of the housing stock |
 | `scenario_modeling_results.txt` | Cost-benefit analysis of different pathways |
+| `scenario_results_summary.csv` | Scenario-level metrics including HN/ASHP splits |
+| `scenario_results_by_property.parquet` | Property-by-property scenario outcomes and diagnostics |
 | `pathway_suitability_by_tier.csv` | Which properties suit heat networks vs heat pumps |
 | `epc_band_distribution.png` | Visual of current EPC ratings |
 | `scenario_comparison.png` | Visual comparison of decarbonization options |

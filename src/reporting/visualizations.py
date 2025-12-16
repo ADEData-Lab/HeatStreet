@@ -626,11 +626,18 @@ class ReportGenerator:
                 'Annual Energy Reduction (kWh)': results['annual_energy_reduction_kwh'],
                 'Annual CO2 Reduction (kg)': results['annual_co2_reduction_kg'],
                 'Annual Bill Savings (£)': results['annual_bill_savings'],
+                'Baseline Bill (£)': results.get('baseline_bill_total', 0),
+                'Post-Measure Bill (£)': results.get('post_measure_bill_total', 0),
+                'Baseline CO2 (kg)': results.get('baseline_co2_total_kg', 0),
+                'Post-Measure CO2 (kg)': results.get('post_measure_co2_total_kg', 0),
                 'Average Payback (years)': results.get('average_payback_years', 0),
                 'Median Payback (years)': results.get('median_payback_years', 0),
                 'ASHP Ready Properties': results.get('ashp_ready_properties', 0),
                 'ASHP Fabric Applied': results.get('ashp_fabric_applied_properties', 0),
-                'ASHP Not Eligible': results.get('ashp_not_ready_properties', 0)
+                'ASHP Not Eligible': results.get('ashp_not_ready_properties', 0),
+                'HN Ready Properties': results.get('hn_ready_properties', 0),
+                'HN Assigned (Hybrid)': results.get('hn_assigned_properties', 0),
+                'ASHP Assigned (Hybrid)': results.get('ashp_assigned_properties', 0),
             })
 
         df_scenarios = pd.DataFrame(scenarios)

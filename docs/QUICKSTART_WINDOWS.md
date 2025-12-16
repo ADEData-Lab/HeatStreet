@@ -165,6 +165,9 @@ type data\outputs\archetype_analysis_results.txt
 # View scenario results
 type data\outputs\scenario_modeling_results.txt
 
+# Preview scenario summary (first few rows)
+powershell -Command "Import-Csv data/outputs/scenario_results_summary.csv | Select-Object -First 5"
+
 # View executive summary
 type data\outputs\reports\executive_summary.txt
 ```
