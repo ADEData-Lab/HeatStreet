@@ -36,7 +36,24 @@ class HeatNetworkAnalyzer:
     def __init__(self):
         """Initialize the heat network analyzer."""
         self.config = load_config()
-        self.heat_network_tiers = self.config['analysis']['heat_network_tiers']
+
+        # Heat network tier definitions were originally stored under
+        # analysis. The config now keeps them under eligibility, so allow
+        # both locations to avoid a hard failure when the analysis block
+        # omits them.
+        analysis_cfg = self.config.get('analysis', {})
+        eligibility_cfg = self.config.get('eligibility', {})
+        self.heat_network_tiers = (
+            analysis_cfg.get('heat_network_tiers')
+            or eligibility_cfg.get('heat_network_tiers')
+        )
+
+        if not self.heat_network_tiers:
+            raise KeyError(
+                "Missing heat network tier configuration. Expected at "
+                "config['analysis']['heat_network_tiers'] or "
+                "config['eligibility']['heat_network_tiers']."
+            )
         self.readiness_config = self.config.get('heat_network', {}).get('readiness', {})
         self.gis_downloader = LondonGISDownloader()
 
