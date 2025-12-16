@@ -527,6 +527,8 @@ This project delivers all contract requirements:
 | EPC ratings and scores | `archetype_analysis_results.txt` |
 | Carbon impact | `archetype_analysis_results.txt` |
 | Energy efficiency options | `scenario_modeling_results.txt` |
+| Scenario diagnostics by property | `scenario_results_by_property.parquet` |
+| Scenario summary metrics | `scenario_results_summary.csv` |
 | Costed decarbonization pathways | `scenario_modeling_results.txt` |
 | District heating analysis | `pathway_suitability_by_tier.csv` |
 | Heat pump pathway analysis | `scenario_modeling_results.txt` |

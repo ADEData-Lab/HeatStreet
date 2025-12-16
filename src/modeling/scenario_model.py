@@ -8,8 +8,8 @@ Implements Section 4 of the project specification.
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
-from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple
+from dataclasses import dataclass, field, asdict
 from loguru import logger
 from concurrent.futures import ProcessPoolExecutor
 import multiprocessing
@@ -34,11 +34,30 @@ from src.spatial.heat_network_analysis import HeatNetworkAnalyzer
 class PropertyUpgrade:
     """Represents an upgrade to a single property."""
     property_id: str
+    uprn: str = ''
+    postcode: str = ''
     scenario: str
+    measures_applied: List[str] = field(default_factory=list)
+    measures_removed: List[str] = field(default_factory=list)
+    hybrid_pathway: Optional[str] = None
+    hn_ready: bool = False
+    tier_number: Optional[int] = None
+    distance_to_network_m: Optional[float] = None
+    in_heat_zone: bool = False
+    ashp_ready: bool = False
+    ashp_projected_ready: bool = False
+    ashp_fabric_needed: bool = False
+    ashp_not_ready_after_fabric: bool = False
+    fabric_inserted_for_hp: bool = False
+    heat_pump_removed: bool = False
     capital_cost: float
     annual_energy_reduction_kwh: float
     annual_co2_reduction_kg: float
     annual_bill_savings: float
+    baseline_bill: float
+    post_measure_bill: float
+    baseline_co2_kg: float
+    post_measure_co2_kg: float
     new_epc_band: str
     payback_years: float
 
@@ -54,7 +73,17 @@ def _calculate_property_upgrade_worker(args):
     Returns:
         PropertyUpgrade object
     """
-    property_dict, scenario_name, measures, costs, config = args
+    (
+        property_dict,
+        scenario_name,
+        measures,
+        costs,
+        config,
+        applied_fabric,
+        removed_hp,
+        hybrid_pathway,
+        removed_measures,
+    ) = args
 
     capital_cost = 0
     energy_reduction = 0
@@ -137,6 +166,12 @@ def _calculate_property_upgrade_worker(args):
     # Calculate bill savings
     bill_savings = energy_reduction * config['energy_prices']['current']['gas']
 
+    baseline_bill = get_absolute_energy() * config['energy_prices']['current']['gas']
+    post_measure_bill = max(baseline_bill - bill_savings, 0)
+
+    baseline_co2 = get_absolute_energy() * config['carbon_factors']['current']['gas']
+    post_measure_co2 = max(baseline_co2 - co2_reduction, 0)
+
     # Estimate new EPC band
     improvement_points = (energy_reduction / floor_area) * 0.5
     new_rating = min(100, current_rating + improvement_points)
@@ -169,11 +204,30 @@ def _calculate_property_upgrade_worker(args):
 
     return PropertyUpgrade(
         property_id=str(property_dict.get('LMK_KEY', 'unknown')),
+        uprn=str(property_dict.get('UPRN', '')),
+        postcode=str(property_dict.get('POSTCODE', '')),
         scenario=scenario_name,
+        measures_applied=measures,
+        measures_removed=removed_measures,
+        hybrid_pathway=hybrid_pathway,
+        hn_ready=bool(property_dict.get('hn_ready', False)),
+        tier_number=property_dict.get('tier_number'),
+        distance_to_network_m=property_dict.get('distance_to_network_m'),
+        in_heat_zone=bool(property_dict.get('in_heat_zone', False)),
+        ashp_ready=bool(property_dict.get('ashp_ready', False)),
+        ashp_projected_ready=bool(property_dict.get('ashp_projected_ready', False)),
+        ashp_fabric_needed=bool(property_dict.get('ashp_fabric_needed', False)),
+        ashp_not_ready_after_fabric=bool(property_dict.get('ashp_not_ready_after_fabric', False)),
+        fabric_inserted_for_hp=applied_fabric,
+        heat_pump_removed=removed_hp,
         capital_cost=capital_cost if not pd.isna(capital_cost) else 0,
         annual_energy_reduction_kwh=energy_reduction if not pd.isna(energy_reduction) else 0,
         annual_co2_reduction_kg=co2_reduction if not pd.isna(co2_reduction) else 0,
         annual_bill_savings=bill_savings if not pd.isna(bill_savings) else 0,
+        baseline_bill=baseline_bill if not pd.isna(baseline_bill) else 0,
+        post_measure_bill=post_measure_bill if not pd.isna(post_measure_bill) else 0,
+        baseline_co2_kg=baseline_co2 if not pd.isna(baseline_co2) else 0,
+        post_measure_co2_kg=post_measure_co2 if not pd.isna(post_measure_co2) else 0,
         new_epc_band=new_band,
         payback_years=payback_years
     )
@@ -239,6 +293,7 @@ class ScenarioModeler:
         )
 
         self.results = {}
+        self.property_results: Dict[str, pd.DataFrame] = {}
 
         self.hn_analyzer = HeatNetworkAnalyzer()
 
@@ -324,20 +379,25 @@ class ScenarioModeler:
 
         # Prepare arguments for parallel processing
         args_list = []
-        fabric_applied = 0
-        hp_removed = 0
 
         for prop_dict in property_dicts:
-            property_measures, applied_fabric, removed_hp = self._build_property_measures(
+            property_measures, applied_fabric, removed_hp, hybrid_pathway, removed_measures = self._build_property_measures(
                 measures,
                 prop_dict
             )
 
-            fabric_applied += int(applied_fabric)
-            hp_removed += int(removed_hp)
-
             args_list.append(
-                (prop_dict, scenario_name, property_measures, self.costs, self.config)
+                (
+                    prop_dict,
+                    scenario_name,
+                    property_measures,
+                    self.costs,
+                    self.config,
+                    applied_fabric,
+                    removed_hp,
+                    hybrid_pathway,
+                    removed_measures
+                )
             )
 
         # Use ProcessPoolExecutor for CPU-bound calculations
@@ -349,12 +409,13 @@ class ScenarioModeler:
 
         logger.info(f"  Parallel processing complete!")
 
+        property_df = pd.DataFrame([asdict(upgrade) for upgrade in property_upgrades])
+        self.property_results[scenario_name] = property_df
+
         # Aggregate results
-        results = self._aggregate_scenario_results(property_upgrades, df_with_flags)
+        results = self._aggregate_scenario_results(property_df, df_with_flags)
         results['scenario_name'] = scenario_name
         results['measures'] = measures
-        results['ashp_fabric_applied_properties'] = fabric_applied
-        results['ashp_not_eligible_properties'] = hp_removed
 
         return results
 
@@ -518,10 +579,12 @@ class ScenarioModeler:
 
         return processed
 
-    def _build_property_measures(self, measures: List[str], property_dict: Dict) -> Tuple[List[str], bool, bool]:
+    def _build_property_measures(self, measures: List[str], property_dict: Dict) -> Tuple[List[str], bool, bool, Optional[str], List[str]]:
         """Insert ASHP-readiness fabric where needed and drop ASHP when infeasible."""
 
         measure_plan = self._resolve_scenario_measures(measures)
+        hybrid_pathway: Optional[str] = None
+        removed: List[str] = []
 
         if {'heat_network_where_available', 'ashp_elsewhere'} & set(measure_plan):
             hn_ready = bool(property_dict.get('hn_ready', False))
@@ -531,8 +594,10 @@ class ScenarioModeler:
 
             if hn_ready:
                 updated_plan.append('district_heating_connection')
+                hybrid_pathway = 'heat_network'
             else:
                 updated_plan.extend(['ashp_installation', 'emitter_upgrades'])
+                hybrid_pathway = 'ashp'
 
             measure_plan = updated_plan
 
@@ -548,10 +613,11 @@ class ScenarioModeler:
                 measure_plan = self.fabric_minimum_measures + measure_plan
                 applied_fabric = True
             elif not ready and not projected_ready:
+                removed.extend([m for m in measure_plan if m in ['ashp_installation', 'emitter_upgrades']])
                 measure_plan = [m for m in measure_plan if m not in ['ashp_installation', 'emitter_upgrades']]
                 removed_hp = True
 
-        return self._dedupe_preserve_order(measure_plan), applied_fabric, removed_hp
+        return self._dedupe_preserve_order(measure_plan), applied_fabric, removed_hp, hybrid_pathway, removed
 
     def _dedupe_preserve_order(self, measures: List[str]) -> List[str]:
         seen = set()
@@ -836,24 +902,29 @@ class ScenarioModeler:
 
     def _aggregate_scenario_results(
         self,
-        upgrades: List[PropertyUpgrade],
+        property_df: pd.DataFrame,
         df: pd.DataFrame
     ) -> Dict:
         """
         Aggregate individual property upgrades into scenario-level results.
 
         Args:
-            upgrades: List of PropertyUpgrade objects
+            property_df: DataFrame of property-level scenario results
             df: Original property DataFrame
 
         Returns:
             Aggregated scenario results
         """
-        total_properties = len(upgrades)
+        total_properties = len(property_df)
+
+        if total_properties == 0:
+            return {}
+
+        numeric_df = property_df.replace({np.inf: np.nan, -np.inf: np.nan})
 
         # Calculate payback statistics (filter out infinite values)
         # Properties with inf payback are not cost-effective at current prices
-        finite_paybacks = [u.payback_years for u in upgrades if np.isfinite(u.payback_years)]
+        finite_paybacks = numeric_df['payback_years'].dropna()
         reasonable_paybacks = [p for p in finite_paybacks if p < 100]
 
         if len(reasonable_paybacks) > 0:
@@ -871,11 +942,15 @@ class ScenarioModeler:
 
         results = {
             'total_properties': total_properties,
-            'capital_cost_total': sum(u.capital_cost for u in upgrades),
-            'capital_cost_per_property': sum(u.capital_cost for u in upgrades) / total_properties if total_properties > 0 else 0,
-            'annual_energy_reduction_kwh': sum(u.annual_energy_reduction_kwh for u in upgrades),
-            'annual_co2_reduction_kg': sum(u.annual_co2_reduction_kg for u in upgrades),
-            'annual_bill_savings': sum(u.annual_bill_savings for u in upgrades),
+            'capital_cost_total': float(numeric_df['capital_cost'].sum()),
+            'capital_cost_per_property': float(numeric_df['capital_cost'].mean()),
+            'annual_energy_reduction_kwh': float(numeric_df['annual_energy_reduction_kwh'].sum()),
+            'annual_co2_reduction_kg': float(numeric_df['annual_co2_reduction_kg'].sum()),
+            'annual_bill_savings': float(numeric_df['annual_bill_savings'].sum()),
+            'baseline_bill_total': float(numeric_df['baseline_bill'].sum()),
+            'post_measure_bill_total': float(numeric_df['post_measure_bill'].sum()),
+            'baseline_co2_total_kg': float(numeric_df['baseline_co2_kg'].sum()),
+            'post_measure_co2_total_kg': float(numeric_df['post_measure_co2_kg'].sum()),
             'average_payback_years': avg_payback if np.isfinite(avg_payback) else None,
             'median_payback_years': median_payback if np.isfinite(median_payback) else None,
             'properties_cost_effective': n_cost_effective,
@@ -883,16 +958,29 @@ class ScenarioModeler:
             'pct_not_cost_effective': pct_not_cost_effective,
         }
 
-        if {'ashp_ready', 'ashp_fabric_needed', 'ashp_not_ready_after_fabric'}.issubset(df.columns):
-            ready_count = int(df['ashp_ready'].sum())
-            fabric_count = int(df['ashp_fabric_needed'].sum())
-            not_ready_count = int(df['ashp_not_ready_after_fabric'].sum())
+        if {'ashp_ready', 'ashp_fabric_needed', 'ashp_not_ready_after_fabric'}.issubset(property_df.columns):
+            ready_count = int(property_df['ashp_ready'].sum())
+            fabric_count = int(property_df['ashp_fabric_needed'].sum())
+            not_ready_count = int(property_df['ashp_not_ready_after_fabric'].sum())
             results.update({
                 'ashp_ready_properties': ready_count,
                 'ashp_ready_pct': (ready_count / total_properties * 100) if total_properties > 0 else 0,
                 'ashp_fabric_required_properties': fabric_count,
                 'ashp_not_ready_properties': not_ready_count,
             })
+
+        if 'fabric_inserted_for_hp' in property_df.columns:
+            results['ashp_fabric_applied_properties'] = int(property_df['fabric_inserted_for_hp'].sum())
+
+        if 'heat_pump_removed' in property_df.columns:
+            results['ashp_not_eligible_properties'] = int(property_df['heat_pump_removed'].sum())
+
+        if 'hn_ready' in property_df.columns:
+            results['hn_ready_properties'] = int(property_df['hn_ready'].sum())
+
+        if 'hybrid_pathway' in property_df.columns:
+            results['hn_assigned_properties'] = int((property_df['hybrid_pathway'] == 'heat_network').sum())
+            results['ashp_assigned_properties'] = int((property_df['hybrid_pathway'] == 'ashp').sum())
 
         # Log payback summary
         if np.isfinite(avg_payback):
@@ -903,7 +991,7 @@ class ScenarioModeler:
 
         # EPC band shifts
         current_bands = df['CURRENT_ENERGY_RATING'].value_counts().to_dict() if 'CURRENT_ENERGY_RATING' in df.columns else {}
-        new_bands = pd.Series([u.new_epc_band for u in upgrades]).value_counts().to_dict()
+        new_bands = property_df['new_epc_band'].value_counts().to_dict()
 
         results['epc_band_shifts'] = {
             'before': current_bands,
@@ -912,12 +1000,12 @@ class ScenarioModeler:
 
         # Payback distribution (handle infinite values)
         payback_categories = {
-            '0-5 years': len([u for u in upgrades if np.isfinite(u.payback_years) and u.payback_years <= 5]),
-            '5-10 years': len([u for u in upgrades if np.isfinite(u.payback_years) and 5 < u.payback_years <= 10]),
-            '10-15 years': len([u for u in upgrades if np.isfinite(u.payback_years) and 10 < u.payback_years <= 15]),
-            '15-20 years': len([u for u in upgrades if np.isfinite(u.payback_years) and 15 < u.payback_years <= 20]),
-            '>20 years': len([u for u in upgrades if np.isfinite(u.payback_years) and u.payback_years > 20]),
-            'Not cost-effective': len([u for u in upgrades if not np.isfinite(u.payback_years)])
+            '0-5 years': len(numeric_df[(numeric_df['payback_years'] <= 5)]),
+            '5-10 years': len(numeric_df[(numeric_df['payback_years'] > 5) & (numeric_df['payback_years'] <= 10)]),
+            '10-15 years': len(numeric_df[(numeric_df['payback_years'] > 10) & (numeric_df['payback_years'] <= 15)]),
+            '15-20 years': len(numeric_df[(numeric_df['payback_years'] > 15) & (numeric_df['payback_years'] <= 20)]),
+            '>20 years': len(numeric_df[(numeric_df['payback_years'] > 20)]),
+            'Not cost-effective': len(property_df) - len(finite_paybacks)
         }
 
         results['payback_distribution'] = payback_categories
@@ -995,12 +1083,47 @@ class ScenarioModeler:
 
         return sensitivity_results
 
-    def save_results(self, output_path: Optional[Path] = None):
+    def _build_summary_dataframe(self) -> pd.DataFrame:
+        rows: List[Dict[str, Any]] = []
+        for scenario, results in self.results.items():
+            if not isinstance(results, dict):
+                continue
+
+            rows.append({
+                'scenario': scenario,
+                'total_properties': results.get('total_properties'),
+                'capital_cost_total': results.get('capital_cost_total'),
+                'capital_cost_per_property': results.get('capital_cost_per_property'),
+                'annual_energy_reduction_kwh': results.get('annual_energy_reduction_kwh'),
+                'annual_co2_reduction_kg': results.get('annual_co2_reduction_kg'),
+                'annual_bill_savings': results.get('annual_bill_savings'),
+                'baseline_bill_total': results.get('baseline_bill_total'),
+                'post_measure_bill_total': results.get('post_measure_bill_total'),
+                'baseline_co2_total_kg': results.get('baseline_co2_total_kg'),
+                'post_measure_co2_total_kg': results.get('post_measure_co2_total_kg'),
+                'average_payback_years': results.get('average_payback_years'),
+                'median_payback_years': results.get('median_payback_years'),
+                'ashp_ready_properties': results.get('ashp_ready_properties'),
+                'ashp_fabric_required_properties': results.get('ashp_fabric_required_properties'),
+                'ashp_not_ready_properties': results.get('ashp_not_ready_properties'),
+                'ashp_fabric_applied_properties': results.get('ashp_fabric_applied_properties'),
+                'ashp_not_eligible_properties': results.get('ashp_not_eligible_properties'),
+                'hn_ready_properties': results.get('hn_ready_properties'),
+                'hn_assigned_properties': results.get('hn_assigned_properties'),
+                'ashp_assigned_properties': results.get('ashp_assigned_properties'),
+            })
+
+        return pd.DataFrame(rows)
+
+    def save_results(self, output_path: Optional[Path] = None) -> Dict[str, Optional[Path]]:
         """
         Save scenario modeling results to file.
 
         Args:
             output_path: Path to save results
+
+        Returns:
+            Dictionary of key artefact paths
         """
         if output_path is None:
             output_path = DATA_OUTPUTS_DIR / "scenario_modeling_results.txt"
@@ -1020,6 +1143,26 @@ class ScenarioModeler:
                 f.write("\n")
 
         logger.info(f"Results saved to: {output_path}")
+
+        summary_path: Optional[Path] = None
+        if self.results:
+            summary_df = self._build_summary_dataframe()
+            summary_path = DATA_OUTPUTS_DIR / "scenario_results_summary.csv"
+            summary_df.to_csv(summary_path, index=False)
+            logger.info(f"Scenario summary saved to: {summary_path}")
+
+        property_path: Optional[Path] = None
+        if self.property_results:
+            combined_df = pd.concat(self.property_results.values(), ignore_index=True)
+            property_path = DATA_OUTPUTS_DIR / "scenario_results_by_property.parquet"
+            combined_df.to_parquet(property_path, index=False)
+            logger.info(f"Property-level scenario results saved to: {property_path}")
+
+        return {
+            'report_path': output_path,
+            'summary_path': summary_path,
+            'property_path': property_path,
+        }
 
 
 def main():

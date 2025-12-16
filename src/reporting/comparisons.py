@@ -46,6 +46,7 @@ class ComparisonReporter:
         self.config = load_config()
         self.costs = get_cost_assumptions()
         self.hn_params = get_heat_network_params()
+        self.hybrid_warning = False
 
     @staticmethod
     def _summary(series: pd.Series) -> Dict[str, float]:
@@ -151,8 +152,15 @@ class ComparisonReporter:
         lines.append("*Note: bill/CO₂ savings use baseline-minus-scenario values (positive = saving); "
                      "bill_change/co2_change columns show signed deltas where negatives indicate reductions.*")
 
+        if self.hybrid_warning:
+            lines.append("")
+            lines.append("> Warning: Hybrid pathway averages match fabric-only results; review heat tech assumptions.")
+
         snippet_path.write_text("\n".join(lines), encoding="utf-8")
         logger.info(f"Wrote markdown snippet to {snippet_path}")
+
+        if self.hybrid_warning:
+            logger.warning("Hybrid pathway averages match fabric-only results; review assumptions.")
 
     def _plot_comparison(self, df: pd.DataFrame):
         plot_path = self.figures_dir / "hn_vs_hp_comparison.png"
@@ -174,13 +182,29 @@ class ComparisonReporter:
         plt.close(fig)
         logger.info(f"Saved comparison plot to {plot_path}")
 
+    def _warn_if_hybrid_equals_fabric(self, df: pd.DataFrame):
+        fabric = df[df['pathway_id'] == 'fabric_only']['total_capex'].mean()
+        hybrid = df[df['pathway_id'] == 'fabric_plus_hp_plus_hn']['total_capex'].mean()
+
+        if pd.isna(fabric) or pd.isna(hybrid):
+            return
+
+        if np.isclose(fabric, hybrid):
+            self.hybrid_warning = True
+            logger.warning(
+                "Hybrid pathway average cost matches fabric-only; this may indicate missing heat technology costs."
+            )
+
     def generate_comparisons(
         self,
         df: Optional[pd.DataFrame] = None,
         results_path: Optional[Path] = None,
     ) -> pd.DataFrame:
         """Generate CSV, markdown, and optional figure comparing HP/HN scenarios."""
+        self.hybrid_warning = False
         results_df = df if df is not None else self.load_results(results_path)
+
+        self._warn_if_hybrid_equals_fabric(results_df)
 
         scenario_ids = [
             'fabric_plus_hp_only',
