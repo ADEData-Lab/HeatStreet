@@ -544,6 +544,16 @@ class HeatNetworkAnalyzer:
             from reportlab.lib.utils import ImageReader
             from datetime import datetime
             import matplotlib.pyplot as plt
+        except ImportError as e:
+            logger.warning(
+                "Skipping heat network map creation because a dependency is missing: "
+                f"{e}"
+            )
+            logger.info(
+                "Install folium, Pillow, and reportlab (see requirements-spatial.txt) "
+                "to enable heat network map exports."
+            )
+            return
 
         def _generate_static_map_image(properties_wgs84: gpd.GeoDataFrame, output_path: Path):
             """Create a static PNG of the classified properties without folium.
