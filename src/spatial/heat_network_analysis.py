@@ -498,7 +498,10 @@ class HeatNetworkAnalyzer:
             unclassified_buffered['_buffer_idx'] = unclassified_buffered.index
 
             # Spatial join to find all properties within each buffer
-            logger.info(f"  Step 3/4: Performing spatial join (this is the slowest step, ~1-3 min for 10K properties)...")
+            logger.info(
+                "  Step 3/4: Performing spatial join (slowest step; scales with property count, ~1-3 min per 10K properties — "
+                "large runs can take tens of minutes)..."
+            )
             import time
             start_time = time.time()
 
