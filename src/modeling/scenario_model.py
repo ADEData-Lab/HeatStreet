@@ -34,9 +34,19 @@ from src.spatial.heat_network_analysis import HeatNetworkAnalyzer
 class PropertyUpgrade:
     """Represents an upgrade to a single property."""
     property_id: str
+    scenario: str
+    capital_cost: float
+    annual_energy_reduction_kwh: float
+    annual_co2_reduction_kg: float
+    annual_bill_savings: float
+    baseline_bill: float = 0.0
+    post_measure_bill: float = 0.0
+    baseline_co2_kg: float = 0.0
+    post_measure_co2_kg: float = 0.0
+    new_epc_band: str = ''
+    payback_years: float = np.inf
     uprn: str = ''
     postcode: str = ''
-    scenario: str
     measures_applied: List[str] = field(default_factory=list)
     measures_removed: List[str] = field(default_factory=list)
     hybrid_pathway: Optional[str] = None
@@ -50,16 +60,6 @@ class PropertyUpgrade:
     ashp_not_ready_after_fabric: bool = False
     fabric_inserted_for_hp: bool = False
     heat_pump_removed: bool = False
-    capital_cost: float
-    annual_energy_reduction_kwh: float
-    annual_co2_reduction_kg: float
-    annual_bill_savings: float
-    baseline_bill: float
-    post_measure_bill: float
-    baseline_co2_kg: float
-    post_measure_co2_kg: float
-    new_epc_band: str
-    payback_years: float
 
 
 def _calculate_property_upgrade_worker(args):
