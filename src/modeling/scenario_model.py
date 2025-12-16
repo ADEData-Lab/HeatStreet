@@ -193,6 +193,24 @@ class ScenarioModeler:
         self.carbon_factors = self.config['carbon_factors']
         self.analysis_horizon_years = get_analysis_horizon_years()
 
+        self.measure_catalogue = {
+            'loft_insulation_topup',
+            'wall_insulation',
+            'double_glazing',
+            'triple_glazing',
+            'floor_insulation',
+            'draught_proofing',
+            'ashp_installation',
+            'emitter_upgrades',
+            'district_heating_connection',
+            'fabric_improvements',
+            'modest_fabric_improvements',
+            'heat_network_where_available',
+            'ashp_elsewhere',
+            'fabric_bundle_tipping_point',
+            'fabric_bundle_minimum_ashp'
+        }
+
         eligibility_cfg = self.config.get('eligibility', {}).get('ashp', {})
         self.ashp_heat_demand_threshold = eligibility_cfg.get('max_heat_demand_kwh_per_m2', 100)
         self.ashp_min_epc_band = eligibility_cfg.get('min_epc_band', 'C')
@@ -204,10 +222,20 @@ class ScenarioModeler:
             curve_df,
             typical_annual_heat_demand_kwh=15000
         )
+        self.fabric_placeholder_map = {
+            'fabric_improvements': self._map_fabric_bundle_to_scenario(
+                self.fabric_bundles.get('fabric_full_to_tipping', [])
+            ),
+            'modest_fabric_improvements': self._map_fabric_bundle_to_scenario(
+                self.fabric_bundles.get('fabric_minimum_to_ashp', [])
+            )
+        }
         self.fabric_minimum_measures = self._map_fabric_bundle_to_scenario(
             self.fabric_bundles.get('fabric_minimum_to_ashp', [])
         )
-        self.scenarios = self._inject_fabric_bundles(self.scenarios)
+        self.scenarios = self._validate_scenario_definitions(
+            self._inject_fabric_bundles(self.scenarios)
+        )
 
         self.results = {}
 
@@ -253,6 +281,7 @@ class ScenarioModeler:
             Dictionary containing scenario results
         """
         measures = scenario_config.get('measures', [])
+        measures = self._resolve_scenario_measures(measures)
 
         if not measures:
             # Baseline scenario - no interventions
@@ -366,6 +395,38 @@ class ScenarioModeler:
 
         return expanded
 
+    def _validate_scenario_definitions(self, scenarios: Dict[str, Dict]) -> Dict[str, Dict]:
+        """Ensure scenarios only contain recognised measures."""
+        for scenario_name, scenario_cfg in scenarios.items():
+            measures = scenario_cfg.get('measures', [])
+            self._validate_measures(measures, context=f"Scenario '{scenario_name}'")
+
+        return scenarios
+
+    def _resolve_scenario_measures(self, measures: List[str]) -> List[str]:
+        """Expand placeholders and validate measure lists prior to modeling."""
+        resolved = self._expand_fabric_placeholders(measures)
+        self._validate_measures(resolved)
+        return self._dedupe_preserve_order(resolved)
+
+    def _expand_fabric_placeholders(self, measures: List[str]) -> List[str]:
+        resolved: List[str] = []
+        for measure in measures:
+            if measure in self.fabric_placeholder_map:
+                resolved.extend(self.fabric_placeholder_map.get(measure, []))
+            else:
+                resolved.append(measure)
+
+        return resolved
+
+    def _validate_measures(self, measures: List[str], context: str = "") -> None:
+        unknown = sorted({m for m in measures if m not in self.measure_catalogue})
+        if unknown:
+            message = ", ".join(unknown)
+            if context:
+                raise ValueError(f"{context} contains unrecognised measures: {message}")
+            raise ValueError(f"Unrecognised measures: {message}")
+
     def _map_fabric_bundle_to_scenario(self, bundle: List[str]) -> List[str]:
         """Translate catalogue measure IDs to scenario measure names."""
         mapping = {
@@ -399,6 +460,14 @@ class ScenarioModeler:
             heat_demand = pd.Series(np.nan, index=processed.index)
         processed['heat_demand_kwh_m2'] = heat_demand
 
+        tier_values = processed.get('heat_network_tier')
+        if tier_values is None:
+            processed['hn_ready'] = False
+        else:
+            processed['hn_ready'] = tier_values.fillna('').apply(
+                lambda tier: isinstance(tier, str) and not str(tier).startswith('Tier 5') and str(tier).strip() != ''
+            )
+
         processed['ashp_meets_heat_demand'] = heat_demand <= self.ashp_heat_demand_threshold
 
         processed['ashp_meets_epc'] = processed.get('CURRENT_ENERGY_RATING', pd.Series('', index=processed.index)).apply(
@@ -422,8 +491,22 @@ class ScenarioModeler:
     def _build_property_measures(self, measures: List[str], property_dict: Dict) -> Tuple[List[str], bool, bool]:
         """Insert ASHP-readiness fabric where needed and drop ASHP when infeasible."""
 
-        needs_heat_pump = 'ashp_installation' in measures
-        measure_plan = list(measures)
+        measure_plan = self._resolve_scenario_measures(measures)
+
+        if {'heat_network_where_available', 'ashp_elsewhere'} & set(measure_plan):
+            hn_ready = bool(property_dict.get('hn_ready', False))
+            updated_plan: List[str] = [
+                m for m in measure_plan if m not in ['heat_network_where_available', 'ashp_elsewhere']
+            ]
+
+            if hn_ready:
+                updated_plan.append('district_heating_connection')
+            else:
+                updated_plan.extend(['ashp_installation', 'emitter_upgrades'])
+
+            measure_plan = updated_plan
+
+        needs_heat_pump = 'ashp_installation' in measure_plan
         applied_fabric = False
         removed_hp = False
 
