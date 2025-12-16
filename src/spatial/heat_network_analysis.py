@@ -15,6 +15,7 @@ from loguru import logger
 import numpy as np
 from concurrent.futures import ProcessPoolExecutor
 import multiprocessing
+from tqdm import tqdm
 
 import sys
 sys.path.append(str(Path(__file__).parent.parent.parent))
@@ -523,8 +524,18 @@ class HeatNetworkAnalyzer:
             heat_density_gwh_km2 = (heat_density_by_buffer / 1_000_000) / buffer_area_km2
 
             # Classify tiers based on heat density
-            logger.info(f"  Classifying {len(heat_density_gwh_km2):,} properties into heat density tiers...")
-            for idx, density in heat_density_gwh_km2.items():
+            logger.info(
+                f"  Classifying {len(heat_density_gwh_km2):,} properties into heat density tiers "
+                "(progress bar updates every ~10s)..."
+            )
+            for idx, density in tqdm(
+                heat_density_gwh_km2.items(),
+                total=len(heat_density_gwh_km2),
+                desc="Heat density tiering",
+                mininterval=10,
+                unit="properties",
+                leave=False,
+            ):
                 if density >= self.heat_network_tiers['tier_3']['min_heat_density_gwh_km2']:
                     properties.loc[idx, 'heat_network_tier'] = 'Tier 3: High heat density'
                     properties.loc[idx, 'tier_number'] = 3
