@@ -140,6 +140,7 @@ class PathwayModeler:
         self.financial = get_financial_params()
         self.hn_params = get_heat_network_params()
         self.uncertainty = get_uncertainty_params()
+        readiness_cfg = self.config.get('heat_network', {}).get('readiness', {})
 
         self.output_dir = output_dir or DATA_OUTPUTS_DIR
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -169,6 +170,7 @@ class PathwayModeler:
         # Heat network parameters
         self.hn_efficiency = self.hn_params.get('distribution_efficiency', 0.90)
         self.hn_penetration = self.hn_params.get('current_penetration', 0.002)
+        self.hn_access_column = readiness_cfg.get('access_column', 'hn_ready')
 
         # Financial parameters
         self.discount_rate = self.financial.get('discount_rate', 0.035)
@@ -404,18 +406,19 @@ class PathwayModeler:
 
     def _get_hn_access(self, df: pd.DataFrame, hn_access_column: Optional[str] = None) -> pd.Series:
         """Determine which properties have heat network access."""
-        if hn_access_column and hn_access_column in df.columns:
-            hn_access = df[hn_access_column].fillna(False).astype(bool)
-        else:
-            np.random.seed(42)
-            hn_access = pd.Series(
-                np.random.random(len(df)) < self.hn_penetration,
-                index=df.index
-            )
+        column = hn_access_column or self.hn_access_column
+
+        if column and column in df.columns:
+            hn_access = df[column].fillna(False).astype(bool)
             logger.info(
-                f"  Assigned HN access to {hn_access.sum():,} properties "
-                f"({hn_access.mean()*100:.1f}%)"
+                f"  Using deterministic heat network access column '{column}' "
+                f"({hn_access.mean()*100:.1f}% ready)"
             )
+        else:
+            logger.warning(
+                "Heat network access column not found; defaulting all properties to no access."
+            )
+            hn_access = pd.Series(False, index=df.index)
 
         return hn_access
 
