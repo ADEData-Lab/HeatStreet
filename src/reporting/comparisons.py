@@ -151,7 +151,7 @@ class ComparisonReporter:
         lines.append("*Note: bill/CO₂ savings use baseline-minus-scenario values (positive = saving); "
                      "bill_change/co2_change columns show signed deltas where negatives indicate reductions.*")
 
-        snippet_path.write_text("\n".join(lines))
+        snippet_path.write_text("\n".join(lines), encoding="utf-8")
         logger.info(f"Wrote markdown snippet to {snippet_path}")
 
     def _plot_comparison(self, df: pd.DataFrame):
