@@ -110,23 +110,39 @@ class AnalysisLogger:
             'description': description
         }
 
-    def add_output(self, output_path: str, output_type: str = "file", description: str = ""):
+    def add_output(
+        self,
+        output_path: str,
+        output_type: str = "file",
+        description: str = "",
+        calculation_steps: Optional[List[str]] = None,
+    ):
         """
-        Add an output file/artifact to the current phase.
+        Add an output file/artifact to the current phase and generate
+        companion Markdown documentation explaining how it was produced.
 
         Args:
             output_path: Path to the output file
             output_type: Type of output (e.g., "csv", "png", "report")
             description: Description of the output
+            calculation_steps: Optional step-by-step notes on how the result was calculated
         """
         if self.current_phase is None:
             logger.warning(f"Cannot add output '{output_path}' - no active phase")
             return
 
+        markdown_path = self._create_output_markdown(
+            output_path=output_path,
+            output_type=output_type,
+            description=description,
+            calculation_steps=calculation_steps,
+        )
+
         self.current_phase['outputs'].append({
             'path': str(output_path),
             'type': output_type,
-            'description': description
+            'description': description,
+            'documentation': str(markdown_path) if markdown_path else None,
         })
 
     def complete_phase(self, success: bool = True, message: str = ""):
@@ -157,6 +173,131 @@ class AnalysisLogger:
         logger.info(f"{status_emoji} Phase {self.current_phase['phase_number']} completed: {self.current_phase['phase_name']} ({duration:.1f}s)")
 
         self.current_phase = None
+
+    def _format_metric_value(self, value: Any) -> str:
+        """
+        Convert a metric value into a human-friendly string.
+
+        Args:
+            value: The metric value
+
+        Returns:
+            Formatted string representation
+        """
+        if isinstance(value, float):
+            if abs(value) >= 1000:
+                return f"{value:,.0f}"
+            return f"{value:.2f}"
+        if isinstance(value, int):
+            return f"{value:,}"
+        return str(value)
+
+    def _create_output_markdown(
+        self,
+        output_path: str,
+        output_type: str,
+        description: str,
+        calculation_steps: Optional[List[str]],
+    ) -> Optional[Path]:
+        """
+        Build a Markdown companion file that explains how an output was created.
+
+        Args:
+            output_path: Path to the primary output
+            output_type: Type of output (e.g., csv, png)
+            description: Short explanation of the output content
+            calculation_steps: Optional detailed steps to include
+
+        Returns:
+            Path to the created Markdown file, or None if creation failed
+        """
+        try:
+            path_obj = Path(output_path)
+
+            if path_obj.suffix:
+                markdown_path = path_obj.with_name(f"{path_obj.stem}_calculation.md")
+            else:
+                markdown_path = path_obj / "calculation_notes.md"
+
+            markdown_path.parent.mkdir(parents=True, exist_ok=True)
+
+            phase_name = "Unknown phase"
+            phase_description = ""
+            metrics = {}
+
+            if self.current_phase:
+                phase_name = self.current_phase.get('phase_name', phase_name)
+                phase_description = self.current_phase.get('description', "")
+                metrics = self.current_phase.get('metrics', {})
+
+            steps = list(calculation_steps) if calculation_steps else []
+
+            if not steps:
+                if phase_description:
+                    steps.append(
+                        f"Ran the '{phase_name}' phase: {phase_description}."
+                    )
+                else:
+                    steps.append(
+                        f"Ran the '{phase_name}' phase to prepare this output."
+                    )
+
+                if metrics:
+                    steps.append(
+                        "Checked the following key numbers to make sure the calculations looked right:"
+                    )
+                    for metric_key, metric_data in metrics.items():
+                        metric_value = metric_data.get('value')
+                        metric_desc = metric_data.get('description') or metric_key.replace('_', ' ')
+                        formatted_value = self._format_metric_value(metric_value)
+                        steps.append(f"- {metric_desc} ({metric_key}): {formatted_value}")
+
+                steps.append(
+                    "Saved the finished result so later steps in the pipeline can reuse it."
+                )
+
+            lines = [
+                f"# Output Documentation: {path_obj.name}",
+                "",
+                f"**Output file:** {path_obj}",
+                f"**Created:** {datetime.now().isoformat()}",
+                f"**Phase:** {phase_name}",
+                f"**Output type:** {output_type}",
+                "",
+                "**What this file contains**",
+                description or "This file stores results from the analysis pipeline in an easy-to-reuse format.",
+                "",
+                "## How this result was calculated",
+            ]
+
+            lines.extend([f"- {step}" for step in steps])
+
+            if metrics:
+                lines.extend([
+                    "",
+                    "## Key checks and numbers",
+                ])
+
+                for metric_key, metric_data in metrics.items():
+                    metric_value = metric_data.get('value')
+                    metric_desc = metric_data.get('description') or metric_key.replace('_', ' ')
+                    formatted_value = self._format_metric_value(metric_value)
+                    lines.append(f"- {metric_desc} ({metric_key}): {formatted_value}")
+
+            lines.extend([
+                "",
+                "This note is generated automatically so anyone opening the data file can understand, in plain language, how it was produced.",
+            ])
+
+            with open(markdown_path, 'w', encoding='utf-8') as f:
+                f.write("\n".join(lines))
+
+            logger.info(f"Documentation saved alongside output: {markdown_path}")
+            return markdown_path
+
+        except Exception as e:
+            logger.warning(f"Could not create documentation for {output_path}: {e}")
+            return None
 
     def skip_phase(self, phase_name: str, reason: str = ""):
         """
