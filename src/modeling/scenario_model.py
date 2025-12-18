@@ -30,6 +30,20 @@ from src.analysis.fabric_tipping_point import FabricTippingPointAnalyzer
 from src.analysis.methodological_adjustments import MethodologicalAdjustments
 from src.spatial.heat_network_analysis import HeatNetworkAnalyzer
 
+BAND_ORDER = ['A', 'B', 'C', 'D', 'E', 'F', 'G']
+BAND_THRESHOLD_MAP = {
+    'A': 92,
+    'B': 81,
+    'C': 69,
+    'D': 55,
+    'E': 39,
+    'F': 21,
+    'G': 0
+}
+MAX_EPC_BAND_IMPROVEMENT = 2
+SAP_POINTS_PER_PERCENT_SAVING = 0.45
+BAND_A_GUARDRAIL_SHARE = 0.10
+
 
 def _select_baseline_energy_intensity(property_like: Dict[str, Any]) -> float:
     """Pick adjusted energy intensity when available, otherwise EPC value."""
@@ -91,6 +105,77 @@ def _assert_non_negative_intensities(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def _rating_to_band_value(rating: float) -> str:
+    """Convert a SAP rating to an EPC band using configured thresholds."""
+    try:
+        numeric_rating = float(rating)
+    except (TypeError, ValueError):
+        numeric_rating = 0.0
+
+    for band in BAND_ORDER:
+        if numeric_rating >= BAND_THRESHOLD_MAP[band]:
+            return band
+
+    return 'G'
+
+
+def _band_upper_bound(band: str) -> float:
+    """Return the maximum SAP score allowed within a band (exclusive of next band)."""
+    band_clean = str(band).strip().upper()
+
+    if band_clean == 'A':
+        return 100.0
+
+    try:
+        idx = BAND_ORDER.index(band_clean)
+    except ValueError:
+        return 100.0
+
+    if idx == 0:
+        return 100.0
+
+    prev_band = BAND_ORDER[idx - 1]
+    return BAND_THRESHOLD_MAP.get(prev_band, 100.0) - 0.01
+
+
+def _normalize_band(band: str, fallback_rating: float) -> str:
+    """Normalize band text, falling back to SAP-derived band when missing/invalid."""
+    band_clean = str(band).strip().upper()
+    if band_clean in BAND_ORDER:
+        return band_clean
+
+    return _rating_to_band_value(fallback_rating)
+
+
+def _sap_delta_from_energy_savings(
+    baseline_kwh: float,
+    post_kwh: float,
+    baseline_sap: float
+) -> Tuple[float, float]:
+    """Estimate SAP delta from sequential energy savings.
+
+    Returns a tuple of (sap_point_gain, saving_pct_basis).
+    """
+    try:
+        baseline_val = float(baseline_kwh)
+    except (TypeError, ValueError):
+        baseline_val = 0.0
+
+    try:
+        post_val = float(post_kwh)
+    except (TypeError, ValueError):
+        post_val = baseline_val
+
+    if baseline_val <= 0:
+        return 0.0, 0.0
+
+    saving_fraction = max(0.0, min(1.0, (baseline_val - post_val) / baseline_val))
+    sap_gain = saving_fraction * 100 * SAP_POINTS_PER_PERCENT_SAVING
+
+    sap_headroom = max(0.0, 100 - float(baseline_sap if not pd.isna(baseline_sap) else 0.0))
+    return min(sap_gain, sap_headroom), saving_fraction * 100
+
+
 @dataclass
 class PropertyUpgrade:
     """Represents an upgrade to a single property."""
@@ -100,11 +185,20 @@ class PropertyUpgrade:
     annual_energy_reduction_kwh: float
     annual_co2_reduction_kg: float
     annual_bill_savings: float
+    baseline_energy_kwh: float = 0.0
+    post_measure_energy_kwh: float = 0.0
     baseline_bill: float = 0.0
     post_measure_bill: float = 0.0
     baseline_co2_kg: float = 0.0
     post_measure_co2_kg: float = 0.0
     new_epc_band: str = ''
+    baseline_epc_band: str = ''
+    sap_rating_before: float = 0.0
+    sap_rating_after: float = 0.0
+    sap_rating_delta: float = 0.0
+    sap_delta_basis_pct: float = 0.0
+    band_shift_steps: int = 0
+    band_shift_capped: bool = False
     payback_years: float = np.inf
     uprn: str = ''
     postcode: str = ''
@@ -197,6 +291,13 @@ def _calculate_property_upgrade_core(
     baseline_kwh = _select_baseline_annual_kwh(property_dict, baseline_intensity)
     wall_type = property_dict.get('wall_type', 'Solid')
     current_rating = property_dict.get('CURRENT_ENERGY_EFFICIENCY', 50)
+
+    try:
+        current_rating = float(current_rating)
+        if pd.isna(current_rating):
+            current_rating = 0.0
+    except (TypeError, ValueError):
+        current_rating = 0.0
 
     baseline_flow_temp = property_dict.get('estimated_flow_temp')
     if baseline_flow_temp is None or pd.isna(baseline_flow_temp):
@@ -318,6 +419,7 @@ def _calculate_property_upgrade_core(
         post_measure_co2_high = non_heating_energy * gas_carbon + hp_electricity_high * elec_carbon
 
         energy_reduction = baseline_kwh - post_energy_central
+        post_energy_use = post_energy_central
         co2_reduction = baseline_co2 - post_measure_co2
 
     else:
@@ -331,29 +433,38 @@ def _calculate_property_upgrade_core(
         co2_reduction = baseline_co2 - post_measure_co2
 
         energy_reduction = baseline_kwh - energy_after_non_hp
+        post_energy_use = energy_after_non_hp
         hp_electricity = hp_electricity_low = hp_electricity_high = 0.0
         central_cop = low_cop = high_cop = np.nan
 
     energy_reduction = float(energy_reduction)
     capital_cost = float(capital_cost)
 
-    improvement_points = (energy_reduction / floor_area) * 0.5 if floor_area else 0
-    new_rating = min(100, current_rating + improvement_points)
+    sap_delta, sap_delta_basis_pct = _sap_delta_from_energy_savings(
+        baseline_kwh,
+        post_energy_use,
+        current_rating
+    )
 
-    if new_rating >= 92:
-        new_band = 'A'
-    elif new_rating >= 81:
-        new_band = 'B'
-    elif new_rating >= 69:
-        new_band = 'C'
-    elif new_rating >= 55:
-        new_band = 'D'
-    elif new_rating >= 39:
-        new_band = 'E'
-    elif new_rating >= 21:
-        new_band = 'F'
+    sap_rating_after = min(100.0, current_rating + sap_delta)
+
+    baseline_band = _normalize_band(property_dict.get('CURRENT_ENERGY_RATING', ''), current_rating)
+    estimated_band = _rating_to_band_value(sap_rating_after)
+
+    baseline_idx = BAND_ORDER.index(baseline_band)
+    estimated_idx = BAND_ORDER.index(estimated_band)
+    band_shift_steps = max(0, baseline_idx - estimated_idx)
+    band_shift_capped = band_shift_steps > MAX_EPC_BAND_IMPROVEMENT
+
+    if band_shift_capped:
+        capped_idx = max(0, baseline_idx - MAX_EPC_BAND_IMPROVEMENT)
+        new_band = BAND_ORDER[capped_idx]
+        sap_rating_after = min(sap_rating_after, _band_upper_bound(new_band))
+        band_shift_steps = baseline_idx - capped_idx
     else:
-        new_band = 'G'
+        new_band = estimated_band
+
+    sap_rating_delta = sap_rating_after - current_rating
 
     if pd.isna(bill_savings) or pd.isna(capital_cost):
         payback_years = np.inf
@@ -386,11 +497,20 @@ def _calculate_property_upgrade_core(
         annual_energy_reduction_kwh=energy_reduction if not pd.isna(energy_reduction) else 0,
         annual_co2_reduction_kg=co2_reduction if not pd.isna(co2_reduction) else 0,
         annual_bill_savings=bill_savings if not pd.isna(bill_savings) else 0,
+        baseline_energy_kwh=baseline_kwh if not pd.isna(baseline_kwh) else 0,
+        post_measure_energy_kwh=post_energy_use if not pd.isna(post_energy_use) else 0,
         baseline_bill=baseline_bill if not pd.isna(baseline_bill) else 0,
         post_measure_bill=post_measure_bill if not pd.isna(post_measure_bill) else 0,
         baseline_co2_kg=baseline_co2 if not pd.isna(baseline_co2) else 0,
         post_measure_co2_kg=post_measure_co2 if not pd.isna(post_measure_co2) else 0,
         new_epc_band=new_band,
+        baseline_epc_band=baseline_band,
+        sap_rating_before=current_rating,
+        sap_rating_after=sap_rating_after,
+        sap_rating_delta=sap_rating_delta,
+        sap_delta_basis_pct=sap_delta_basis_pct,
+        band_shift_steps=band_shift_steps,
+        band_shift_capped=band_shift_capped,
         payback_years=payback_years,
         estimated_flow_temp_c=float(baseline_flow_temp) if not pd.isna(baseline_flow_temp) else np.nan,
         operating_flow_temp_c=operating_flow_temp,
@@ -1012,20 +1132,7 @@ class ScenarioModeler:
 
     def _rating_to_band(self, rating: float) -> str:
         """Convert SAP rating to EPC band."""
-        if rating >= 92:
-            return 'A'
-        elif rating >= 81:
-            return 'B'
-        elif rating >= 69:
-            return 'C'
-        elif rating >= 55:
-            return 'D'
-        elif rating >= 39:
-            return 'E'
-        elif rating >= 21:
-            return 'F'
-        else:
-            return 'G'
+        return _rating_to_band_value(rating)
 
     def _aggregate_scenario_results(
         self,
@@ -1085,6 +1192,33 @@ class ScenarioModeler:
             'pct_not_cost_effective': pct_not_cost_effective,
         }
 
+        if {'baseline_energy_kwh', 'post_measure_energy_kwh'}.issubset(numeric_df.columns):
+            results['baseline_annual_energy_kwh'] = float(numeric_df['baseline_energy_kwh'].sum())
+            results['post_measure_energy_kwh'] = float(numeric_df['post_measure_energy_kwh'].sum())
+
+            with np.errstate(divide='ignore', invalid='ignore'):
+                reduction_pct = np.where(
+                    numeric_df['baseline_energy_kwh'] > 0,
+                    numeric_df['annual_energy_reduction_kwh'] / numeric_df['baseline_energy_kwh'],
+                    np.nan
+                )
+
+            reduction_pct_series = pd.Series(reduction_pct).replace([np.inf, -np.inf], np.nan).dropna()
+            if not reduction_pct_series.empty:
+                results['mean_energy_reduction_pct'] = float(reduction_pct_series.mean() * 100)
+                results['median_energy_reduction_pct'] = float(reduction_pct_series.median() * 100)
+
+        if {'sap_rating_delta', 'sap_rating_before', 'sap_rating_after', 'sap_delta_basis_pct'}.issubset(numeric_df.columns):
+            sap_delta_series = numeric_df['sap_rating_delta'].dropna()
+            results['sap_rating_delta_total'] = float(sap_delta_series.sum())
+            results['sap_rating_delta_mean'] = float(sap_delta_series.mean()) if not sap_delta_series.empty else 0.0
+            results['sap_rating_delta_median'] = float(sap_delta_series.median()) if not sap_delta_series.empty else 0.0
+
+            basis_series = numeric_df['sap_delta_basis_pct'].replace([np.inf, -np.inf], np.nan).dropna()
+            if not basis_series.empty:
+                results['sap_delta_basis_pct_mean'] = float(basis_series.mean())
+                results['sap_delta_basis_pct_median'] = float(basis_series.median())
+
         optional_sums = {
             'annual_bill_savings_low': 'annual_bill_savings_low',
             'annual_bill_savings_high': 'annual_bill_savings_high',
@@ -1100,6 +1234,14 @@ class ScenarioModeler:
         for result_key, col in optional_sums.items():
             if col in numeric_df.columns:
                 results[result_key] = float(numeric_df[col].sum())
+
+        if 'band_shift_capped' in property_df.columns:
+            capped_count = int(property_df['band_shift_capped'].sum())
+            results['epc_band_shift_cap_applied_properties'] = capped_count
+            results['epc_band_max_improvement'] = MAX_EPC_BAND_IMPROVEMENT
+
+        if 'band_shift_steps' in property_df.columns:
+            results['epc_band_shift_mean_steps'] = float(property_df['band_shift_steps'].mean())
 
         if {'ashp_ready', 'ashp_fabric_needed', 'ashp_not_ready_after_fabric'}.issubset(property_df.columns):
             ready_count = int(property_df['ashp_ready'].sum())
@@ -1136,9 +1278,29 @@ class ScenarioModeler:
         current_bands = df['CURRENT_ENERGY_RATING'].value_counts().to_dict() if 'CURRENT_ENERGY_RATING' in df.columns else {}
         new_bands = property_df['new_epc_band'].value_counts().to_dict()
 
+        band_a_before = current_bands.get('A', 0)
+        band_a_after = new_bands.get('A', 0)
+        band_a_guardrail = band_a_before + int(total_properties * BAND_A_GUARDRAIL_SHARE)
+        band_a_guardrail_hard_limit = band_a_before + int(total_properties * BAND_A_GUARDRAIL_SHARE * 2)
+        band_a_warning = band_a_after > band_a_guardrail
+
+        if band_a_warning:
+            logger.warning(
+                f"Band A count exceeds guardrail (before={band_a_before}, after={band_a_after}, guardrail={band_a_guardrail})"
+            )
+
+        assert band_a_after <= band_a_guardrail_hard_limit, (
+            "Unrealistic migration to EPC band A detected after capping; "
+            "review SAP delta assumptions."
+        )
+
         results['epc_band_shifts'] = {
             'before': current_bands,
-            'after': new_bands
+            'after': new_bands,
+            'max_band_improvement': MAX_EPC_BAND_IMPROVEMENT,
+            'band_shift_cap_properties': int(property_df['band_shift_capped'].sum()) if 'band_shift_capped' in property_df.columns else 0,
+            'band_a_warning': band_a_warning,
+            'band_a_guardrail': band_a_guardrail
         }
 
         # Payback distribution (handle infinite values)
