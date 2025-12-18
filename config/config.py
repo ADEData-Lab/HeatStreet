@@ -117,6 +117,44 @@ def get_uncertainty_params() -> Dict[str, Any]:
     return config.get('uncertainty', {})
 
 
+def get_performance_gap_factors(variant: str = "central") -> Dict[str, Any]:
+    """Get EPC performance gap (prebound) factors by variant.
+
+    Args:
+        variant: Which variant to return. Use "all" to retrieve every variant.
+
+    Returns:
+        Dictionary mapping EPC band → factor for the requested variant, or all variants.
+    """
+    config = load_config()
+    prebound_cfg = config.get('methodological_adjustments', {}).get('prebound_effect', {})
+    factors_by_variant = prebound_cfg.get('performance_gap_factors', {})
+
+    if not factors_by_variant:
+        raise ValueError(
+            "Missing performance gap factors in config.methodological_adjustments.prebound_effect.performance_gap_factors."
+        )
+
+    if variant in {"all", None}:
+        return factors_by_variant
+
+    if variant not in factors_by_variant:
+        available = ", ".join(sorted(factors_by_variant))
+        raise ValueError(f"Unknown performance gap variant '{variant}'. Available: {available}")
+
+    return factors_by_variant[variant]
+
+
+def get_default_performance_gap_variant() -> str:
+    """Return configured default performance gap variant (prebound scenario)."""
+    config = load_config()
+    return (
+        config.get('methodological_adjustments', {})
+        .get('prebound_effect', {})
+        .get('default_variant', 'central')
+    )
+
+
 def get_anomaly_detection_params() -> Dict[str, Any]:
     """Get EPC anomaly detection thresholds from config."""
     config = load_config()

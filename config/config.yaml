@@ -291,6 +291,41 @@ heat_network:
     # Column used for deterministic access checks throughout the pipeline
     access_column: "hn_ready"
 
+# Methodological Adjustments
+# See authoritative_sources.sections.methodological_adjustments
+methodological_adjustments:
+  prebound_effect:
+    default_variant: central
+    performance_gap_factors:
+      central:
+        A: 1.00
+        B: 1.00
+        C: 0.92
+        D: 0.82
+        E: 0.72
+        F: 0.55
+        G: 0.52
+      low:
+        A: 1.00
+        B: 1.00
+        C: 0.96
+        D: 0.87
+        E: 0.78
+        F: 0.62
+        G: 0.60
+      high:
+        A: 1.00
+        B: 1.00
+        C: 0.88
+        D: 0.77
+        E: 0.66
+        F: 0.48
+        G: 0.45
+    notes:
+      source: "Few et al. (2023) EPC-to-metered performance gap by EPC band"
+      low_variant: "Conservative prebound effect (upper CI of metered/ EPC ratio) used for sensitivity"
+      high_variant: "Stronger prebound effect (lower CI of metered/ EPC ratio) to stress-test baseline uncertainty"
+
 # Financial Parameters
 # See authoritative_sources.sections.financial_parameters
 financial:
@@ -872,4 +907,3 @@ authoritative_sources:
     ---
     
     *This document should be reviewed and updated at least annually, or whenever significant changes are made to energy prices, carbon factors, or methodology.*
-

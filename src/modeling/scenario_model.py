@@ -30,6 +30,39 @@ from src.analysis.fabric_tipping_point import FabricTippingPointAnalyzer
 from src.spatial.heat_network_analysis import HeatNetworkAnalyzer
 
 
+def _select_baseline_energy_intensity(property_like: Dict[str, Any]) -> float:
+    """Pick adjusted energy intensity when available, otherwise EPC value."""
+    for key in [
+        'energy_consumption_adjusted',
+        'energy_consumption_adjusted_central',
+        'ENERGY_CONSUMPTION_CURRENT',
+    ]:
+        val = property_like.get(key)
+        if val is not None and not pd.isna(val):
+            return float(val)
+
+    return float(property_like.get('ENERGY_CONSUMPTION_CURRENT', 150))
+
+
+def _select_baseline_annual_kwh(property_like: Dict[str, Any], energy_intensity: float) -> float:
+    """Return absolute baseline consumption, prioritising prebound-adjusted columns."""
+    for key in [
+        'baseline_consumption_kwh_year',
+        'baseline_consumption_kwh_year_central',
+        'baseline_consumption_kwh_year_low',
+        'baseline_consumption_kwh_year_high',
+    ]:
+        val = property_like.get(key)
+        if val is not None and not pd.isna(val):
+            return float(val)
+
+    floor_area = property_like.get('TOTAL_FLOOR_AREA', 100)
+    if pd.isna(floor_area):
+        floor_area = 100
+
+    return float(energy_intensity) * float(floor_area)
+
+
 @dataclass
 class PropertyUpgrade:
     """Represents an upgrade to a single property."""
@@ -90,13 +123,14 @@ def _calculate_property_upgrade_worker(args):
     co2_reduction = 0
 
     floor_area = property_dict.get('TOTAL_FLOOR_AREA', 100)
-    energy_consumption = property_dict.get('ENERGY_CONSUMPTION_CURRENT', 150)
+    baseline_intensity = _select_baseline_energy_intensity(property_dict)
+    baseline_kwh = _select_baseline_annual_kwh(property_dict, baseline_intensity)
     wall_type = property_dict.get('wall_type', 'Solid')
     current_rating = property_dict.get('CURRENT_ENERGY_EFFICIENCY', 50)
 
     # Helper function to get absolute energy
     def get_absolute_energy():
-        return energy_consumption * floor_area
+        return baseline_kwh
 
     # Calculate costs and impacts for each measure
     for measure in measures:
@@ -166,10 +200,10 @@ def _calculate_property_upgrade_worker(args):
     # Calculate bill savings
     bill_savings = energy_reduction * config['energy_prices']['current']['gas']
 
-    baseline_bill = get_absolute_energy() * config['energy_prices']['current']['gas']
+    baseline_bill = baseline_kwh * config['energy_prices']['current']['gas']
     post_measure_bill = max(baseline_bill - bill_savings, 0)
 
-    baseline_co2 = get_absolute_energy() * config['carbon_factors']['current']['gas']
+    baseline_co2 = baseline_kwh * config['carbon_factors']['current']['gas']
     post_measure_co2 = max(baseline_co2 - co2_reduction, 0)
 
     # Estimate new EPC band
@@ -300,6 +334,17 @@ class ScenarioModeler:
         logger.info("Initialized Scenario Modeler")
         logger.info(f"Loaded {len(self.scenarios)} scenarios")
 
+    def _ensure_adjusted_baseline(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Guarantee prebound-adjusted baseline columns before modeling."""
+        if 'energy_consumption_adjusted' in df.columns or 'energy_consumption_adjusted_central' in df.columns:
+            return df
+
+        logger.info("Applying prebound adjustment to supply adjusted baseline for scenario modeling...")
+        from src.analysis.methodological_adjustments import MethodologicalAdjustments
+
+        adjuster = MethodologicalAdjustments()
+        return adjuster.apply_prebound_adjustment(df)
+
     def _apply_heat_network_readiness(self, df: pd.DataFrame) -> pd.DataFrame:
         """Add deterministic heat network readiness columns to the EPC dataset."""
 
@@ -336,7 +381,8 @@ class ScenarioModeler:
         """
         logger.info(f"Modeling scenarios for {len(df):,} properties...")
 
-        df_with_flags = self._preprocess_ashp_readiness(df)
+        df_baseline = self._ensure_adjusted_baseline(df)
+        df_with_flags = self._preprocess_ashp_readiness(df_baseline)
 
         for scenario_name, scenario_config in self.scenarios.items():
             logger.info(f"\nModeling scenario: {scenario_name}")
@@ -365,11 +411,13 @@ class ScenarioModeler:
         measures = scenario_config.get('measures', [])
         measures = self._resolve_scenario_measures(measures)
 
+        df_ready = self._ensure_adjusted_baseline(df)
+
         if not measures:
             # Baseline scenario - no interventions
-            return self._model_baseline(df)
+            return self._model_baseline(df_ready)
 
-        df_with_flags = self._preprocess_ashp_readiness(df)
+        df_with_flags = self._preprocess_ashp_readiness(df_ready)
 
         # Calculate costs and impacts for each property using parallel processing
         logger.info(f"  Processing {len(df_with_flags):,} properties in parallel...")
@@ -423,16 +471,25 @@ class ScenarioModeler:
         """Model baseline (no intervention) scenario."""
         logger.info("Modeling baseline scenario...")
 
-        # ENERGY_CONSUMPTION_CURRENT is in kWh/m²/year - multiply by floor area for absolute values
-        if 'ENERGY_CONSUMPTION_CURRENT' in df.columns and 'TOTAL_FLOOR_AREA' in df.columns:
-            total_energy = (df['ENERGY_CONSUMPTION_CURRENT'] * df['TOTAL_FLOOR_AREA']).sum()
+        if 'baseline_consumption_kwh_year' in df.columns:
+            total_energy = df['baseline_consumption_kwh_year'].sum()
         else:
-            total_energy = 0
+            intensity_series = (
+                df['energy_consumption_adjusted']
+                if 'energy_consumption_adjusted' in df.columns
+                else df['energy_consumption_adjusted_central']
+                if 'energy_consumption_adjusted_central' in df.columns
+                else df['ENERGY_CONSUMPTION_CURRENT']
+                if 'ENERGY_CONSUMPTION_CURRENT' in df.columns
+                else pd.Series(0, index=df.index)
+            )
+            floor_area_series = (
+                df['TOTAL_FLOOR_AREA'] if 'TOTAL_FLOOR_AREA' in df.columns else pd.Series(0, index=df.index)
+            )
+            total_energy = (intensity_series.fillna(0) * floor_area_series.fillna(0)).sum()
 
-        # CO2_EMISSIONS_CURRENT is already in tonnes/year (absolute)
-        total_co2 = df['CO2_EMISSIONS_CURRENT'].sum() if 'CO2_EMISSIONS_CURRENT' in df.columns else 0
-        # Convert tonnes to kg
-        total_co2_kg = total_co2 * 1000
+        gas_carbon_factor = self.carbon_factors.get('current', {}).get('gas', 0)
+        total_co2_kg = float(total_energy) * gas_carbon_factor
 
         return {
             'total_properties': len(df),
@@ -545,7 +602,12 @@ class ScenarioModeler:
             return df
 
         processed = df.copy()
-        heat_demand = processed.get('ENERGY_CONSUMPTION_CURRENT')
+        heat_demand = None
+        for col in ['energy_consumption_adjusted', 'energy_consumption_adjusted_central', 'ENERGY_CONSUMPTION_CURRENT']:
+            if col in processed.columns:
+                heat_demand = processed[col]
+                break
+
         if heat_demand is None:
             heat_demand = pd.Series(np.nan, index=processed.index)
         processed['heat_demand_kwh_m2'] = heat_demand
@@ -673,6 +735,8 @@ class ScenarioModeler:
         co2_reduction = 0
 
         floor_area = property_data.get('TOTAL_FLOOR_AREA', 100)  # Default if missing
+        baseline_intensity = _select_baseline_energy_intensity(property_data)
+        baseline_kwh = _select_baseline_annual_kwh(property_data, baseline_intensity)
 
         # Calculate costs and impacts for each measure
         for measure in measures:
@@ -722,9 +786,15 @@ class ScenarioModeler:
         # Calculate bill savings
         bill_savings = energy_reduction * self.energy_prices['current']['gas']
 
+        baseline_bill = baseline_kwh * self.energy_prices['current']['gas']
+        post_measure_bill = max(baseline_bill - bill_savings, 0)
+
+        baseline_co2 = baseline_kwh * self.carbon_factors['current']['gas']
+        post_measure_co2 = max(baseline_co2 - co2_reduction, 0)
+
         # Estimate new EPC band (simplified)
         current_rating = property_data.get('CURRENT_ENERGY_EFFICIENCY', 50)
-        improvement_points = (energy_reduction / floor_area) * 0.5  # Simplified conversion
+        improvement_points = (energy_reduction / floor_area) * 0.5 if floor_area else 0  # Simplified conversion
         new_rating = min(100, current_rating + improvement_points)
         new_band = self._rating_to_band(new_rating)
 
@@ -746,6 +816,10 @@ class ScenarioModeler:
             annual_energy_reduction_kwh=energy_reduction if not pd.isna(energy_reduction) else 0,
             annual_co2_reduction_kg=co2_reduction if not pd.isna(co2_reduction) else 0,
             annual_bill_savings=bill_savings if not pd.isna(bill_savings) else 0,
+            baseline_bill=baseline_bill if not pd.isna(baseline_bill) else 0,
+            post_measure_bill=post_measure_bill if not pd.isna(post_measure_bill) else 0,
+            baseline_co2_kg=baseline_co2 if not pd.isna(baseline_co2) else 0,
+            post_measure_co2_kg=post_measure_co2 if not pd.isna(post_measure_co2) else 0,
             new_epc_band=new_band,
             payback_years=payback_years
         )
@@ -760,11 +834,10 @@ class ScenarioModeler:
     def _get_absolute_energy(self, property_data: pd.Series) -> float:
         """
         Get absolute energy consumption in kWh/year.
-        ENERGY_CONSUMPTION_CURRENT from EPC is in kWh/m²/year, so multiply by floor area.
+        Prioritises prebound-adjusted intensities when available.
         """
-        energy_intensity = property_data.get('ENERGY_CONSUMPTION_CURRENT', 150)  # kWh/m²/year
-        floor_area = property_data.get('TOTAL_FLOOR_AREA', 100)  # m²
-        return energy_intensity * floor_area  # kWh/year
+        energy_intensity = _select_baseline_energy_intensity(property_data)
+        return _select_baseline_annual_kwh(property_data, energy_intensity)
 
     def _savings_loft_insulation(self, property_data: pd.Series) -> float:
         """Calculate energy savings from loft insulation."""

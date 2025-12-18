@@ -9,16 +9,20 @@ Implements evidence-based adjustments to improve analysis accuracy:
 
 import pandas as pd
 import numpy as np
-from typing import Dict, Tuple
+from typing import Dict
 from loguru import logger
+from config.config import (
+    get_default_performance_gap_variant,
+    get_performance_gap_factors,
+)
 
 
 class MethodologicalAdjustments:
     """Apply evidence-based methodological adjustments to EPC analysis."""
 
-    # Prebound effect factors from Few et al. (2023)
+    # Prebound effect factors from Few et al. (2023) used as fallback
     # EPCs systematically overpredict energy consumption, especially for lower-rated homes
-    PREBOUND_FACTORS = {
+    DEFAULT_PREBOUND_FACTORS = {
         'A': 1.00,  # No adjustment needed
         'B': 1.00,  # No adjustment needed
         'C': 0.92,  # 8% overprediction
@@ -38,9 +42,36 @@ class MethodologicalAdjustments:
 
     def __init__(self):
         """Initialize methodological adjustments."""
-        logger.info("Initialized Methodological Adjustments")
+        self.performance_gap_variants = self._load_performance_gap_variants()
+        self.base_gap_variant = self._resolve_base_variant()
+        logger.info(
+            "Initialized Methodological Adjustments (base performance gap variant: {})",
+            self.base_gap_variant,
+        )
 
-    def apply_prebound_adjustment(self, df: pd.DataFrame) -> pd.DataFrame:
+    def _load_performance_gap_variants(self) -> Dict[str, Dict[str, float]]:
+        """Load performance gap factors from config with sensible fallback."""
+        try:
+            factors = get_performance_gap_factors("all")
+            if not isinstance(factors, dict) or not factors:
+                raise ValueError("Performance gap factors missing or malformed")
+            return factors
+        except Exception as exc:
+            logger.warning(
+                "Falling back to default prebound factors due to config issue: {}", exc
+            )
+            return {'central': self.DEFAULT_PREBOUND_FACTORS}
+
+    def _resolve_base_variant(self) -> str:
+        """Pick the base (canonical) variant used for main baseline columns."""
+        configured = get_default_performance_gap_variant()
+        if configured in self.performance_gap_variants:
+            return configured
+        if 'central' in self.performance_gap_variants:
+            return 'central'
+        return next(iter(self.performance_gap_variants.keys()))
+
+    def apply_prebound_adjustment(self, df: pd.DataFrame, variant: str = None) -> pd.DataFrame:
         """
         Apply prebound effect adjustment to energy consumption.
 
@@ -67,34 +98,113 @@ class MethodologicalAdjustments:
             logger.warning("CURRENT_ENERGY_RATING column not found, skipping prebound adjustment")
             return df
 
-        # Map band to factor
-        df_adj['prebound_factor'] = df_adj['CURRENT_ENERGY_RATING'].map(self.PREBOUND_FACTORS)
+        available_variants = ['central', 'low', 'high']
+        available_variants = [v for v in available_variants if v in self.performance_gap_variants]
+        if not available_variants:
+            available_variants = list(self.performance_gap_variants.keys())
 
-        # Default to D band factor (0.82) for missing values
-        df_adj['prebound_factor'] = df_adj['prebound_factor'].fillna(0.82)
-
-        # Apply adjustment to energy consumption (which is already in kWh/m²/year)
-        if 'ENERGY_CONSUMPTION_CURRENT' in df.columns:
-            df_adj['energy_consumption_adjusted'] = (
-                df_adj['ENERGY_CONSUMPTION_CURRENT'] * df_adj['prebound_factor']
+        base_variant = variant or self.base_gap_variant
+        if base_variant not in available_variants:
+            logger.warning(
+                "Requested base variant '{}' not found; defaulting to '{}'",
+                base_variant,
+                available_variants[0],
             )
+            base_variant = available_variants[0]
 
-            # Calculate absolute consumption for cost calculations
-            if 'TOTAL_FLOOR_AREA' in df.columns:
-                df_adj['baseline_consumption_kwh_year'] = (
-                    df_adj['energy_consumption_adjusted'] * df_adj['TOTAL_FLOOR_AREA']
+        central_factors = self.performance_gap_variants.get(
+            'central', self.DEFAULT_PREBOUND_FACTORS
+        )
+        default_fill = central_factors.get('D', 0.82)
+
+        # Map band to factor for each variant and compute adjusted intensities
+        for variant_name in available_variants:
+            factor_map = self.performance_gap_variants.get(variant_name, central_factors)
+            factor_col = f'prebound_factor_{variant_name}'
+            df_adj[factor_col] = df_adj['CURRENT_ENERGY_RATING'].map(factor_map)
+            df_adj[factor_col] = df_adj[factor_col].fillna(default_fill)
+
+            if 'ENERGY_CONSUMPTION_CURRENT' in df.columns:
+                adjusted_col = f'energy_consumption_adjusted_{variant_name}'
+                df_adj[adjusted_col] = (
+                    df_adj['ENERGY_CONSUMPTION_CURRENT'] * df_adj[factor_col]
                 )
 
-        logger.info(f"✓ Prebound adjustment applied")
+                if 'TOTAL_FLOOR_AREA' in df.columns:
+                    df_adj[f'baseline_consumption_kwh_year_{variant_name}'] = (
+                        df_adj[adjusted_col] * df_adj['TOTAL_FLOOR_AREA']
+                    )
 
-        # Log impact
-        if 'ENERGY_CONSUMPTION_CURRENT' in df.columns and 'energy_consumption_adjusted' in df_adj.columns:
+        # Canonical columns use the base variant
+        base_factor_col = f'prebound_factor_{base_variant}'
+        if base_factor_col in df_adj.columns:
+            df_adj['prebound_factor'] = df_adj[base_factor_col]
+        else:
+            df_adj['prebound_factor'] = df_adj['CURRENT_ENERGY_RATING'].map(central_factors).fillna(default_fill)
+
+        if 'ENERGY_CONSUMPTION_CURRENT' in df.columns:
+            base_adjusted_col = f'energy_consumption_adjusted_{base_variant}'
+            if base_adjusted_col in df_adj.columns:
+                df_adj['energy_consumption_adjusted'] = df_adj[base_adjusted_col]
+            else:
+                df_adj['energy_consumption_adjusted'] = (
+                    df_adj['ENERGY_CONSUMPTION_CURRENT'] * df_adj['prebound_factor']
+                )
+
+            if 'TOTAL_FLOOR_AREA' in df.columns:
+                base_baseline_col = f'baseline_consumption_kwh_year_{base_variant}'
+                if base_baseline_col in df_adj.columns:
+                    df_adj['baseline_consumption_kwh_year'] = df_adj[base_baseline_col]
+                else:
+                    df_adj['baseline_consumption_kwh_year'] = (
+                        df_adj['energy_consumption_adjusted'] * df_adj['TOTAL_FLOOR_AREA']
+                    )
+
+        logger.info(f"✓ Prebound adjustment applied using '{base_variant}' variant")
+
+        # Log impact (overall and band-wise)
+        if 'ENERGY_CONSUMPTION_CURRENT' in df.columns:
             original_mean = df['ENERGY_CONSUMPTION_CURRENT'].mean()
-            adjusted_mean = df_adj['energy_consumption_adjusted'].mean()
-            reduction_pct = (1 - adjusted_mean / original_mean) * 100
             logger.info(f"  Original mean: {original_mean:.1f} kWh/m²/year")
-            logger.info(f"  Adjusted mean: {adjusted_mean:.1f} kWh/m²/year")
-            logger.info(f"  Reduction: {reduction_pct:.1f}% (more realistic baseline)")
+
+            for variant_name in available_variants:
+                adjusted_col = f'energy_consumption_adjusted_{variant_name}'
+                if adjusted_col not in df_adj.columns:
+                    continue
+
+                adjusted_mean = df_adj[adjusted_col].mean()
+                reduction_pct = (
+                    (1 - adjusted_mean / original_mean) * 100
+                    if original_mean > 0 else np.nan
+                )
+                logger.info(
+                    "  Variant '{variant}': adjusted mean {mean:.1f} kWh/m²/year ({reduction:.1f}% reduction)",
+                    variant=variant_name,
+                    mean=adjusted_mean,
+                    reduction=reduction_pct,
+                )
+
+                band_summary = (
+                    df_adj[['CURRENT_ENERGY_RATING', 'ENERGY_CONSUMPTION_CURRENT', adjusted_col]]
+                    .dropna(subset=['CURRENT_ENERGY_RATING'])
+                    .groupby('CURRENT_ENERGY_RATING')
+                    .mean()
+                )
+                for band, row in band_summary.sort_index().iterrows():
+                    original_band = row.get('ENERGY_CONSUMPTION_CURRENT')
+                    adjusted_band = row.get(adjusted_col)
+                    reduction_band_pct = (
+                        (1 - adjusted_band / original_band) * 100
+                        if pd.notna(original_band) and original_band != 0 else np.nan
+                    )
+                    logger.info(
+                        "    Band {band}: {orig:.1f} → {adjusted:.1f} kWh/m² ({gap:.1f}% gap) [{variant}]",
+                        band=band,
+                        orig=original_band,
+                        adjusted=adjusted_band,
+                        gap=reduction_band_pct,
+                        variant=variant_name,
+                    )
 
         return df_adj
 
