@@ -160,3 +160,19 @@ def test_hn_ready_generation_drives_pathway(monkeypatch, scenario_modeler_factor
     assert pathway == 'heat_network'
     assert 'district_heating_connection' in plan
     assert 'ashp_installation' not in plan
+
+
+def test_negative_energy_intensity_rejected(scenario_modeler_factory):
+    modeler = scenario_modeler_factory()
+
+    df = pd.DataFrame([
+        {
+            'LMK_KEY': 'NEG_EN',
+            'TOTAL_FLOOR_AREA': 75,
+            'ENERGY_CONSUMPTION_CURRENT': -15,
+            'CURRENT_ENERGY_RATING': 'D',
+        }
+    ])
+
+    with pytest.raises(ValueError):
+        modeler.model_all_scenarios(df)

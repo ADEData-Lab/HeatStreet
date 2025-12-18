@@ -353,6 +353,8 @@ def validate_data(df, analysis_logger: AnalysisLogger = None):
         analysis_logger.add_metric("duplicates_removed", report['duplicates_removed'], "Duplicate records removed")
         analysis_logger.add_metric("invalid_records", report['total_records'] - len(df_validated), "Invalid records removed")
         analysis_logger.add_metric("validation_rate", len(df_validated)/report['total_records']*100, "Percentage of records passing validation")
+        analysis_logger.add_metric("negative_energy_values", report.get('negative_energy_values', 0), "Records with negative ENERGY_CONSUMPTION_CURRENT")
+        analysis_logger.add_metric("negative_co2_values", report.get('negative_co2_values', 0), "Records with negative CO2_EMISSIONS_CURRENT")
 
     # Save validated data
     import pandas as pd

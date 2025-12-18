@@ -39,6 +39,8 @@ class EPCDataValidator:
             'missing_critical_fields': 0,
             'construction_date_mismatches': 0,
             'illogical_insulation': 0,
+            'negative_energy_values': 0,
+            'negative_co2_values': 0,
             'records_passed': 0
         }
 
@@ -63,6 +65,7 @@ class EPCDataValidator:
         # Run validation checks in sequence
         df = self.remove_duplicates(df)
         df = self.validate_floor_areas(df)
+        df = self.validate_energy_and_emissions(df)
         df = self.validate_built_form(df)
         df = self.validate_critical_fields(df)
         df = self.validate_construction_dates(df)
@@ -91,6 +94,49 @@ class EPCDataValidator:
         df.columns = df.columns.str.replace('-', '_').str.upper()
 
         logger.info(f"Standardized {len(df.columns)} column names")
+
+        return df
+
+    def validate_energy_and_emissions(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Remove or clamp negative energy consumption and CO₂ emission values.
+
+        Args:
+            df: EPC DataFrame
+
+        Returns:
+            DataFrame with negative energy/CO₂ values removed
+        """
+        logger.info("Validating energy and CO₂ metrics for negative values...")
+
+        energy_negatives = 0
+        co2_negatives = 0
+
+        if 'ENERGY_CONSUMPTION_CURRENT' in df.columns:
+            energy_series = pd.to_numeric(df['ENERGY_CONSUMPTION_CURRENT'], errors='coerce')
+            energy_negatives = (energy_series < 0).sum()
+
+        if 'CO2_EMISSIONS_CURRENT' in df.columns:
+            co2_series = pd.to_numeric(df['CO2_EMISSIONS_CURRENT'], errors='coerce')
+            co2_negatives = (co2_series < 0).sum()
+
+        removal_mask = pd.Series(False, index=df.index)
+
+        if energy_negatives > 0:
+            logger.warning(f"Found {energy_negatives:,} records with negative ENERGY_CONSUMPTION_CURRENT")
+            removal_mask |= pd.to_numeric(df['ENERGY_CONSUMPTION_CURRENT'], errors='coerce') < 0
+
+        if co2_negatives > 0:
+            logger.warning(f"Found {co2_negatives:,} records with negative CO2_EMISSIONS_CURRENT")
+            removal_mask |= pd.to_numeric(df['CO2_EMISSIONS_CURRENT'], errors='coerce') < 0
+
+        removed_count = removal_mask.sum()
+        if removed_count > 0:
+            df = df[~removal_mask].copy()
+            logger.info(f"Removed {removed_count:,} records with negative energy or CO₂ metrics")
+
+        self.validation_report['negative_energy_values'] = int(energy_negatives)
+        self.validation_report['negative_co2_values'] = int(co2_negatives)
 
         return df
 
@@ -817,6 +863,11 @@ class EPCDataValidator:
                     logger.warning(f"Attempted correction, new mean: {corrected_mean:.1f}")
             else:
                 logger.info(f"✓ Energy consumption validated: mean = {result_mean:.1f} kWh/m²/year")
+
+            negative_energy_norm = (df['energy_kwh_per_m2_year'] < 0).sum()
+            if negative_energy_norm > 0:
+                logger.warning(f"Clamping {negative_energy_norm:,} negative normalized energy values to zero")
+                df['energy_kwh_per_m2_year'] = df['energy_kwh_per_m2_year'].clip(lower=0)
         elif 'ENERGY_CONSUMPTION_CURRENT' in df.columns:
             # No floor area available - copy as-is with warning
             df['energy_kwh_per_m2_year'] = df['ENERGY_CONSUMPTION_CURRENT'].copy()
@@ -839,6 +890,11 @@ class EPCDataValidator:
                 )
             else:
                 logger.info(f"✓ CO₂ emissions validated: mean = {co2_mean:.1f} kgCO₂/m²/year")
+
+            negative_co2_norm = (df['co2_kg_per_m2_year'] < 0).sum()
+            if negative_co2_norm > 0:
+                logger.warning(f"Clamping {negative_co2_norm:,} negative normalized CO₂ values to zero")
+                df['co2_kg_per_m2_year'] = df['co2_kg_per_m2_year'].clip(lower=0)
 
             logger.info("CO2 metrics normalized to kg/m²/year (converted from tonnes/year)")
 
@@ -863,6 +919,8 @@ class EPCDataValidator:
         logger.info(f"Missing critical fields:        {self.validation_report['missing_critical_fields']:,}")
         logger.info(f"Construction date mismatches:   {self.validation_report['construction_date_mismatches']:,}")
         logger.info(f"Illogical insulation (flagged): {self.validation_report['illogical_insulation']:,}")
+        logger.info(f"Negative energy values:         {self.validation_report['negative_energy_values']:,}")
+        logger.info(f"Negative CO₂ values:            {self.validation_report['negative_co2_values']:,}")
         logger.info(f"\nRecords passed validation:      {self.validation_report['records_passed']:,}")
 
         pass_rate = (self.validation_report['records_passed'] /

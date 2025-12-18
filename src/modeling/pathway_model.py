@@ -53,7 +53,10 @@ def _select_baseline_energy_intensity(property_like: pd.Series) -> float:
     ]:
         val = property_like.get(col)
         if val is not None and not pd.isna(val):
-            return float(val)
+            numeric_val = float(val)
+            if numeric_val < 0:
+                raise ValueError(f"Negative energy intensity supplied for {col}: {numeric_val}")
+            return numeric_val
 
     return float(property_like.get('ENERGY_CONSUMPTION_CURRENT', 150))
 
@@ -75,6 +78,30 @@ def _select_baseline_annual_kwh(property_like: pd.Series, energy_intensity: floa
         floor_area = 100
 
     return float(energy_intensity) * float(floor_area)
+
+
+def _assert_non_negative_intensities(df: pd.DataFrame) -> pd.DataFrame:
+    """Ensure no negative energy intensity values are present before pathway modeling."""
+    intensity_cols = [
+        'energy_consumption_adjusted',
+        'energy_consumption_adjusted_central',
+        'ENERGY_CONSUMPTION_CURRENT',
+    ]
+
+    present_cols = [col for col in intensity_cols if col in df.columns]
+    if not present_cols:
+        return df
+
+    negative_counts = {
+        col: int((pd.to_numeric(df[col], errors='coerce') < 0).sum())
+        for col in present_cols
+    }
+
+    total_negatives = sum(negative_counts.values())
+    if total_negatives > 0:
+        raise ValueError(f"Negative energy intensities found in pathway inputs: {negative_counts}")
+
+    return df
 
 
 # ============================================================================
@@ -237,13 +264,14 @@ class PathwayModeler:
     def _ensure_adjusted_baseline(self, df: pd.DataFrame) -> pd.DataFrame:
         """Guarantee prebound baseline is available before pathway calculations."""
         if 'energy_consumption_adjusted' in df.columns or 'energy_consumption_adjusted_central' in df.columns:
-            return df
+            return _assert_non_negative_intensities(df)
 
         logger.info("Applying prebound adjustment to supply adjusted baseline for pathway modeling...")
         from src.analysis.methodological_adjustments import MethodologicalAdjustments
 
         adjuster = MethodologicalAdjustments()
-        return adjuster.apply_prebound_adjustment(df)
+        adjusted = adjuster.apply_prebound_adjustment(df)
+        return _assert_non_negative_intensities(adjusted)
 
     def calculate_property_pathway(
         self,

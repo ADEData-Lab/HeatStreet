@@ -265,6 +265,25 @@ def test_epc_anomaly_flagging():
     logger.info("PASS: All anomaly flagging tests passed!")
 
 
+def test_pathway_modeler_rejects_negative_intensity():
+    from src.modeling.pathway_model import PathwayModeler, PATHWAYS
+
+    modeler = PathwayModeler()
+
+    negative_property = pd.Series({
+        'LMK_KEY': 'NEG_PATH',
+        'TOTAL_FLOOR_AREA': 90,
+        'ENERGY_CONSUMPTION_CURRENT': -25,
+    })
+
+    with pytest.raises(ValueError):
+        modeler.calculate_property_pathway(
+            negative_property,
+            PATHWAYS['baseline'],
+            has_hn_access=False
+        )
+
+
 def test_package_and_pathway_ids():
     """
     Verify that all package and pathway IDs resolve to known definitions.
