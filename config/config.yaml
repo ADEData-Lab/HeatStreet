@@ -264,6 +264,13 @@ carbon_factors:
 heat_pump:
   scop: 3.0  # Seasonal Coefficient of Performance
   design_flow_temps: [35, 45, 55, 65]  # °C
+  heating_demand_fraction: 0.8  # Share of total consumption attributed to space/water heating
+  cop_vs_flow_temp:
+    temperatures_c: [35, 45, 55, 65]
+    central_spf: [3.6, 3.2, 2.7, 2.3]
+    low_spf: [3.2, 2.8, 2.4, 2.0]
+    high_spf: [4.0, 3.5, 3.0, 2.6]
+    source: "Electrification of Heat (ESC 2024) field trial SPF vs flow temperature; medians with IQR bounds"
 
 # Heat Network Parameters
 # See authoritative_sources.sections.heat_network_parameters
@@ -682,12 +689,15 @@ authoritative_sources:
     | 49 | Heat Pump SCOP (ASHP) | 3.0 | **Validated** | [Energy Systems Catapult - Electrification of Heat](https://es.catapult.org.uk/reports/electrification-of-heat-demonstration-project-insights-report/), [Guardian Heat Pump Analysis](https://www.theguardian.com/environment/2024/may/13/are-heat-pumps-more-expensive-to-run-than-gas-boilers) |
     | 50 | SCOP Calculation Formula | SCOP = seasonal heat output / seasonal electrical input | **Validated** | [EU Ecodesign Regulation 813/2013](https://eur-lex.europa.eu/legal-content/EN/TXT/?uri=CELEX%3A32013R0813) |
     | 51 | Flow Temperature Range | [35, 45, 55, 65] °C | **Validated conceptually** | [Mitsubishi Ecodan Technical Data](https://ecodan.mitsubishielectric.co.uk/) |
-    
+    | 51a | COP/SPF vs Flow Temperature (median) | {35°C: 3.6, 45°C: 3.2, 55°C: 2.7, 65°C: 2.3} | **Evidence-based** | [Energy Systems Catapult - Electrification of Heat](https://es.catapult.org.uk/reports/electrification-of-heat-demonstration-project-insights-report/) |
+    | 51b | COP/SPF Sensitivity Bounds (IQR) | Low {35°C: 3.2, 45°C: 2.8, 55°C: 2.4, 65°C: 2.0}; High {35°C: 4.0, 45°C: 3.5, 55°C: 3.0, 65°C: 2.6} | **Evidence-based** | [Energy Systems Catapult - Electrification of Heat](https://es.catapult.org.uk/reports/electrification-of-heat-demonstration-project-insights-report/), [BEIS Heat Pump Field Trials](https://assets.publishing.service.gov.uk/media/5a81d9be40f0b61aab341b26/impacts_of_heat_pumps_on_household_electricity_bills.pdf) |
+
     **Notes:**
     - SCOP of 3.0 matches median seasonal performance from UK trials (~2.7–3.2)
     - SCOP formula is standard EN 14825 / Ecodesign definition
     - Flow temperature range matches typical operating envelope of residential ASHPs (and high-temp variants)
-    
+    - COP/SPF curves derived from UK field trial medians (Electrification of Heat) with IQR bounds reflecting site variability; higher flow temperatures reduce SPF sharply
+
     ---
     
     ## 6. Heat Network Parameters
@@ -861,7 +871,7 @@ authoritative_sources:
     | Carbon Factors | 5 | 2 | 0 | 2 | 1 | 0 |
     | Retrofit Costs | 20 | 1 | 0 | 0 | 19 | 0 |
     | Energy Savings | 16 | 1 | 0 | 0 | 15 | 0 |
-    | Heat Pump | 3 | 3 | 0 | 0 | 0 | 0 |
+    | Heat Pump | 5 | 3 | 2 | 0 | 0 | 0 |
     | Heat Network | 5 | 2 | 0 | 1 | 1 | **1** |
     | Financial | 3 | 3 | 0 | 0 | 0 | 0 |
     | Methodological | 9 | 2 | 4 | 0 | 3 | 0 |
@@ -869,7 +879,7 @@ authoritative_sources:
     | Load Profiles | 3 | 1 | 0 | 0 | 2 | 0 |
     | Spatial Analysis | 4 | 1 | 0 | 0 | 3 | 0 |
     | Scenario Calcs | 6 | 3 | 1 | 1 | 1 | 0 |
-    | **TOTAL** | **86** | **21** | **6** | **9** | **49** | **1** |
+    | **TOTAL** | **88** | **21** | **8** | **9** | **49** | **1** |
     
     ---
     

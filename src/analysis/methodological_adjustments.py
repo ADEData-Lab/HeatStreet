@@ -9,11 +9,12 @@ Implements evidence-based adjustments to improve analysis accuracy:
 
 import pandas as pd
 import numpy as np
-from typing import Dict
+from typing import Dict, Optional, Union
 from loguru import logger
 from config.config import (
     get_default_performance_gap_variant,
     get_performance_gap_factors,
+    get_heat_pump_cop_curve,
 )
 
 
@@ -44,6 +45,8 @@ class MethodologicalAdjustments:
         """Initialize methodological adjustments."""
         self.performance_gap_variants = self._load_performance_gap_variants()
         self.base_gap_variant = self._resolve_base_variant()
+        self.hp_cop_curve = get_heat_pump_cop_curve()
+        self.min_flow_temp = float(min(self.hp_cop_curve.get('temperatures_c', [45])))
         logger.info(
             "Initialized Methodological Adjustments (base performance gap variant: {})",
             self.base_gap_variant,
@@ -208,6 +211,42 @@ class MethodologicalAdjustments:
 
         return df_adj
 
+    def derive_heat_pump_cop(
+        self,
+        flow_temp: Union[pd.Series, float, int],
+        include_bounds: bool = True,
+    ) -> Dict[str, Union[pd.Series, float]]:
+        """Map flow temperature to COP/SPF using configured curves.
+
+        Args:
+            flow_temp: Target flow temperature(s) in °C.
+            include_bounds: Whether to return low/high sensitivity bounds.
+
+        Returns:
+            Dictionary with central (and optional low/high) COP values.
+        """
+        temps = np.array(self.hp_cop_curve.get('temperatures_c', []), dtype=float)
+        if temps.size == 0:
+            raise ValueError("Heat pump COP curve temperatures are not configured.")
+
+        def _interp(values: Optional[list]) -> Union[pd.Series, float]:
+            curve = np.array(values if values is not None else self.hp_cop_curve['central'], dtype=float)
+            if isinstance(flow_temp, pd.Series):
+                return pd.Series(
+                    np.interp(flow_temp.astype(float), temps, curve),
+                    index=flow_temp.index,
+                )
+            return float(np.interp(float(flow_temp), temps, curve))
+
+        central = _interp(self.hp_cop_curve.get('central'))
+        results: Dict[str, Union[pd.Series, float]] = {'central': central}
+
+        if include_bounds:
+            results['low'] = _interp(self.hp_cop_curve.get('low'))
+            results['high'] = _interp(self.hp_cop_curve.get('high'))
+
+        return results
+
     def estimate_flow_temperature(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Estimate required flow temperature for heat pumps based on fabric performance.
@@ -277,6 +316,24 @@ class MethodologicalAdjustments:
                 logger.info(f"    {need}: {pct:.1f}%")
 
         return df_temp
+
+    def attach_cop_estimates(
+        self,
+        df: pd.DataFrame,
+        flow_temp_col: str = 'estimated_flow_temp'
+    ) -> pd.DataFrame:
+        """Add COP estimates to dataframe based on flow temperatures."""
+        if flow_temp_col not in df.columns:
+            logger.warning("Flow temperature column '%s' missing; skipping COP attachment", flow_temp_col)
+            return df
+
+        df_cop = df.copy()
+        cop = self.derive_heat_pump_cop(df_cop[flow_temp_col], include_bounds=True)
+        df_cop['hp_cop_central'] = cop['central']
+        df_cop['hp_cop_low'] = cop.get('low', cop['central'])
+        df_cop['hp_cop_high'] = cop.get('high', cop['central'])
+
+        return df_cop
 
     def add_measurement_uncertainty(self, df: pd.DataFrame) -> pd.DataFrame:
         """

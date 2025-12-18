@@ -190,6 +190,49 @@ def get_energy_prices(scenario: str = 'current') -> Dict[str, float]:
     })
 
 
+def get_heat_pump_cop_curve() -> Dict[str, Any]:
+    """Return the configured COP/SPF vs flow temperature curve.
+
+    The curve should include temperature breakpoints (°C) and performance
+    variants (central/low/high) for interpolation. Missing variants default to
+    the central curve.
+    """
+    config = load_config()
+    hp_cfg = config.get('heat_pump', {})
+    curve = hp_cfg.get('cop_vs_flow_temp') or hp_cfg.get('cop_curve')
+
+    if not isinstance(curve, dict):
+        raise ValueError("Missing heat pump COP curve configuration.")
+
+    temps = curve.get('temperatures_c')
+    if not temps or not isinstance(temps, (list, tuple)):
+        raise ValueError("Heat pump COP curve requires 'temperatures_c' breakpoints.")
+
+    def _validate_variant(name: str) -> Any:
+        values = curve.get(name)
+        if values is None:
+            return None
+        if len(values) != len(temps):
+            raise ValueError(
+                f"Heat pump COP curve '{name}' length {len(values)} does not match temperatures length {len(temps)}."
+            )
+        return values
+
+    central = _validate_variant('central_spf') or _validate_variant('central_cop')
+    if central is None:
+        raise ValueError("Heat pump COP curve missing central performance values.")
+
+    low = _validate_variant('low_spf') or _validate_variant('low_cop') or central
+    high = _validate_variant('high_spf') or _validate_variant('high_cop') or central
+
+    return {
+        'temperatures_c': temps,
+        'central': central,
+        'low': low,
+        'high': high,
+    }
+
+
 def ensure_directories():
     """Create necessary directories if they don't exist."""
     directories = [
