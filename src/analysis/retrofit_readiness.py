@@ -14,6 +14,7 @@ from loguru import logger
 import sys
 sys.path.append(str(Path(__file__).parent.parent.parent))
 from config.config import load_config, DATA_OUTPUTS_DIR
+from src.analysis.methodological_adjustments import MethodologicalAdjustments
 
 
 class RetrofitReadinessAnalyzer:
@@ -59,6 +60,7 @@ class RetrofitReadinessAnalyzer:
     def __init__(self):
         """Initialize retrofit readiness analyzer."""
         self.config = load_config()
+        self.adjuster = MethodologicalAdjustments()
         logger.info("Initialized Retrofit Readiness Analyzer")
 
     def assess_heat_pump_readiness(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -77,6 +79,10 @@ class RetrofitReadinessAnalyzer:
 
         # Calculate current heat demand (kWh/m²/year)
         df_readiness['heat_demand_kwh_m2'] = self._calculate_heat_demand(df_readiness)
+
+        # Estimate flow temperature and COP to inform readiness and sizing
+        df_readiness = self.adjuster.estimate_flow_temperature(df_readiness)
+        df_readiness = self.adjuster.attach_cop_estimates(df_readiness)
 
         # Identify required interventions
         df_readiness['needs_loft_topup'] = self._needs_loft_insulation(df_readiness)
@@ -518,6 +524,9 @@ class RetrofitReadinessAnalyzer:
                 (df_readiness['heat_demand_kwh_m2'].mean() - df_readiness['heat_demand_after_fabric'].mean()) /
                 df_readiness['heat_demand_kwh_m2'].mean() * 100
             ),
+            'mean_hp_cop_central': df_readiness['hp_cop_central'].mean() if 'hp_cop_central' in df_readiness.columns else None,
+            'mean_hp_cop_low': df_readiness['hp_cop_low'].mean() if 'hp_cop_low' in df_readiness.columns else None,
+            'mean_hp_cop_high': df_readiness['hp_cop_high'].mean() if 'hp_cop_high' in df_readiness.columns else None,
 
             # Cost distribution by tier
             'fabric_cost_by_tier': df_readiness.groupby('hp_readiness_tier')['fabric_prerequisite_cost'].mean().to_dict(),

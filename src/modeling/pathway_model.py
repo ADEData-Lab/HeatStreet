@@ -42,6 +42,7 @@ from src.analysis.retrofit_packages import (
     get_package_definitions,
     RetrofitPackageAnalyzer
 )
+from src.analysis.methodological_adjustments import MethodologicalAdjustments
 
 
 def _select_baseline_energy_intensity(property_like: pd.Series) -> float:
@@ -201,6 +202,9 @@ class PathwayModeler:
         self.hn_params = get_heat_network_params()
         self.uncertainty = get_uncertainty_params()
         readiness_cfg = self.config.get('heat_network', {}).get('readiness', {})
+        self.adjuster = MethodologicalAdjustments()
+        self.heating_fraction = float(self.config.get('heat_pump', {}).get('heating_demand_fraction', 0.8))
+        self.min_flow_temp = float(min(self.config.get('heat_pump', {}).get('design_flow_temps', [self.adjuster.min_flow_temp])))
 
         self.output_dir = output_dir or DATA_OUTPUTS_DIR
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -267,10 +271,7 @@ class PathwayModeler:
             return _assert_non_negative_intensities(df)
 
         logger.info("Applying prebound adjustment to supply adjusted baseline for pathway modeling...")
-        from src.analysis.methodological_adjustments import MethodologicalAdjustments
-
-        adjuster = MethodologicalAdjustments()
-        adjusted = adjuster.apply_prebound_adjustment(df)
+        adjusted = self.adjuster.apply_prebound_adjustment(df)
         return _assert_non_negative_intensities(adjusted)
 
     def calculate_property_pathway(
@@ -316,6 +317,21 @@ class PathwayModeler:
 
         # Post-fabric energy demand
         post_fabric_demand = baseline_demand * (1 - fabric_saving_pct)
+
+        baseline_flow_temp = property_data.get('estimated_flow_temp')
+        if baseline_flow_temp is None or pd.isna(baseline_flow_temp):
+            derived = self.adjuster.estimate_flow_temperature(pd.DataFrame([property_data]))
+            baseline_flow_temp = float(derived['estimated_flow_temp'].iloc[0]) if 'estimated_flow_temp' in derived else self.min_flow_temp
+
+        flow_temp_after_measures = max(
+            self.min_flow_temp,
+            baseline_flow_temp - fabric_result.get('flow_temp_reduction_k', 0.0)
+        )
+
+        cop_estimates = self.adjuster.derive_heat_pump_cop(flow_temp_after_measures, include_bounds=True)
+        hp_cop_central = cop_estimates.get('central') or self.hp_scop
+        hp_cop_low = cop_estimates.get('low', hp_cop_central)
+        hp_cop_high = cop_estimates.get('high', hp_cop_central)
 
         # ====================================================================
         # STEP 2: Calculate heat technology costs
@@ -365,6 +381,8 @@ class PathwayModeler:
         # STEP 4: Calculate annual bills based on heat source
         # ====================================================================
         baseline_bill = baseline_demand * self.gas_price
+        heating_after_fabric = post_fabric_demand * self.heating_fraction
+        residual_gas_after_fabric = max(post_fabric_demand - heating_after_fabric, 0)
 
         if pathway.heat_source == 'gas':
             # Gas boiler (with or without fabric)
@@ -374,16 +392,21 @@ class PathwayModeler:
 
         elif pathway.heat_source == 'hp':
             # Heat pump (electricity)
-            hp_demand = post_fabric_demand / self.hp_scop  # Electricity used
-            annual_demand = hp_demand
-            annual_bill = hp_demand * self.elec_price
-            annual_co2 = (hp_demand * self.elec_carbon) / 1000
+            hp_demand = heating_after_fabric / hp_cop_central if hp_cop_central else heating_after_fabric
+            annual_demand = residual_gas_after_fabric + hp_demand
+            annual_bill = hp_demand * self.elec_price + residual_gas_after_fabric * self.gas_price
+            annual_co2 = (
+                hp_demand * self.elec_carbon + residual_gas_after_fabric * self.gas_carbon
+            ) / 1000
 
         elif pathway.heat_source == 'hp_proxy':
-            hp_demand = post_fabric_demand / self.ground_loop_scop
-            annual_demand = hp_demand
-            annual_bill = hp_demand * self.elec_price
-            annual_co2 = (hp_demand * self.elec_carbon) / 1000
+            proxy_cop = self.ground_loop_scop or hp_cop_central
+            hp_demand = heating_after_fabric / proxy_cop if proxy_cop else heating_after_fabric
+            annual_demand = residual_gas_after_fabric + hp_demand
+            annual_bill = hp_demand * self.elec_price + residual_gas_after_fabric * self.gas_price
+            annual_co2 = (
+                hp_demand * self.elec_carbon + residual_gas_after_fabric * self.gas_carbon
+            ) / 1000
 
         elif pathway.heat_source == 'hn':
             # Heat network (network tariff)
@@ -401,10 +424,12 @@ class PathwayModeler:
                 annual_bill = hn_demand * self.hn_tariff
                 annual_co2 = (hn_demand * self.gas_carbon * 0.4) / 1000
             else:
-                hp_demand = post_fabric_demand / self.hp_scop
-                annual_demand = hp_demand
-                annual_bill = hp_demand * self.elec_price
-                annual_co2 = (hp_demand * self.elec_carbon) / 1000
+                hp_demand = heating_after_fabric / hp_cop_central if hp_cop_central else heating_after_fabric
+                annual_demand = residual_gas_after_fabric + hp_demand
+                annual_bill = hp_demand * self.elec_price + residual_gas_after_fabric * self.gas_price
+                annual_co2 = (
+                    hp_demand * self.elec_carbon + residual_gas_after_fabric * self.gas_carbon
+                ) / 1000
 
         # ====================================================================
         # STEP 5: Calculate savings and payback
@@ -412,6 +437,9 @@ class PathwayModeler:
         annual_bill_saving = baseline_bill - annual_bill
         baseline_co2 = (baseline_demand * self.gas_carbon) / 1000
         co2_saving = baseline_co2 - annual_co2
+
+        demand_reduction_kwh = baseline_demand - annual_demand
+        demand_reduction_pct = (demand_reduction_kwh / baseline_demand * 100) if baseline_demand else 0
 
         # Simple payback
         if annual_bill_saving > 0:
@@ -429,6 +457,11 @@ class PathwayModeler:
             'pathway_id': pathway.pathway_id,
             'has_hn_access': has_hn_access,
 
+            'heat_pump_flow_temp_c': flow_temp_after_measures,
+            'heat_pump_cop_central': hp_cop_central,
+            'heat_pump_cop_low': hp_cop_low,
+            'heat_pump_cop_high': hp_cop_high,
+
             # Baseline
             'baseline_demand_kwh': baseline_demand,
             'baseline_bill': baseline_bill,
@@ -440,8 +473,8 @@ class PathwayModeler:
             'annual_co2_tonnes': annual_co2,
 
             # Savings
-            'demand_reduction_kwh': baseline_demand - post_fabric_demand,
-            'demand_reduction_pct': fabric_saving_pct * 100,
+            'demand_reduction_kwh': demand_reduction_kwh,
+            'demand_reduction_pct': demand_reduction_pct,
             'annual_bill_saving': annual_bill_saving,
             'co2_saving_tonnes': co2_saving,
 

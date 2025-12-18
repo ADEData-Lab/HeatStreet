@@ -27,6 +27,7 @@ from config.config import (
     DATA_OUTPUTS_DIR
 )
 from src.analysis.fabric_tipping_point import FabricTippingPointAnalyzer
+from src.analysis.methodological_adjustments import MethodologicalAdjustments
 from src.spatial.heat_network_analysis import HeatNetworkAnalyzer
 
 
@@ -120,34 +121,76 @@ class PropertyUpgrade:
     ashp_not_ready_after_fabric: bool = False
     fabric_inserted_for_hp: bool = False
     heat_pump_removed: bool = False
+    estimated_flow_temp_c: float = np.nan
+    operating_flow_temp_c: float = np.nan
+    heat_pump_cop_central: float = np.nan
+    heat_pump_cop_low: float = np.nan
+    heat_pump_cop_high: float = np.nan
+    heat_pump_electricity_kwh: float = 0.0
+    heat_pump_electricity_kwh_low: float = 0.0
+    heat_pump_electricity_kwh_high: float = 0.0
+    annual_bill_savings_low: float = 0.0
+    annual_bill_savings_high: float = 0.0
+    post_measure_bill_low: float = 0.0
+    post_measure_bill_high: float = 0.0
+    post_measure_co2_kg_low: float = 0.0
+    post_measure_co2_kg_high: float = 0.0
 
 
 def _calculate_property_upgrade_worker(args):
-    """
-    Worker function for parallel property upgrade calculations.
-    Must be at module level for pickling.
+    """Worker wrapper to enable parallel execution in ProcessPool."""
+    return _calculate_property_upgrade_core(*args)
 
-    Args:
-        args: Tuple of (property_dict, scenario_name, measures, costs, config)
 
-    Returns:
-        PropertyUpgrade object
-    """
-    (
-        property_dict,
-        scenario_name,
-        measures,
-        costs,
-        config,
-        applied_fabric,
-        removed_hp,
-        hybrid_pathway,
-        removed_measures,
-    ) = args
+def _calculate_property_upgrade_core(
+    property_dict: Dict[str, Any],
+    scenario_name: str,
+    measures: List[str],
+    costs: Dict[str, Any],
+    config: Dict[str, Any],
+    applied_fabric: bool,
+    removed_hp: bool,
+    hybrid_pathway: Optional[str],
+    removed_measures: List[str],
+) -> PropertyUpgrade:
+    """Calculate upgrade metrics for a single property using configured COP curves."""
+    energy_prices = config.get('energy_prices', {}).get('current', {})
+    gas_price = energy_prices.get('gas', 0.0)
+    elec_price = energy_prices.get('electricity', 0.0)
 
-    capital_cost = 0
-    energy_reduction = 0
-    co2_reduction = 0
+    carbon_factors = config.get('carbon_factors', {}).get('current', {})
+    gas_carbon = carbon_factors.get('gas', 0.0)
+    elec_carbon = carbon_factors.get('electricity', 0.0)
+
+    measure_savings = config.get('measure_savings', {})
+    hp_cfg = config.get('heat_pump', {})
+    heating_fraction = float(hp_cfg.get('heating_demand_fraction', 0.8))
+    design_flow_temps = hp_cfg.get('design_flow_temps', [])
+
+    adjuster = getattr(_calculate_property_upgrade_core, "_adjuster", None)
+    if adjuster is None:
+        adjuster = MethodologicalAdjustments()
+        setattr(_calculate_property_upgrade_core, "_adjuster", adjuster)
+
+    def _flow_temp_reduction(measure_name: str) -> float:
+        lookup = 'radiator_upsizing' if measure_name == 'emitter_upgrades' else measure_name
+        return float(measure_savings.get(lookup, {}).get('flow_temp_reduction_k', 0) or 0)
+
+    def _measure_saving(measure_name: str, wall_type: str, baseline_kwh: float) -> float:
+        cfg = measure_savings.get(measure_name, {})
+
+        if measure_name == 'wall_insulation':
+            pct = cfg.get('cavity_kwh_saving_pct', 0.20) if wall_type == 'Cavity' else cfg.get('solid_kwh_saving_pct', 0.30)
+            return baseline_kwh * pct
+
+        pct = cfg.get('kwh_saving_pct')
+        if pct is not None:
+            return baseline_kwh * pct
+
+        if measure_name == 'district_heating_connection':
+            return baseline_kwh * 0.15
+
+        return 0.0
 
     floor_area = property_dict.get('TOTAL_FLOOR_AREA', 100)
     baseline_intensity = _select_baseline_energy_intensity(property_dict)
@@ -155,89 +198,148 @@ def _calculate_property_upgrade_worker(args):
     wall_type = property_dict.get('wall_type', 'Solid')
     current_rating = property_dict.get('CURRENT_ENERGY_EFFICIENCY', 50)
 
-    # Helper function to get absolute energy
-    def get_absolute_energy():
-        return baseline_kwh
+    baseline_flow_temp = property_dict.get('estimated_flow_temp')
+    if baseline_flow_temp is None or pd.isna(baseline_flow_temp):
+        estimated = adjuster.estimate_flow_temperature(pd.DataFrame([property_dict]))
+        baseline_flow_temp = float(estimated['estimated_flow_temp'].iloc[0]) if 'estimated_flow_temp' in estimated else float(adjuster.min_flow_temp)
+
+    min_flow_temp = float(min(design_flow_temps)) if design_flow_temps else adjuster.min_flow_temp
+
+    capital_cost = 0.0
+    fabric_savings = 0.0
+    district_savings = 0.0
+    flow_temp_reduction = 0.0
+    uses_heat_pump = False
 
     # Calculate costs and impacts for each measure
     for measure in measures:
         if measure == 'loft_insulation_topup':
             loft_area = floor_area * 0.9
-            capital_cost += loft_area * costs['loft_insulation_per_m2']
-            energy_reduction += get_absolute_energy() * 0.15
+            capital_cost += loft_area * costs.get('loft_insulation_per_m2', 0)
+            fabric_savings += _measure_saving(measure, wall_type, baseline_kwh)
+            flow_temp_reduction += _flow_temp_reduction(measure)
 
         elif measure == 'wall_insulation':
             if wall_type == 'Cavity':
-                capital_cost += costs['cavity_wall_insulation']
-                energy_reduction += get_absolute_energy() * 0.20
+                capital_cost += costs.get('cavity_wall_insulation', 0)
             else:
-                wall_area = floor_area * 1.5
-                capital_cost += wall_area * costs['internal_wall_insulation_per_m2']
-                energy_reduction += get_absolute_energy() * 0.30
+                wall_area_calc = floor_area * 1.5
+                capital_cost += wall_area_calc * costs.get('internal_wall_insulation_per_m2', 0)
+            fabric_savings += _measure_saving(measure, wall_type, baseline_kwh)
+            flow_temp_reduction += _flow_temp_reduction(measure)
 
         elif measure == 'double_glazing':
             window_area = floor_area * 0.2
-            capital_cost += window_area * costs['double_glazing_per_m2']
-            energy_reduction += get_absolute_energy() * 0.10
+            capital_cost += window_area * costs.get('double_glazing_per_m2', 0)
+            fabric_savings += _measure_saving(measure, wall_type, baseline_kwh)
+            flow_temp_reduction += _flow_temp_reduction(measure)
 
         elif measure == 'triple_glazing':
             window_area = floor_area * 0.2
             capital_cost += costs.get('triple_glazing_upgrade', window_area * costs.get('double_glazing_per_m2', 0))
-            energy_reduction += get_absolute_energy() * 0.15
+            fabric_savings += _measure_saving(measure, wall_type, baseline_kwh)
+            flow_temp_reduction += _flow_temp_reduction(measure)
 
         elif measure == 'floor_insulation':
             capital_cost += costs.get('floor_insulation', 0)
-            energy_reduction += get_absolute_energy() * 0.05
+            fabric_savings += _measure_saving(measure, wall_type, baseline_kwh)
+            flow_temp_reduction += _flow_temp_reduction(measure)
 
         elif measure == 'draught_proofing':
             capital_cost += costs.get('draught_proofing', 0)
-            energy_reduction += get_absolute_energy() * 0.05
+            fabric_savings += _measure_saving(measure, wall_type, baseline_kwh)
+            flow_temp_reduction += _flow_temp_reduction(measure)
 
         elif measure == 'ashp_installation':
-            capital_cost += costs['ashp_installation']
-            current_heating = get_absolute_energy() * 0.8
-            gas_saved = current_heating
-            electricity_used = current_heating / config['heat_pump']['scop']
-            energy_reduction += gas_saved - electricity_used
+            capital_cost += costs.get('ashp_installation', 0)
+            uses_heat_pump = True
 
         elif measure == 'emitter_upgrades':
             num_radiators = int(floor_area / 15)
-            capital_cost += num_radiators * costs['emitter_upgrade_per_radiator']
+            capital_cost += num_radiators * costs.get('emitter_upgrade_per_radiator', 0)
+            flow_temp_reduction += _flow_temp_reduction(measure)
 
         elif measure == 'district_heating_connection':
-            capital_cost += costs['district_heating_connection']
-            energy_reduction += get_absolute_energy() * 0.15
+            capital_cost += costs.get('district_heating_connection', 0)
+            district_savings += _measure_saving(measure, wall_type, baseline_kwh)
 
         elif measure in ['fabric_improvements', 'modest_fabric_improvements']:
-            # Combination of measures
             loft_area = floor_area * 0.9
-            capital_cost += loft_area * costs['loft_insulation_per_m2']
+            capital_cost += loft_area * costs.get('loft_insulation_per_m2', 0)
             if wall_type == 'Cavity':
-                capital_cost += costs['cavity_wall_insulation']
+                capital_cost += costs.get('cavity_wall_insulation', 0)
             else:
-                wall_area = floor_area * 1.5
-                capital_cost += wall_area * costs['internal_wall_insulation_per_m2']
+                wall_area_calc = floor_area * 1.5
+                capital_cost += wall_area_calc * costs.get('internal_wall_insulation_per_m2', 0)
             window_area = floor_area * 0.2
-            capital_cost += window_area * costs['double_glazing_per_m2']
-            energy_reduction += get_absolute_energy() * 0.40
+            capital_cost += window_area * costs.get('double_glazing_per_m2', 0)
+            fabric_savings += baseline_kwh * 0.40
+            flow_temp_reduction += sum(
+                _flow_temp_reduction(x) for x in ['loft_insulation_topup', 'wall_insulation', 'double_glazing']
+            )
 
-    # Calculate CO2 reduction
-    co2_reduction = energy_reduction * config['carbon_factors']['current']['gas']
+    fabric_savings = min(fabric_savings, baseline_kwh)
+    energy_after_fabric = max(baseline_kwh - fabric_savings, 0)
+    district_savings = min(district_savings, energy_after_fabric)
+    energy_after_non_hp = max(energy_after_fabric - district_savings, 0)
 
-    # Calculate bill savings
-    bill_savings = energy_reduction * config['energy_prices']['current']['gas']
+    baseline_bill = baseline_kwh * gas_price
+    baseline_co2 = baseline_kwh * gas_carbon
 
-    baseline_bill = baseline_kwh * config['energy_prices']['current']['gas']
-    post_measure_bill = max(baseline_bill - bill_savings, 0)
+    operating_flow_temp = max(min_flow_temp, float(baseline_flow_temp) - flow_temp_reduction)
 
-    baseline_co2 = baseline_kwh * config['carbon_factors']['current']['gas']
-    post_measure_co2 = max(baseline_co2 - co2_reduction, 0)
+    if uses_heat_pump:
+        cop = adjuster.derive_heat_pump_cop(operating_flow_temp, include_bounds=True)
+        central_cop = cop.get('central') or 1e-6
+        low_cop = cop.get('low') or central_cop
+        high_cop = cop.get('high') or central_cop
 
-    # Estimate new EPC band
-    improvement_points = (energy_reduction / floor_area) * 0.5
+        heating_after_fabric = energy_after_fabric * heating_fraction
+        non_heating_energy = max(energy_after_fabric - heating_after_fabric, 0)
+
+        hp_electricity = heating_after_fabric / central_cop if central_cop > 0 else heating_after_fabric
+        hp_electricity_low = heating_after_fabric / low_cop if low_cop > 0 else heating_after_fabric
+        hp_electricity_high = heating_after_fabric / high_cop if high_cop > 0 else heating_after_fabric
+
+        post_energy_central = non_heating_energy + hp_electricity
+        post_energy_low = non_heating_energy + hp_electricity_low
+        post_energy_high = non_heating_energy + hp_electricity_high
+
+        post_measure_bill = non_heating_energy * gas_price + hp_electricity * elec_price
+        post_measure_bill_low = non_heating_energy * gas_price + hp_electricity_low * elec_price
+        post_measure_bill_high = non_heating_energy * gas_price + hp_electricity_high * elec_price
+
+        bill_savings = baseline_bill - post_measure_bill
+        bill_savings_low = baseline_bill - post_measure_bill_low
+        bill_savings_high = baseline_bill - post_measure_bill_high
+
+        post_measure_co2 = non_heating_energy * gas_carbon + hp_electricity * elec_carbon
+        post_measure_co2_low = non_heating_energy * gas_carbon + hp_electricity_low * elec_carbon
+        post_measure_co2_high = non_heating_energy * gas_carbon + hp_electricity_high * elec_carbon
+
+        energy_reduction = baseline_kwh - post_energy_central
+        co2_reduction = baseline_co2 - post_measure_co2
+
+    else:
+        post_measure_bill = energy_after_non_hp * gas_price
+        post_measure_bill_low = post_measure_bill_high = post_measure_bill
+        bill_savings = baseline_bill - post_measure_bill
+        bill_savings_low = bill_savings_high = bill_savings
+
+        post_measure_co2 = energy_after_non_hp * gas_carbon
+        post_measure_co2_low = post_measure_co2_high = post_measure_co2
+        co2_reduction = baseline_co2 - post_measure_co2
+
+        energy_reduction = baseline_kwh - energy_after_non_hp
+        hp_electricity = hp_electricity_low = hp_electricity_high = 0.0
+        central_cop = low_cop = high_cop = np.nan
+
+    energy_reduction = float(energy_reduction)
+    capital_cost = float(capital_cost)
+
+    improvement_points = (energy_reduction / floor_area) * 0.5 if floor_area else 0
     new_rating = min(100, current_rating + improvement_points)
 
-    # Convert rating to band
     if new_rating >= 92:
         new_band = 'A'
     elif new_rating >= 81:
@@ -253,7 +355,6 @@ def _calculate_property_upgrade_worker(args):
     else:
         new_band = 'G'
 
-    # Calculate payback period
     if pd.isna(bill_savings) or pd.isna(capital_cost):
         payback_years = np.inf
     elif bill_savings <= 0:
@@ -290,7 +391,21 @@ def _calculate_property_upgrade_worker(args):
         baseline_co2_kg=baseline_co2 if not pd.isna(baseline_co2) else 0,
         post_measure_co2_kg=post_measure_co2 if not pd.isna(post_measure_co2) else 0,
         new_epc_band=new_band,
-        payback_years=payback_years
+        payback_years=payback_years,
+        estimated_flow_temp_c=float(baseline_flow_temp) if not pd.isna(baseline_flow_temp) else np.nan,
+        operating_flow_temp_c=operating_flow_temp,
+        heat_pump_cop_central=central_cop,
+        heat_pump_cop_low=low_cop,
+        heat_pump_cop_high=high_cop,
+        heat_pump_electricity_kwh=hp_electricity,
+        heat_pump_electricity_kwh_low=hp_electricity_low,
+        heat_pump_electricity_kwh_high=hp_electricity_high,
+        annual_bill_savings_low=bill_savings_low if not pd.isna(bill_savings_low) else 0,
+        annual_bill_savings_high=bill_savings_high if not pd.isna(bill_savings_high) else 0,
+        post_measure_bill_low=post_measure_bill_low if not pd.isna(post_measure_bill_low) else 0,
+        post_measure_bill_high=post_measure_bill_high if not pd.isna(post_measure_bill_high) else 0,
+        post_measure_co2_kg_low=post_measure_co2_low if not pd.isna(post_measure_co2_low) else 0,
+        post_measure_co2_kg_high=post_measure_co2_high if not pd.isna(post_measure_co2_high) else 0,
     )
 
 
@@ -326,6 +441,10 @@ class ScenarioModeler:
             'fabric_bundle_tipping_point',
             'fabric_bundle_minimum_ashp'
         }
+
+        self.adjuster = MethodologicalAdjustments()
+        self.heating_fraction = float(self.config.get('heat_pump', {}).get('heating_demand_fraction', 0.8))
+        self.min_flow_temp = float(min(self.config.get('heat_pump', {}).get('design_flow_temps', [self.adjuster.min_flow_temp])))
 
         eligibility_cfg = self.config.get('eligibility', {}).get('ashp', {})
         self.ashp_heat_demand_threshold = eligibility_cfg.get('max_heat_demand_kwh_per_m2', 100)
@@ -367,10 +486,7 @@ class ScenarioModeler:
             return _assert_non_negative_intensities(df)
 
         logger.info("Applying prebound adjustment to supply adjusted baseline for scenario modeling...")
-        from src.analysis.methodological_adjustments import MethodologicalAdjustments
-
-        adjuster = MethodologicalAdjustments()
-        adjusted = adjuster.apply_prebound_adjustment(df)
+        adjusted = self.adjuster.apply_prebound_adjustment(df)
         return _assert_non_negative_intensities(adjusted)
 
     def _apply_heat_network_readiness(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -626,10 +742,13 @@ class ScenarioModeler:
 
         df = self._apply_heat_network_readiness(df)
 
-        if 'ashp_ready' in df.columns:
-            return df
-
         processed = df.copy()
+        processed = self.adjuster.estimate_flow_temperature(processed)
+        processed = self.adjuster.attach_cop_estimates(processed)
+
+        if 'ashp_ready' in df.columns:
+            return processed
+
         heat_demand = None
         for col in ['energy_consumption_adjusted', 'energy_consumption_adjusted_central', 'ENERGY_CONSUMPTION_CURRENT']:
             if col in processed.columns:
@@ -747,109 +866,16 @@ class ScenarioModeler:
         scenario_name: str,
         measures: List[str]
     ) -> PropertyUpgrade:
-        """
-        Calculate upgrade costs and impacts for a single property.
-
-        Args:
-            property_data: Property characteristics
-            scenario_name: Name of the scenario
-            measures: List of measures to apply
-
-        Returns:
-            PropertyUpgrade object
-        """
-        capital_cost = 0
-        energy_reduction = 0
-        co2_reduction = 0
-
-        floor_area = property_data.get('TOTAL_FLOOR_AREA', 100)  # Default if missing
-        baseline_intensity = _select_baseline_energy_intensity(property_data)
-        baseline_kwh = _select_baseline_annual_kwh(property_data, baseline_intensity)
-
-        # Calculate costs and impacts for each measure
-        for measure in measures:
-            if measure == 'loft_insulation_topup':
-                capital_cost += self._cost_loft_insulation(property_data)
-                energy_reduction += self._savings_loft_insulation(property_data)
-
-            elif measure == 'wall_insulation':
-                capital_cost += self._cost_wall_insulation(property_data)
-                energy_reduction += self._savings_wall_insulation(property_data)
-
-            elif measure == 'double_glazing':
-                capital_cost += self._cost_glazing(property_data)
-                energy_reduction += self._savings_glazing(property_data)
-
-            elif measure == 'triple_glazing':
-                capital_cost += self._cost_triple_glazing(property_data)
-                energy_reduction += self._savings_triple_glazing(property_data)
-
-            elif measure == 'floor_insulation':
-                capital_cost += self._cost_floor_insulation(property_data)
-                energy_reduction += self._savings_floor_insulation(property_data)
-
-            elif measure == 'draught_proofing':
-                capital_cost += self._cost_draught_proofing(property_data)
-                energy_reduction += self._savings_draught_proofing(property_data)
-
-            elif measure == 'ashp_installation':
-                capital_cost += self.costs['ashp_installation']
-                energy_reduction += self._savings_heat_pump(property_data)
-
-            elif measure == 'emitter_upgrades':
-                capital_cost += self._cost_emitter_upgrade(property_data)
-
-            elif measure == 'district_heating_connection':
-                capital_cost += self.costs['district_heating_connection']
-                energy_reduction += self._savings_district_heating(property_data)
-
-            elif measure in ['fabric_improvements', 'modest_fabric_improvements']:
-                # Combination of measures
-                capital_cost += self._cost_fabric_package(property_data)
-                energy_reduction += self._savings_fabric_package(property_data)
-
-        # Calculate CO2 reduction
-        co2_reduction = energy_reduction * self.carbon_factors['current']['gas']
-
-        # Calculate bill savings
-        bill_savings = energy_reduction * self.energy_prices['current']['gas']
-
-        baseline_bill = baseline_kwh * self.energy_prices['current']['gas']
-        post_measure_bill = max(baseline_bill - bill_savings, 0)
-
-        baseline_co2 = baseline_kwh * self.carbon_factors['current']['gas']
-        post_measure_co2 = max(baseline_co2 - co2_reduction, 0)
-
-        # Estimate new EPC band (simplified)
-        current_rating = property_data.get('CURRENT_ENERGY_EFFICIENCY', 50)
-        improvement_points = (energy_reduction / floor_area) * 0.5 if floor_area else 0  # Simplified conversion
-        new_rating = min(100, current_rating + improvement_points)
-        new_band = self._rating_to_band(new_rating)
-
-        # Calculate payback period with proper handling of edge cases
-        # Handle NaN, zero, and negative savings
-        if pd.isna(bill_savings) or pd.isna(capital_cost):
-            payback_years = np.inf  # Not calculable
-        elif bill_savings <= 0:
-            payback_years = np.inf  # Not cost-effective at current prices
-        elif capital_cost <= 0:
-            payback_years = 0  # No cost = immediate payback
-        else:
-            payback_years = capital_cost / bill_savings
-
-        return PropertyUpgrade(
-            property_id=str(property_data.get('LMK_KEY', 'unknown')),
-            scenario=scenario_name,
-            capital_cost=capital_cost if not pd.isna(capital_cost) else 0,
-            annual_energy_reduction_kwh=energy_reduction if not pd.isna(energy_reduction) else 0,
-            annual_co2_reduction_kg=co2_reduction if not pd.isna(co2_reduction) else 0,
-            annual_bill_savings=bill_savings if not pd.isna(bill_savings) else 0,
-            baseline_bill=baseline_bill if not pd.isna(baseline_bill) else 0,
-            post_measure_bill=post_measure_bill if not pd.isna(post_measure_bill) else 0,
-            baseline_co2_kg=baseline_co2 if not pd.isna(baseline_co2) else 0,
-            post_measure_co2_kg=post_measure_co2 if not pd.isna(post_measure_co2) else 0,
-            new_epc_band=new_band,
-            payback_years=payback_years
+        return _calculate_property_upgrade_core(
+            property_data.to_dict(),
+            scenario_name,
+            measures,
+            self.costs,
+            self.config,
+            False,
+            False,
+            None,
+            [],
         )
 
     def _cost_loft_insulation(self, property_data: pd.Series) -> float:
@@ -1059,6 +1085,22 @@ class ScenarioModeler:
             'pct_not_cost_effective': pct_not_cost_effective,
         }
 
+        optional_sums = {
+            'annual_bill_savings_low': 'annual_bill_savings_low',
+            'annual_bill_savings_high': 'annual_bill_savings_high',
+            'post_measure_bill_total_low': 'post_measure_bill_low',
+            'post_measure_bill_total_high': 'post_measure_bill_high',
+            'post_measure_co2_total_kg_low': 'post_measure_co2_kg_low',
+            'post_measure_co2_total_kg_high': 'post_measure_co2_kg_high',
+            'heat_pump_electricity_total_kwh': 'heat_pump_electricity_kwh',
+            'heat_pump_electricity_total_kwh_low': 'heat_pump_electricity_kwh_low',
+            'heat_pump_electricity_total_kwh_high': 'heat_pump_electricity_kwh_high',
+        }
+
+        for result_key, col in optional_sums.items():
+            if col in numeric_df.columns:
+                results[result_key] = float(numeric_df[col].sum())
+
         if {'ashp_ready', 'ashp_fabric_needed', 'ashp_not_ready_after_fabric'}.issubset(property_df.columns):
             ready_count = int(property_df['ashp_ready'].sum())
             fabric_count = int(property_df['ashp_fabric_needed'].sum())
@@ -1198,10 +1240,19 @@ class ScenarioModeler:
                 'annual_energy_reduction_kwh': results.get('annual_energy_reduction_kwh'),
                 'annual_co2_reduction_kg': results.get('annual_co2_reduction_kg'),
                 'annual_bill_savings': results.get('annual_bill_savings'),
+                'annual_bill_savings_low': results.get('annual_bill_savings_low'),
+                'annual_bill_savings_high': results.get('annual_bill_savings_high'),
                 'baseline_bill_total': results.get('baseline_bill_total'),
                 'post_measure_bill_total': results.get('post_measure_bill_total'),
+                'post_measure_bill_total_low': results.get('post_measure_bill_total_low'),
+                'post_measure_bill_total_high': results.get('post_measure_bill_total_high'),
                 'baseline_co2_total_kg': results.get('baseline_co2_total_kg'),
                 'post_measure_co2_total_kg': results.get('post_measure_co2_total_kg'),
+                'post_measure_co2_total_kg_low': results.get('post_measure_co2_total_kg_low'),
+                'post_measure_co2_total_kg_high': results.get('post_measure_co2_total_kg_high'),
+                'heat_pump_electricity_total_kwh': results.get('heat_pump_electricity_total_kwh'),
+                'heat_pump_electricity_total_kwh_low': results.get('heat_pump_electricity_total_kwh_low'),
+                'heat_pump_electricity_total_kwh_high': results.get('heat_pump_electricity_total_kwh_high'),
                 'average_payback_years': results.get('average_payback_years'),
                 'median_payback_years': results.get('median_payback_years'),
                 'ashp_ready_properties': results.get('ashp_ready_properties'),
