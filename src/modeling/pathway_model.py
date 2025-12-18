@@ -44,6 +44,39 @@ from src.analysis.retrofit_packages import (
 )
 
 
+def _select_baseline_energy_intensity(property_like: pd.Series) -> float:
+    """Pick adjusted energy intensity when available, otherwise EPC value."""
+    for col in [
+        'energy_consumption_adjusted',
+        'energy_consumption_adjusted_central',
+        'ENERGY_CONSUMPTION_CURRENT',
+    ]:
+        val = property_like.get(col)
+        if val is not None and not pd.isna(val):
+            return float(val)
+
+    return float(property_like.get('ENERGY_CONSUMPTION_CURRENT', 150))
+
+
+def _select_baseline_annual_kwh(property_like: pd.Series, energy_intensity: float) -> float:
+    """Return absolute baseline demand (kWh/year) prioritising adjusted baseline."""
+    for col in [
+        'baseline_consumption_kwh_year',
+        'baseline_consumption_kwh_year_central',
+        'baseline_consumption_kwh_year_low',
+        'baseline_consumption_kwh_year_high',
+    ]:
+        val = property_like.get(col)
+        if val is not None and not pd.isna(val):
+            return float(val)
+
+    floor_area = property_like.get('TOTAL_FLOOR_AREA', 100)
+    if pd.isna(floor_area):
+        floor_area = 100
+
+    return float(energy_intensity) * float(floor_area)
+
+
 # ============================================================================
 # PATHWAY DEFINITIONS
 # ============================================================================
@@ -201,6 +234,17 @@ class PathwayModeler:
         logger.info(f"  HN tariff: £{self.hn_tariff}/kWh")
         logger.info(f"  HN penetration: {self.hn_penetration * 100:.1f}%")
 
+    def _ensure_adjusted_baseline(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Guarantee prebound baseline is available before pathway calculations."""
+        if 'energy_consumption_adjusted' in df.columns or 'energy_consumption_adjusted_central' in df.columns:
+            return df
+
+        logger.info("Applying prebound adjustment to supply adjusted baseline for pathway modeling...")
+        from src.analysis.methodological_adjustments import MethodologicalAdjustments
+
+        adjuster = MethodologicalAdjustments()
+        return adjuster.apply_prebound_adjustment(df)
+
     def calculate_property_pathway(
         self,
         property_data: pd.Series,
@@ -225,8 +269,8 @@ class PathwayModeler:
         """
         # Property characteristics
         floor_area = property_data.get('TOTAL_FLOOR_AREA', 100)
-        energy_intensity = property_data.get('ENERGY_CONSUMPTION_CURRENT', 150)  # kWh/m²/year
-        baseline_demand = energy_intensity * floor_area  # kWh/year
+        energy_intensity = _select_baseline_energy_intensity(property_data)  # kWh/m²/year
+        baseline_demand = _select_baseline_annual_kwh(property_data, energy_intensity)  # kWh/year
 
         # ====================================================================
         # STEP 1: Calculate fabric package costs and savings
@@ -455,13 +499,14 @@ class PathwayModeler:
         """
         logger.info(f"Analyzing pathways for {len(df):,} properties...")
 
-        hn_access = self._get_hn_access(df, hn_access_column=hn_access_column)
+        df_ready = self._ensure_adjusted_baseline(df)
+        hn_access = self._get_hn_access(df_ready, hn_access_column=hn_access_column)
 
         results = []
 
-        for idx, (row_idx, property_data) in enumerate(df.iterrows()):
+        for idx, (row_idx, property_data) in enumerate(df_ready.iterrows()):
             if idx % 1000 == 0:
-                logger.info(f"  Processing property {idx + 1:,}/{len(df):,}...")
+                logger.info(f"  Processing property {idx + 1:,}/{len(df_ready):,}...")
 
             has_hn = hn_access.loc[row_idx]
 
