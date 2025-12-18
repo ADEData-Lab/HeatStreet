@@ -34,6 +34,7 @@ from config.config import (
     DATA_PROCESSED_DIR,
     DATA_OUTPUTS_DIR
 )
+from src.modeling.costing import CostCalculator
 
 
 @dataclass
@@ -360,7 +361,7 @@ class RetrofitPackageAnalyzer:
     at property level and aggregated.
     """
 
-    def __init__(self, output_dir: Optional[Path] = None):
+    def __init__(self, output_dir: Optional[Path] = None, cost_calculator: Optional[CostCalculator] = None):
         """Initialize the analyzer with measure catalogue and packages."""
         self.config = load_config()
         self.catalogue = get_measure_catalogue()
@@ -381,6 +382,7 @@ class RetrofitPackageAnalyzer:
         # Load carbon factors
         self.carbon_factors = self.config.get('carbon_factors', {}).get('current', {})
         self.gas_carbon = self.carbon_factors.get('gas', 0.183)
+        self.cost_calculator = cost_calculator
 
         logger.info(f"Initialized RetrofitPackageAnalyzer with {len(self.packages)} packages")
 
@@ -421,7 +423,7 @@ class RetrofitPackageAnalyzer:
             # Check applicability based on property characteristics
             if self._is_measure_applicable(measure, property_data):
                 applicable_measures.append(measure_id)
-                total_capex += measure.capex_per_home
+                total_capex += self._measure_cost(measure_id, property_data)
                 remaining_demand *= (1 - measure.annual_kwh_saving_pct)
                 total_flow_temp_reduction += measure.flow_temp_reduction_k
 
@@ -455,6 +457,22 @@ class RetrofitPackageAnalyzer:
             'simple_payback_years': simple_payback_years,
             'discounted_payback_years': discounted_payback_years
         }
+
+    def _measure_cost(self, measure_id: str, property_data: pd.Series) -> float:
+        """Return measure cost using shared costing rules when available."""
+
+        if not self.cost_calculator:
+            return self.catalogue[measure_id].capex_per_home
+
+        alias_map = {
+            'rad_upsizing': 'radiator_upsizing',
+            'double_glazing_upgrade': 'double_glazing',
+            'triple_glazing_upgrade': 'triple_glazing',
+        }
+
+        measure_name = alias_map.get(measure_id, measure_id)
+        cost, _ = self.cost_calculator.measure_cost(measure_name, property_data)
+        return cost
 
     def _is_measure_applicable(self, measure: Measure, property_data: pd.Series) -> bool:
         """
