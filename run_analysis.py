@@ -6,6 +6,7 @@ with interactive prompts and progress indicators.
 """
 
 import os
+import json
 import shutil
 import sys
 import subprocess
@@ -375,12 +376,19 @@ def validate_data(df, analysis_logger: AnalysisLogger = None):
         logger.debug(f"Parquet save failed: {e}")
 
     validator.save_validation_report()
+    try:
+        validation_report_json = DATA_PROCESSED_DIR / "validation_report.json"
+        with open(validation_report_json, "w", encoding="utf-8") as f:
+            json.dump(report, f, indent=2)
+    except Exception as e:
+        logger.debug(f"Could not save validation report JSON: {e}")
 
     console.print(f"[green]✓[/green] Validated data saved")
 
     if analysis_logger:
         analysis_logger.add_output(str(output_file), "csv", "Validated EPC dataset")
         analysis_logger.add_output("data/processed/validation_report.txt", "report", "Data validation report")
+        analysis_logger.add_output("data/processed/validation_report.json", "report", "Data validation report (JSON)")
         analysis_logger.complete_phase(success=True, message=f"{len(df_validated):,} records validated")
 
     return df_validated, report
@@ -409,6 +417,26 @@ def apply_methodological_adjustments(df, analysis_logger: AnalysisLogger = None)
 
     # Generate summary
     summary = adjuster.generate_adjustment_summary(df_adjusted)
+    output_file = DATA_PROCESSED_DIR / "epc_london_adjusted.csv"
+    df_adjusted.to_csv(output_file, index=False)
+    parquet_file = None
+    try:
+        parquet_file = output_file.with_suffix(".parquet")
+        df_parquet = df_adjusted.copy()
+        for col in df_parquet.columns:
+            if df_parquet[col].dtype == 'object':
+                df_parquet[col] = df_parquet[col].astype(str)
+        df_parquet.to_parquet(parquet_file, index=False)
+    except Exception as e:
+        parquet_file = None
+        logger.debug(f"Could not save adjusted parquet: {e}")
+
+    try:
+        summary_path = DATA_PROCESSED_DIR / "methodological_adjustments_summary.json"
+        with open(summary_path, "w", encoding="utf-8") as f:
+            json.dump(summary, f, indent=2)
+    except Exception as e:
+        logger.debug(f"Could not save adjustment summary JSON: {e}")
 
     console.print(f"[green]✓[/green] Methodological adjustments applied")
     adjustments_applied = []
@@ -425,9 +453,13 @@ def apply_methodological_adjustments(df, analysis_logger: AnalysisLogger = None)
     if analysis_logger:
         analysis_logger.add_metric("adjustments_applied", len(adjustments_applied), f"Applied: {', '.join(adjustments_applied)}")
         analysis_logger.add_metric("records_adjusted", len(df_adjusted), "Records with adjustments")
+        analysis_logger.add_output(str(output_file), "csv", "Adjusted EPC dataset")
+        analysis_logger.add_output("data/processed/methodological_adjustments_summary.json", "report", "Methodological adjustments summary (JSON)")
+        if parquet_file and parquet_file.exists():
+            analysis_logger.add_output(str(parquet_file), "parquet", "Adjusted EPC dataset (Parquet)")
         analysis_logger.complete_phase(success=True, message=f"{len(adjustments_applied)} methodological adjustments applied")
 
-    return df_adjusted
+    return df_adjusted, summary
 
 
 def analyze_archetype(df, analysis_logger: AnalysisLogger = None):
@@ -1195,6 +1227,102 @@ def package_dashboard_assets(
     return True
 
 
+def _describe_existing_file(file_path: Path, title: str, include_records: bool = True):
+    """Display a panel describing an existing data file."""
+    if not file_path.exists():
+        return
+
+    try:
+        file_size = os.path.getsize(file_path) / (1024 * 1024)  # MB
+        mod_time = os.path.getmtime(file_path)
+        from datetime import datetime
+        mod_date = datetime.fromtimestamp(mod_time).strftime('%Y-%m-%d %H:%M')
+
+        record_line = ""
+        if include_records:
+            try:
+                record_count = max(sum(1 for _ in open(file_path, encoding="utf-8")) - 1, 0)
+                record_line = f"Records: ~{record_count:,}\n"
+            except Exception as e:
+                logger.debug(f"Could not count records in {file_path}: {e}")
+        console.print()
+        console.print(Panel(
+            f"[bold cyan]{title}[/bold cyan]\n\n"
+            f"File: {file_path.name}\n"
+            f"Size: {file_size:.1f} MB\n"
+            f"{record_line}"
+            f"Last modified: {mod_date}",
+            border_style="green"
+        ))
+        console.print()
+    except Exception as e:
+        logger.debug(f"Could not describe file {file_path}: {e}")
+
+
+def prompt_use_existing_dataframe(
+    phase_name: str,
+    description: str,
+    file_path: Path,
+    analysis_logger: AnalysisLogger = None,
+    include_records: bool = True,
+):
+    """
+    Ask the user whether to reuse an existing processed dataset.
+
+    Returns a DataFrame if loaded, otherwise None.
+    """
+    if not file_path.exists():
+        return None
+
+    _describe_existing_file(file_path, f"Existing {description}", include_records)
+
+    use_existing = questionary.confirm(
+        f"Use existing {description} from {file_path.name}?",
+        default=True
+    ).ask()
+
+    if not use_existing:
+        return None
+
+    if analysis_logger:
+        analysis_logger.start_phase(
+            phase_name,
+            f"Load existing {description} from disk"
+        )
+
+    try:
+        import pandas as pd
+
+        df_existing = pd.read_csv(file_path)
+        console.print(f"[green]✓[/green] Loaded existing {description} ({len(df_existing):,} records)")
+
+        if analysis_logger:
+            analysis_logger.add_metric("records_loaded", len(df_existing), f"{description} records loaded from disk")
+            analysis_logger.add_output(str(file_path), "csv", f"Existing {description}")
+            analysis_logger.complete_phase(success=True, message=f"Loaded existing {description}")
+
+        return df_existing
+    except Exception as e:
+        console.print(f"[yellow]⚠ Could not load existing {description}: {e}[/yellow]")
+        logger.exception(f"Failed to load existing {description}")
+        if analysis_logger and analysis_logger.current_phase:
+            analysis_logger.complete_phase(success=False, message=f"Failed to load existing {description}: {e}")
+        return None
+
+
+def load_json_if_exists(file_path: Path):
+    """Load a JSON file if it exists, otherwise return None."""
+    if not file_path.exists():
+        return None
+
+    try:
+        with open(file_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        logger.debug(f"Could not load JSON from {file_path}: {e}")
+        return None
+
+
 def check_existing_data():
     """Check if previously downloaded data exists."""
     raw_csv = DATA_RAW_DIR / "epc_london_raw.csv"
@@ -1360,20 +1488,52 @@ def main():
         console.print("[cyan]Proceeding with existing data...[/cyan]")
         console.print()
 
+    df_raw = df.copy()
+
+    # Phase 2: Check for existing validated data before running validation
+    validated_path = DATA_PROCESSED_DIR / "epc_london_validated.csv"
+    df_validated = prompt_use_existing_dataframe(
+        "Data Validation",
+        "validated EPC dataset",
+        validated_path,
+        analysis_logger
+    )
+    validation_report = None
+
+    if df_validated is not None:
+        validation_report = load_json_if_exists(DATA_PROCESSED_DIR / "validation_report.json")
+        if validation_report:
+            console.print("[cyan]Loaded validation report from previous run[/cyan]")
+        else:
+            console.print("[yellow]⚠ Validation report JSON not found; continuing without it[/yellow]")
+    else:
+        # Phase 2: Validate
+        df_validated, validation_report = validate_data(df, analysis_logger)
+
     # Set metadata
     analysis_logger.set_metadata("total_properties", len(df))
 
-    # Phase 2: Validate
-    df_validated, validation_report = validate_data(df, analysis_logger)
     if df_validated.empty:
         console.print("[red]✗ Analysis stopped - no valid data[/red]")
         return
 
-    # Keep reference to raw data for quality reports
-    df_raw = df.copy()
-
-    # Phase 2.5: Methodological Adjustments
-    df_adjusted = apply_methodological_adjustments(df_validated, analysis_logger)
+    # Phase 2.5: Methodological Adjustments (check for existing adjusted data)
+    adjusted_path = DATA_PROCESSED_DIR / "epc_london_adjusted.csv"
+    df_adjusted = prompt_use_existing_dataframe(
+        "Methodological Adjustments",
+        "methodologically adjusted dataset",
+        adjusted_path,
+        analysis_logger
+    )
+    adjustment_summary = None
+    if df_adjusted is not None:
+        adjustment_summary = load_json_if_exists(DATA_PROCESSED_DIR / "methodological_adjustments_summary.json")
+        if adjustment_summary:
+            console.print("[cyan]Loaded methodological adjustment summary from previous run[/cyan]")
+        else:
+            console.print("[yellow]⚠ Adjustment summary JSON not found; proceeding without it[/yellow]")
+    else:
+        df_adjusted, adjustment_summary = apply_methodological_adjustments(df_validated, analysis_logger)
 
     # Phase 3: Analyze (use adjusted data)
     archetype_results = analyze_archetype(df_adjusted, analysis_logger)
