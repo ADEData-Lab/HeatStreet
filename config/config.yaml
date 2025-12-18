@@ -429,6 +429,12 @@ methodological_adjustments:
 financial:
   discount_rate: 0.035  # 3.5% real discount rate (HM Treasury Green Book)
   analysis_horizon_years: 20  # Project lifetime for NPV calculations
+
+  # Cost-effectiveness thresholds for flagging recommended upgrades
+  cost_effectiveness:
+    max_payback_years: 20               # Maximum payback for cost-effective classification
+    max_carbon_abatement_cost: 300      # Maximum £/tCO2 to recommend (optional threshold)
+
   price_scenarios:
     baseline:
       name: "Current prices (Ofgem cap)"

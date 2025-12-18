@@ -35,6 +35,8 @@ from config.config import (
     get_financial_params,
     get_heat_network_params,
     get_uncertainty_params,
+    get_cost_effectiveness_params,
+    get_eligibility_params,
     DATA_PROCESSED_DIR,
     DATA_OUTPUTS_DIR
 )
@@ -45,66 +47,31 @@ from src.analysis.retrofit_packages import (
 )
 from src.analysis.methodological_adjustments import MethodologicalAdjustments
 from src.modeling.costing import CostCalculator
+from src.utils.modeling_utils import (
+    select_baseline_energy_intensity,
+    select_baseline_annual_kwh,
+    assert_non_negative_intensities,
+    is_hp_ready,
+    is_upgrade_recommended,
+    calculate_carbon_abatement_cost,
+    summarize_series,
+)
 
 
+# Legacy wrapper functions delegating to shared utils
 def _select_baseline_energy_intensity(property_like: pd.Series) -> float:
     """Pick adjusted energy intensity when available, otherwise EPC value."""
-    for col in [
-        'energy_consumption_adjusted',
-        'energy_consumption_adjusted_central',
-        'ENERGY_CONSUMPTION_CURRENT',
-    ]:
-        val = property_like.get(col)
-        if val is not None and not pd.isna(val):
-            numeric_val = float(val)
-            if numeric_val < 0:
-                raise ValueError(f"Negative energy intensity supplied for {col}: {numeric_val}")
-            return numeric_val
-
-    return float(property_like.get('ENERGY_CONSUMPTION_CURRENT', 150))
+    return select_baseline_energy_intensity(property_like)
 
 
 def _select_baseline_annual_kwh(property_like: pd.Series, energy_intensity: float) -> float:
     """Return absolute baseline demand (kWh/year) prioritising adjusted baseline."""
-    for col in [
-        'baseline_consumption_kwh_year',
-        'baseline_consumption_kwh_year_central',
-        'baseline_consumption_kwh_year_low',
-        'baseline_consumption_kwh_year_high',
-    ]:
-        val = property_like.get(col)
-        if val is not None and not pd.isna(val):
-            return float(val)
-
-    floor_area = property_like.get('TOTAL_FLOOR_AREA', 100)
-    if pd.isna(floor_area):
-        floor_area = 100
-
-    return float(energy_intensity) * float(floor_area)
+    return select_baseline_annual_kwh(property_like, energy_intensity)
 
 
 def _assert_non_negative_intensities(df: pd.DataFrame) -> pd.DataFrame:
     """Ensure no negative energy intensity values are present before pathway modeling."""
-    intensity_cols = [
-        'energy_consumption_adjusted',
-        'energy_consumption_adjusted_central',
-        'ENERGY_CONSUMPTION_CURRENT',
-    ]
-
-    present_cols = [col for col in intensity_cols if col in df.columns]
-    if not present_cols:
-        return df
-
-    negative_counts = {
-        col: int((pd.to_numeric(df[col], errors='coerce') < 0).sum())
-        for col in present_cols
-    }
-
-    total_negatives = sum(negative_counts.values())
-    if total_negatives > 0:
-        raise ValueError(f"Negative energy intensities found in pathway inputs: {negative_counts}")
-
-    return df
+    return assert_non_negative_intensities(df)
 
 
 # ============================================================================
@@ -420,20 +387,20 @@ class PathwayModeler:
         elif pathway.heat_source == 'hn':
             # Heat network (network tariff)
             hn_demand = heating_after_fabric / self.hn_efficiency if self.hn_efficiency > 0 else heating_after_fabric
-            annual_demand = non_heating_energy + heating_after_fabric  # Delivered heat (no additional demand saving)
-            annual_bill = hn_demand * self.hn_tariff + non_heating_energy * self.gas_price
+            annual_demand = residual_gas_after_fabric + heating_after_fabric  # Delivered heat (no additional demand saving)
+            annual_bill = hn_demand * self.hn_tariff + residual_gas_after_fabric * self.gas_price
             annual_co2 = (
-                hn_demand * self.hn_carbon + non_heating_energy * self.gas_carbon
+                hn_demand * self.hn_carbon + residual_gas_after_fabric * self.gas_carbon
             ) / 1000
 
         elif pathway.heat_source == 'hp+hn':
             # Hybrid - depends on HN access
             if has_hn_access:
                 hn_demand = heating_after_fabric / self.hn_efficiency if self.hn_efficiency > 0 else heating_after_fabric
-                annual_demand = non_heating_energy + heating_after_fabric
-                annual_bill = hn_demand * self.hn_tariff + non_heating_energy * self.gas_price
+                annual_demand = residual_gas_after_fabric + heating_after_fabric
+                annual_bill = hn_demand * self.hn_tariff + residual_gas_after_fabric * self.gas_price
                 annual_co2 = (
-                    hn_demand * self.hn_carbon + non_heating_energy * self.gas_carbon
+                    hn_demand * self.hn_carbon + residual_gas_after_fabric * self.gas_carbon
                 ) / 1000
             else:
                 hp_demand = heating_after_fabric / hp_cop_central if hp_cop_central else heating_after_fabric
@@ -462,6 +429,24 @@ class PathwayModeler:
         # Discounted payback
         discounted_payback = self._calculate_discounted_payback(
             total_capex, annual_bill_saving
+        )
+
+        # Cost-effectiveness metrics
+        cost_effectiveness_cfg = get_cost_effectiveness_params()
+        max_payback_threshold = cost_effectiveness_cfg.get('max_payback_years', 20)
+        analysis_horizon = self.financial.get('analysis_horizon_years', 20)
+
+        # Calculate carbon abatement cost
+        carbon_abatement = calculate_carbon_abatement_cost(
+            total_capex,
+            co2_saving * 1000,  # Convert tonnes to kg
+            int(analysis_horizon)
+        )
+
+        # Determine if upgrade is recommended
+        upgrade_recommended_val = is_upgrade_recommended(
+            simple_payback,
+            max_payback_threshold=max_payback_threshold
         )
 
         return {
@@ -500,6 +485,10 @@ class PathwayModeler:
             # Payback
             'simple_payback_years': simple_payback,
             'discounted_payback_years': discounted_payback,
+
+            # Cost-effectiveness
+            'carbon_abatement_cost': carbon_abatement,
+            'upgrade_recommended': upgrade_recommended_val,
         }
 
     def _calculate_discounted_payback(
@@ -542,18 +531,7 @@ class PathwayModeler:
     @staticmethod
     def _summarize_series(series: pd.Series) -> Dict[str, float]:
         """Return common summary statistics for a series."""
-        clean = series.replace([np.inf, -np.inf], np.nan).dropna()
-        if len(clean) == 0:
-            return {k: np.nan for k in ['mean', 'median', 'p10', 'p90', 'min', 'max']}
-
-        return {
-            'mean': clean.mean(),
-            'median': clean.median(),
-            'p10': clean.quantile(0.10),
-            'p90': clean.quantile(0.90),
-            'min': clean.min(),
-            'max': clean.max(),
-        }
+        return summarize_series(series)
 
     def analyze_all_pathways(
         self,
@@ -628,6 +606,23 @@ class PathwayModeler:
                 np.isfinite(pathway_results['simple_payback_years'])
             ]
 
+            # Cost-effectiveness counts
+            upgrade_recommended_count = 0
+            if 'upgrade_recommended' in pathway_results.columns:
+                upgrade_recommended_count = int(pathway_results['upgrade_recommended'].sum())
+
+            # Carbon abatement statistics
+            carbon_abatement_stats = {}
+            if 'carbon_abatement_cost' in pathway_results.columns:
+                finite_abatement = pathway_results['carbon_abatement_cost'].replace(
+                    [np.inf, -np.inf], np.nan
+                ).dropna()
+                if len(finite_abatement) > 0:
+                    carbon_abatement_stats = {
+                        'carbon_abatement_cost_mean': float(finite_abatement.mean()),
+                        'carbon_abatement_cost_median': float(finite_abatement.median()),
+                    }
+
             summary = {
                 'pathway_id': pathway_id,
                 'pathway_name': pathway_name,
@@ -663,6 +658,14 @@ class PathwayModeler:
                     pathway_results['total_capex'].sum() /
                     (pathway_results['co2_saving_tonnes'].sum() * 20)
                 ) if pathway_results['co2_saving_tonnes'].sum() > 0 else np.nan,
+
+                # Upgrade recommendations
+                'upgrade_recommended_count': upgrade_recommended_count,
+                'upgrade_recommended_pct': (
+                    upgrade_recommended_count / len(pathway_results) * 100
+                ) if len(pathway_results) > 0 else 0,
+
+                **carbon_abatement_stats,
             }
 
             summary_rows.append(summary)
