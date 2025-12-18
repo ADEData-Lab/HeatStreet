@@ -275,7 +275,9 @@ def calculate_sap_delta_from_energy_savings(
     """
     Estimate SAP delta from energy savings.
 
-    Uses a linear approximation based on percentage energy reduction.
+    Uses a diminishing returns model based on percentage energy reduction.
+    Higher savings produce less incremental SAP gain to reflect real-world
+    diminishing returns and prevent unrealistic Band A migrations.
 
     Args:
         baseline_kwh: Baseline annual consumption
@@ -299,10 +301,49 @@ def calculate_sap_delta_from_energy_savings(
         return 0.0, 0.0
 
     saving_fraction = max(0.0, min(1.0, (baseline_val - post_val) / baseline_val))
-    sap_gain = saving_fraction * 100 * SAP_POINTS_PER_PERCENT_SAVING
+    saving_pct = saving_fraction * 100
 
-    sap_headroom = max(0.0, 100 - float(baseline_sap if not pd.isna(baseline_sap) else 0.0))
-    return min(sap_gain, sap_headroom), saving_fraction * 100
+    # Apply diminishing returns for high energy savings
+    # First 20% savings: full SAP_POINTS_PER_PERCENT_SAVING (0.45)
+    # 20-40% savings: 75% of rate
+    # 40-60% savings: 50% of rate
+    # >60% savings: 25% of rate
+    sap_gain = 0.0
+    remaining_saving = saving_pct
+
+    if remaining_saving > 0:
+        band1 = min(remaining_saving, 20)
+        sap_gain += band1 * SAP_POINTS_PER_PERCENT_SAVING
+        remaining_saving -= band1
+
+    if remaining_saving > 0:
+        band2 = min(remaining_saving, 20)
+        sap_gain += band2 * SAP_POINTS_PER_PERCENT_SAVING * 0.75
+        remaining_saving -= band2
+
+    if remaining_saving > 0:
+        band3 = min(remaining_saving, 20)
+        sap_gain += band3 * SAP_POINTS_PER_PERCENT_SAVING * 0.50
+        remaining_saving -= band3
+
+    if remaining_saving > 0:
+        sap_gain += remaining_saving * SAP_POINTS_PER_PERCENT_SAVING * 0.25
+
+    # Also apply additional cap based on baseline SAP
+    # Properties already at high SAP scores have less room for improvement
+    baseline_sap_val = float(baseline_sap if not pd.isna(baseline_sap) else 0.0)
+    sap_headroom = max(0.0, 100 - baseline_sap_val)
+
+    # For properties already at Band B or better (SAP >= 81), apply stricter cap
+    # to prevent unrealistic Band A migrations
+    if baseline_sap_val >= 81:
+        # Max 5 SAP points gain for properties already at Band B
+        sap_gain = min(sap_gain, 5.0)
+    elif baseline_sap_val >= 69:
+        # Max 10 SAP points gain for Band C properties
+        sap_gain = min(sap_gain, 10.0)
+
+    return min(sap_gain, sap_headroom), saving_pct
 
 
 def calculate_epc_band_distribution(
