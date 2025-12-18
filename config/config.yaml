@@ -373,6 +373,8 @@ heat_network:
   tariff_per_kwh: 0.08
   # Heat network efficiency (losses)
   distribution_efficiency: 0.90  # 10% distribution losses
+  # Carbon intensity of supplied heat (kgCO2/kWh at building boundary)
+  carbon_intensity_kg_per_kwh: 0.073  # ~60% lower than gas default (0.183)
 
   # Deterministic heat network readiness flags (used by ScenarioModeler & PathwayModeler)
   readiness:

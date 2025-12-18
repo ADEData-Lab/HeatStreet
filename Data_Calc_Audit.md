@@ -31,7 +31,7 @@ This document catalogs every formula, parameter, and external datapoint used whe
   - Double glazing: window area = 0.2·floor area; cost = window area·`double_glazing_per_m2`; saving = 10% of absolute energy use.
   - ASHP installation: capex adds `ashp_installation`; heating demand assumed 80% of total absolute energy; gas saved equals heating demand; electricity use = heating demand / SCOP; net energy reduction = gas saved − electricity use.
   - Emitter upgrades: radiator count = floor area / 15; cost = radiators·`emitter_upgrade_per_radiator`.
-  - District heating: capex adds `district_heating_connection`; energy reduction = 15% of absolute energy use.
+- District heating: capex adds `district_heating_connection`; no fabric-equivalent demand reduction is applied (beyond distribution losses captured via tariff and carbon intensity assumptions).
   - Fabric improvement bundles combine loft, wall, and glazing costs above with a 40% energy‑reduction lump sum.
   - All formulas computed inside `_calculate_property_upgrade_worker`.【F:src/modeling/scenario_model.py†L42-L116】
 - **Energy/CO₂/bill impact translations**

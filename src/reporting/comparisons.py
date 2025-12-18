@@ -128,6 +128,11 @@ class ComparisonReporter:
         tariff_info = self.config.get('energy_prices', {}).get('current', {})
         hp_cop = self.config.get('heat_pump', {}).get('scop', 3.0)
         connection_cost = self.costs.get('district_heating_connection', 5000)
+        hn_efficiency = self.hn_params.get('distribution_efficiency', 1.0)
+        hn_carbon = self.hn_params.get(
+            'carbon_intensity_kg_per_kwh',
+            self.config.get('carbon_factors', {}).get('current', {}).get('heat_network')
+        )
 
         lines = [
             "# Heat pump vs heat network comparison",
@@ -137,6 +142,8 @@ class ComparisonReporter:
             "", "**Tariffs & performance assumptions:**", f"- Electricity: £{tariff_info.get('electricity', 0.245):.3f}/kWh",
             f"- Gas: £{tariff_info.get('gas', 0.0624):.4f}/kWh",
             f"- Heat network tariff: £{self.hn_params.get('tariff_per_kwh', 0.08):.3f}/kWh",
+            f"- Heat network delivery efficiency: {hn_efficiency*100:.0f}% (tariff applied to input energy)",
+            f"- Heat network carbon intensity: {hn_carbon:.3f} kgCO₂/kWh supplied" if hn_carbon is not None else "- Heat network carbon intensity: not specified",
             f"- Heat pump COP (SCOP): {hp_cop:.2f}; shared ground loop proxy shown if available.",
             f"- HN connection cost assumption: £{connection_cost:,.0f} per home (sensitivity available via CLI).",
             "", "## Scenario ranges (p10–p90)",
@@ -150,7 +157,11 @@ class ComparisonReporter:
 
         lines.append("")
         lines.append("*Note: bill/CO₂ savings use baseline-minus-scenario values (positive = saving); "
-                     "bill_change/co2_change columns show signed deltas where negatives indicate reductions.*")
+                     "bill_change/co2_change columns show signed deltas where negatives indicate reductions." \
+                     " Heat networks are modelled as a supply switch (no extra demand reduction; non-heating demand remains on gas) with network tariffs and carbon applied to supplied heat.*")
+
+        lines.append("")
+        lines.append("*Hybrid pathway routing is mutually exclusive: homes connect to heat networks where ready, with others receiving ASHPs to avoid double-counting benefits.*")
 
         if self.hybrid_warning:
             lines.append("")
