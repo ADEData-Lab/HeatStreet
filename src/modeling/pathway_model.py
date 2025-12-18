@@ -225,6 +225,7 @@ class PathwayModeler:
         self.carbon = self.config.get('carbon_factors', {}).get('current', {})
         self.gas_carbon = self.carbon.get('gas', 0.183)
         self.elec_carbon = self.carbon.get('electricity', 0.225)
+        self.hn_carbon = self.hn_params.get('carbon_intensity_kg_per_kwh', self.carbon.get('heat_network', self.gas_carbon * 0.4))
 
         # Heat pump parameters
         self.hp_scop = self.config.get('heat_pump', {}).get('scop', 3.0)
@@ -418,19 +419,22 @@ class PathwayModeler:
 
         elif pathway.heat_source == 'hn':
             # Heat network (network tariff)
-            hn_demand = post_fabric_demand / self.hn_efficiency  # Account for losses
-            annual_demand = post_fabric_demand  # Delivered heat
-            annual_bill = hn_demand * self.hn_tariff
-            # HN CO2 depends on source - assume low-carbon (60% less than gas)
-            annual_co2 = (hn_demand * self.gas_carbon * 0.4) / 1000
+            hn_demand = heating_after_fabric / self.hn_efficiency if self.hn_efficiency > 0 else heating_after_fabric
+            annual_demand = non_heating_energy + heating_after_fabric  # Delivered heat (no additional demand saving)
+            annual_bill = hn_demand * self.hn_tariff + non_heating_energy * self.gas_price
+            annual_co2 = (
+                hn_demand * self.hn_carbon + non_heating_energy * self.gas_carbon
+            ) / 1000
 
         elif pathway.heat_source == 'hp+hn':
             # Hybrid - depends on HN access
             if has_hn_access:
-                hn_demand = post_fabric_demand / self.hn_efficiency
-                annual_demand = post_fabric_demand
-                annual_bill = hn_demand * self.hn_tariff
-                annual_co2 = (hn_demand * self.gas_carbon * 0.4) / 1000
+                hn_demand = heating_after_fabric / self.hn_efficiency if self.hn_efficiency > 0 else heating_after_fabric
+                annual_demand = non_heating_energy + heating_after_fabric
+                annual_bill = hn_demand * self.hn_tariff + non_heating_energy * self.gas_price
+                annual_co2 = (
+                    hn_demand * self.hn_carbon + non_heating_energy * self.gas_carbon
+                ) / 1000
             else:
                 hp_demand = heating_after_fabric / hp_cop_central if hp_cop_central else heating_after_fabric
                 annual_demand = residual_gas_after_fabric + hp_demand

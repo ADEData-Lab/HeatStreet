@@ -255,12 +255,16 @@ def _calculate_property_upgrade_core(
 ) -> PropertyUpgrade:
     """Calculate upgrade metrics for a single property using configured COP curves."""
     energy_prices = config.get('energy_prices', {}).get('current', {})
+    heat_network_cfg = config.get('heat_network', {})
     gas_price = energy_prices.get('gas', 0.0)
     elec_price = energy_prices.get('electricity', 0.0)
+    hn_tariff = heat_network_cfg.get('tariff_per_kwh', energy_prices.get('heat_network', 0.08))
+    hn_efficiency = heat_network_cfg.get('distribution_efficiency', 1.0) or 1.0
 
     carbon_factors = config.get('carbon_factors', {}).get('current', {})
     gas_carbon = carbon_factors.get('gas', 0.0)
     elec_carbon = carbon_factors.get('electricity', 0.0)
+    hn_carbon = heat_network_cfg.get('carbon_intensity_kg_per_kwh', carbon_factors.get('heat_network', gas_carbon * 0.4))
 
     measure_savings = config.get('measure_savings', {})
     hp_cfg = config.get('heat_pump', {})
@@ -288,9 +292,6 @@ def _calculate_property_upgrade_core(
         if pct is not None:
             return baseline_kwh * pct
 
-        if measure_name == 'district_heating_connection':
-            return baseline_kwh * 0.15
-
         return 0.0
 
     floor_area = property_dict.get('TOTAL_FLOOR_AREA', 100)
@@ -315,7 +316,7 @@ def _calculate_property_upgrade_core(
 
     capital_cost = 0.0
     fabric_savings = 0.0
-    district_savings = 0.0
+    uses_heat_network = False
     flow_temp_reduction = 0.0
     uses_heat_pump = False
     cost_notes: List[str] = []
@@ -379,7 +380,7 @@ def _calculate_property_upgrade_core(
 
         elif measure == 'district_heating_connection':
             _apply_cost('district_heating_connection')
-            district_savings += _measure_saving(measure, wall_type, baseline_kwh)
+            uses_heat_network = True
 
         elif measure in ['fabric_improvements', 'modest_fabric_improvements']:
             _apply_cost('loft_insulation_topup', 'loft')
@@ -395,15 +396,39 @@ def _calculate_property_upgrade_core(
 
     fabric_savings = min(fabric_savings, baseline_kwh)
     energy_after_fabric = max(baseline_kwh - fabric_savings, 0)
-    district_savings = min(district_savings, energy_after_fabric)
-    energy_after_non_hp = max(energy_after_fabric - district_savings, 0)
 
     baseline_bill = baseline_kwh * gas_price
     baseline_co2 = baseline_kwh * gas_carbon
 
     operating_flow_temp = max(min_flow_temp, float(baseline_flow_temp) - flow_temp_reduction)
 
-    if uses_heat_pump:
+    if uses_heat_network and uses_heat_pump:
+        logger.warning(
+            "Both ASHP and heat network specified; prioritising heat network to avoid double counting."
+        )
+        uses_heat_pump = False
+
+    if uses_heat_network:
+        heating_after_fabric = energy_after_fabric * heating_fraction
+        non_heating_energy = max(energy_after_fabric - heating_after_fabric, 0)
+
+        hn_input_energy = heating_after_fabric / hn_efficiency if hn_efficiency > 0 else heating_after_fabric
+        post_energy_use = non_heating_energy + heating_after_fabric
+
+        post_measure_bill = non_heating_energy * gas_price + hn_input_energy * hn_tariff
+        post_measure_bill_low = post_measure_bill_high = post_measure_bill
+        bill_savings = baseline_bill - post_measure_bill
+        bill_savings_low = bill_savings_high = bill_savings
+
+        post_measure_co2 = non_heating_energy * gas_carbon + hn_input_energy * hn_carbon
+        post_measure_co2_low = post_measure_co2_high = post_measure_co2
+        co2_reduction = baseline_co2 - post_measure_co2
+
+        energy_reduction = baseline_kwh - post_energy_use
+        hp_electricity = hp_electricity_low = hp_electricity_high = 0.0
+        central_cop = low_cop = high_cop = np.nan
+
+    elif uses_heat_pump:
         cop = adjuster.derive_heat_pump_cop(operating_flow_temp, include_bounds=True)
         central_cop = cop.get('central') or 1e-6
         low_cop = cop.get('low') or central_cop
@@ -437,17 +462,17 @@ def _calculate_property_upgrade_core(
         co2_reduction = baseline_co2 - post_measure_co2
 
     else:
-        post_measure_bill = energy_after_non_hp * gas_price
+        post_measure_bill = energy_after_fabric * gas_price
         post_measure_bill_low = post_measure_bill_high = post_measure_bill
         bill_savings = baseline_bill - post_measure_bill
         bill_savings_low = bill_savings_high = bill_savings
 
-        post_measure_co2 = energy_after_non_hp * gas_carbon
+        post_measure_co2 = energy_after_fabric * gas_carbon
         post_measure_co2_low = post_measure_co2_high = post_measure_co2
         co2_reduction = baseline_co2 - post_measure_co2
 
-        energy_reduction = baseline_kwh - energy_after_non_hp
-        post_energy_use = energy_after_non_hp
+        energy_reduction = baseline_kwh - energy_after_fabric
+        post_energy_use = energy_after_fabric
         hp_electricity = hp_electricity_low = hp_electricity_high = 0.0
         central_cop = low_cop = high_cop = np.nan
 
