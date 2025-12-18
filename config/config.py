@@ -117,6 +117,24 @@ def get_analysis_horizon_years() -> float:
     return get_financial_params()['analysis_horizon_years']
 
 
+def get_cost_effectiveness_params() -> Dict[str, Any]:
+    """Get cost-effectiveness threshold parameters from config."""
+    config = load_config()
+    financial = config.get('financial', {})
+    ce_params = financial.get('cost_effectiveness', {})
+
+    return {
+        'max_payback_years': ce_params.get('max_payback_years', 20),
+        'max_carbon_abatement_cost': ce_params.get('max_carbon_abatement_cost', 300),
+    }
+
+
+def get_eligibility_params() -> Dict[str, Any]:
+    """Get eligibility parameters for ASHP and heat networks."""
+    config = load_config()
+    return config.get('eligibility', {})
+
+
 def get_uncertainty_params() -> Dict[str, Any]:
     """Get uncertainty parameters from config."""
     config = load_config()

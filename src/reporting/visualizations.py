@@ -261,6 +261,171 @@ class ReportGenerator:
 
         logger.info(f"Saved subsidy sensitivity to: {save_path}")
 
+    def plot_epc_band_shifts(
+        self,
+        band_shift_data: Dict,
+        scenario_name: str = 'Scenario',
+        save_path: Optional[Path] = None
+    ):
+        """
+        Create chart showing EPC band distribution before and after intervention.
+
+        Args:
+            band_shift_data: Dictionary with 'before' and 'after' band distributions
+            scenario_name: Name of the scenario for title
+            save_path: Path to save figure
+        """
+        logger.info("Creating EPC band shift chart...")
+
+        if save_path is None:
+            save_path = self.output_dir / "epc_band_shifts.png"
+
+        bands = ['A', 'B', 'C', 'D', 'E', 'F', 'G']
+        before_counts = [band_shift_data.get('before', {}).get(b, 0) for b in bands]
+        after_counts = [band_shift_data.get('after', {}).get(b, 0) for b in bands]
+
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+        fig.suptitle(f'EPC Band Distribution: {scenario_name}', fontsize=14, fontweight='bold')
+
+        # Colors from A (green) to G (red)
+        colors = ['#2ecc71', '#27ae60', '#f1c40f', '#f39c12', '#e67e22', '#e74c3c', '#c0392b']
+
+        x = np.arange(len(bands))
+        width = 0.35
+
+        # Grouped bar chart
+        bars1 = ax1.bar(x - width/2, before_counts, width, label='Before',
+                       color='lightgray', edgecolor='black', linewidth=1.2)
+        bars2 = ax1.bar(x + width/2, after_counts, width, label='After',
+                       color=colors, edgecolor='black', linewidth=1.2)
+
+        ax1.set_xlabel('EPC Band', fontsize=12, fontweight='bold')
+        ax1.set_ylabel('Number of Properties', fontsize=12, fontweight='bold')
+        ax1.set_title('Band Distribution Before vs After', fontsize=13, fontweight='bold')
+        ax1.set_xticks(x)
+        ax1.set_xticklabels(bands)
+        ax1.legend()
+        ax1.yaxis.grid(True, alpha=0.3)
+        ax1.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{int(x):,}'))
+
+        # Net change chart
+        changes = [after - before for before, after in zip(before_counts, after_counts)]
+        change_colors = ['#2ecc71' if c > 0 else '#e74c3c' for c in changes]
+
+        bars3 = ax2.bar(bands, changes, color=change_colors, edgecolor='black', linewidth=1.2)
+
+        # Add value labels
+        for bar, change in zip(bars3, changes):
+            height = bar.get_height()
+            va = 'bottom' if change >= 0 else 'top'
+            ax2.text(bar.get_x() + bar.get_width()/2., height,
+                    f'{change:+,}',
+                    ha='center', va=va, fontsize=10, fontweight='bold')
+
+        ax2.axhline(y=0, color='black', linewidth=1)
+        ax2.set_xlabel('EPC Band', fontsize=12, fontweight='bold')
+        ax2.set_ylabel('Net Change in Properties', fontsize=12, fontweight='bold')
+        ax2.set_title('Net Change by Band', fontsize=13, fontweight='bold')
+        ax2.yaxis.grid(True, alpha=0.3)
+        ax2.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{int(x):+,}'))
+
+        # Calculate and display Band C or better metrics
+        total = sum(before_counts)
+        band_c_or_better_before = sum(before_counts[:3])
+        band_c_or_better_after = sum(after_counts[:3])
+        pct_before = band_c_or_better_before / total * 100 if total > 0 else 0
+        pct_after = band_c_or_better_after / total * 100 if total > 0 else 0
+
+        textstr = (f'Band C or better:\n'
+                  f'Before: {band_c_or_better_before:,} ({pct_before:.1f}%)\n'
+                  f'After: {band_c_or_better_after:,} ({pct_after:.1f}%)\n'
+                  f'Change: +{pct_after - pct_before:.1f}pp')
+
+        ax2.text(0.98, 0.98, textstr, transform=ax2.transAxes,
+                fontsize=11, verticalalignment='top', horizontalalignment='right',
+                bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+
+        plt.tight_layout()
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.close()
+
+        logger.info(f"Saved EPC band shifts to: {save_path}")
+
+    def plot_cost_effectiveness_summary(
+        self,
+        ce_summary: Dict,
+        scenario_name: str = 'Scenario',
+        save_path: Optional[Path] = None
+    ):
+        """
+        Create chart showing cost-effectiveness summary.
+
+        Args:
+            ce_summary: Cost-effectiveness summary dictionary
+            scenario_name: Name of the scenario for title
+            save_path: Path to save figure
+        """
+        logger.info("Creating cost-effectiveness summary chart...")
+
+        if save_path is None:
+            save_path = self.output_dir / "cost_effectiveness_summary.png"
+
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+        fig.suptitle(f'Cost-Effectiveness Analysis: {scenario_name}', fontsize=14, fontweight='bold')
+
+        # Pie chart of cost-effectiveness categories
+        categories = ['Cost-effective', 'Marginal', 'Not cost-effective']
+        counts = [
+            ce_summary.get('cost_effective_count', 0),
+            ce_summary.get('marginal_count', 0),
+            ce_summary.get('not_cost_effective_count', 0)
+        ]
+        colors = ['#2ecc71', '#f39c12', '#e74c3c']
+
+        # Only include non-zero categories
+        labels_filtered = []
+        counts_filtered = []
+        colors_filtered = []
+        for label, count, color in zip(categories, counts, colors):
+            if count > 0:
+                labels_filtered.append(label)
+                counts_filtered.append(count)
+                colors_filtered.append(color)
+
+        if counts_filtered:
+            wedges, texts, autotexts = ax1.pie(
+                counts_filtered, labels=labels_filtered,
+                autopct=lambda pct: f'{pct:.1f}%\n({int(pct/100*sum(counts_filtered)):,})',
+                colors=colors_filtered, startangle=90,
+                textprops={'fontsize': 10}
+            )
+            ax1.set_title('Upgrade Recommendation Distribution', fontsize=13, fontweight='bold')
+
+        # Bar chart of key metrics
+        metrics = {
+            'Payback\nThreshold': ce_summary.get('payback_threshold_years', 20),
+            'Cost-effective\n(%)': ce_summary.get('cost_effective_pct', 0),
+            'Avg Payback\n(cost-eff)': ce_summary.get('avg_payback_cost_effective', 0) or 0,
+        }
+
+        bars = ax2.bar(metrics.keys(), metrics.values(), color='steelblue', edgecolor='black')
+        ax2.set_ylabel('Value', fontsize=12, fontweight='bold')
+        ax2.set_title('Cost-Effectiveness Metrics', fontsize=13, fontweight='bold')
+        ax2.yaxis.grid(True, alpha=0.3)
+
+        # Add value labels
+        for bar in bars:
+            height = bar.get_height()
+            ax2.text(bar.get_x() + bar.get_width()/2., height,
+                    f'{height:.1f}',
+                    ha='center', va='bottom', fontsize=10, fontweight='bold')
+
+        plt.tight_layout()
+        plt.savefig(save_path, dpi=300, bbox_inches='tight')
+        plt.close()
+
+        logger.info(f"Saved cost-effectiveness summary to: {save_path}")
+
     def plot_heat_network_tiers(
         self,
         tier_data: pd.DataFrame,
@@ -362,6 +527,23 @@ class ReportGenerator:
                 f.write(f"  Annual bill savings: £{results['annual_bill_savings']:,.0f}\n")
                 if 'average_payback_years' in results:
                     f.write(f"  Average payback: {results['average_payback_years']:.1f} years\n")
+
+                # EPC band shift summary
+                band_summary = results.get('epc_band_shift_summary', {})
+                if band_summary:
+                    before_pct = band_summary.get('band_c_or_better_before_pct', 0)
+                    after_pct = band_summary.get('band_c_or_better_after_pct', 0)
+                    f.write(f"  EPC Band C or better: {before_pct:.1f}% -> {after_pct:.1f}% (+{after_pct - before_pct:.1f}pp)\n")
+
+                # Cost-effectiveness summary
+                ce_summary = results.get('cost_effectiveness_summary', {})
+                if ce_summary:
+                    ce_pct = ce_summary.get('cost_effective_pct', 0)
+                    f.write(f"  Cost-effective upgrades: {ce_pct:.1f}%\n")
+
+                # Carbon abatement cost
+                if 'carbon_abatement_cost_median' in results:
+                    f.write(f"  Carbon abatement cost (median): £{results['carbon_abatement_cost_median']:.0f}/tCO2\n")
 
             # Heat Network Tiers
             f.write("\n\n3. HEAT NETWORK ZONE CLASSIFICATION\n")
@@ -619,6 +801,10 @@ class ReportGenerator:
         scenarios = []
 
         for scenario_name, results in scenario_results.items():
+            # Extract nested summaries
+            ce_summary = results.get('cost_effectiveness_summary', {})
+            band_summary = results.get('epc_band_shift_summary', {})
+
             scenarios.append({
                 'Scenario': scenario_name,
                 'Capital Cost (Total)': results['capital_cost_total'],
@@ -632,6 +818,15 @@ class ReportGenerator:
                 'Post-Measure CO2 (kg)': results.get('post_measure_co2_total_kg', 0),
                 'Average Payback (years)': results.get('average_payback_years', 0),
                 'Median Payback (years)': results.get('median_payback_years', 0),
+                # Cost-effectiveness metrics
+                'Cost-effective Count': ce_summary.get('cost_effective_count', 0),
+                'Cost-effective (%)': ce_summary.get('cost_effective_pct', 0),
+                'Not Cost-effective Count': ce_summary.get('not_cost_effective_count', 0),
+                'Carbon Abatement Cost (£/tCO2)': results.get('carbon_abatement_cost_median', 0),
+                # EPC band metrics
+                'Band C+ Before (%)': band_summary.get('band_c_or_better_before_pct', 0),
+                'Band C+ After (%)': band_summary.get('band_c_or_better_after_pct', 0),
+                # HP readiness
                 'ASHP Ready Properties': results.get('ashp_ready_properties', 0),
                 'ASHP Fabric Applied': results.get('ashp_fabric_applied_properties', 0),
                 'ASHP Not Eligible': results.get('ashp_not_ready_properties', 0),

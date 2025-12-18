@@ -23,6 +23,8 @@ from config.config import (
     get_cost_assumptions,
     get_cost_rules,
     get_analysis_horizon_years,
+    get_cost_effectiveness_params,
+    get_eligibility_params,
     get_measure_savings,
     DATA_PROCESSED_DIR,
     DATA_OUTPUTS_DIR
@@ -31,122 +33,60 @@ from src.analysis.fabric_tipping_point import FabricTippingPointAnalyzer
 from src.analysis.methodological_adjustments import MethodologicalAdjustments
 from src.spatial.heat_network_analysis import HeatNetworkAnalyzer
 from src.modeling.costing import CostCalculator
+from src.utils.modeling_utils import (
+    BAND_ORDER,
+    BAND_THRESHOLD_MAP,
+    MAX_EPC_BAND_IMPROVEMENT,
+    SAP_POINTS_PER_PERCENT_SAVING,
+    BAND_A_GUARDRAIL_SHARE,
+    select_baseline_energy_intensity,
+    select_baseline_annual_kwh,
+    assert_non_negative_intensities,
+    rating_to_band,
+    band_upper_bound,
+    normalize_band,
+    is_band_at_least,
+    calculate_sap_delta_from_energy_savings,
+    calculate_epc_band_distribution,
+    calculate_band_shift_summary,
+    is_hp_ready,
+    min_fabric_measures_for_hp,
+    is_upgrade_recommended,
+    calculate_carbon_abatement_cost,
+    calculate_cost_effectiveness_summary,
+    summarize_series,
+)
 
-BAND_ORDER = ['A', 'B', 'C', 'D', 'E', 'F', 'G']
-BAND_THRESHOLD_MAP = {
-    'A': 92,
-    'B': 81,
-    'C': 69,
-    'D': 55,
-    'E': 39,
-    'F': 21,
-    'G': 0
-}
-MAX_EPC_BAND_IMPROVEMENT = 2
-SAP_POINTS_PER_PERCENT_SAVING = 0.45
-BAND_A_GUARDRAIL_SHARE = 0.10
 
-
+# Legacy wrapper functions (now delegating to shared utils for backwards compatibility)
 def _select_baseline_energy_intensity(property_like: Dict[str, Any]) -> float:
     """Pick adjusted energy intensity when available, otherwise EPC value."""
-    for key in [
-        'energy_consumption_adjusted',
-        'energy_consumption_adjusted_central',
-        'ENERGY_CONSUMPTION_CURRENT',
-    ]:
-        val = property_like.get(key)
-        if val is not None and not pd.isna(val):
-            numeric_val = float(val)
-            if numeric_val < 0:
-                raise ValueError(f"Negative energy intensity supplied for {key}: {numeric_val}")
-            return numeric_val
-
-    return float(property_like.get('ENERGY_CONSUMPTION_CURRENT', 150))
+    return select_baseline_energy_intensity(property_like)
 
 
 def _select_baseline_annual_kwh(property_like: Dict[str, Any], energy_intensity: float) -> float:
     """Return absolute baseline consumption, prioritising prebound-adjusted columns."""
-    for key in [
-        'baseline_consumption_kwh_year',
-        'baseline_consumption_kwh_year_central',
-        'baseline_consumption_kwh_year_low',
-        'baseline_consumption_kwh_year_high',
-    ]:
-        val = property_like.get(key)
-        if val is not None and not pd.isna(val):
-            return float(val)
-
-    floor_area = property_like.get('TOTAL_FLOOR_AREA', 100)
-    if pd.isna(floor_area):
-        floor_area = 100
-
-    return float(energy_intensity) * float(floor_area)
+    return select_baseline_annual_kwh(property_like, energy_intensity)
 
 
 def _assert_non_negative_intensities(df: pd.DataFrame) -> pd.DataFrame:
     """Ensure no negative energy intensity values are present before modeling."""
-    intensity_cols = [
-        'energy_consumption_adjusted',
-        'energy_consumption_adjusted_central',
-        'ENERGY_CONSUMPTION_CURRENT',
-    ]
-
-    present_cols = [col for col in intensity_cols if col in df.columns]
-    if not present_cols:
-        return df
-
-    negative_counts = {
-        col: int((pd.to_numeric(df[col], errors='coerce') < 0).sum())
-        for col in present_cols
-    }
-
-    total_negatives = sum(negative_counts.values())
-    if total_negatives > 0:
-        raise ValueError(f"Negative energy intensities found in scenario inputs: {negative_counts}")
-
-    return df
+    return assert_non_negative_intensities(df)
 
 
 def _rating_to_band_value(rating: float) -> str:
     """Convert a SAP rating to an EPC band using configured thresholds."""
-    try:
-        numeric_rating = float(rating)
-    except (TypeError, ValueError):
-        numeric_rating = 0.0
-
-    for band in BAND_ORDER:
-        if numeric_rating >= BAND_THRESHOLD_MAP[band]:
-            return band
-
-    return 'G'
+    return rating_to_band(rating)
 
 
 def _band_upper_bound(band: str) -> float:
     """Return the maximum SAP score allowed within a band (exclusive of next band)."""
-    band_clean = str(band).strip().upper()
-
-    if band_clean == 'A':
-        return 100.0
-
-    try:
-        idx = BAND_ORDER.index(band_clean)
-    except ValueError:
-        return 100.0
-
-    if idx == 0:
-        return 100.0
-
-    prev_band = BAND_ORDER[idx - 1]
-    return BAND_THRESHOLD_MAP.get(prev_band, 100.0) - 0.01
+    return band_upper_bound(band)
 
 
 def _normalize_band(band: str, fallback_rating: float) -> str:
     """Normalize band text, falling back to SAP-derived band when missing/invalid."""
-    band_clean = str(band).strip().upper()
-    if band_clean in BAND_ORDER:
-        return band_clean
-
-    return _rating_to_band_value(fallback_rating)
+    return normalize_band(band, fallback_rating)
 
 
 def _sap_delta_from_energy_savings(
@@ -154,28 +94,8 @@ def _sap_delta_from_energy_savings(
     post_kwh: float,
     baseline_sap: float
 ) -> Tuple[float, float]:
-    """Estimate SAP delta from sequential energy savings.
-
-    Returns a tuple of (sap_point_gain, saving_pct_basis).
-    """
-    try:
-        baseline_val = float(baseline_kwh)
-    except (TypeError, ValueError):
-        baseline_val = 0.0
-
-    try:
-        post_val = float(post_kwh)
-    except (TypeError, ValueError):
-        post_val = baseline_val
-
-    if baseline_val <= 0:
-        return 0.0, 0.0
-
-    saving_fraction = max(0.0, min(1.0, (baseline_val - post_val) / baseline_val))
-    sap_gain = saving_fraction * 100 * SAP_POINTS_PER_PERCENT_SAVING
-
-    sap_headroom = max(0.0, 100 - float(baseline_sap if not pd.isna(baseline_sap) else 0.0))
-    return min(sap_gain, sap_headroom), saving_fraction * 100
+    """Estimate SAP delta from sequential energy savings."""
+    return calculate_sap_delta_from_energy_savings(baseline_kwh, post_kwh, baseline_sap)
 
 
 @dataclass
@@ -234,6 +154,10 @@ class PropertyUpgrade:
     costing_basis: str = ''
     costing_cap_applied: bool = False
     costing_notes: str = ''
+    # Cost-effectiveness fields
+    upgrade_recommended: bool = False
+    carbon_abatement_cost: float = np.inf
+    discounted_payback_years: float = np.inf
 
 
 def _calculate_property_upgrade_worker(args):
@@ -514,6 +438,38 @@ def _calculate_property_upgrade_core(
     else:
         payback_years = capital_cost / bill_savings
 
+    # Calculate cost-effectiveness metrics
+    cost_effectiveness_cfg = config.get('financial', {}).get('cost_effectiveness', {})
+    max_payback_threshold = cost_effectiveness_cfg.get('max_payback_years', 20)
+    analysis_horizon = config.get('financial', {}).get('analysis_horizon_years', 20)
+    discount_rate = config.get('financial', {}).get('discount_rate', 0.035)
+
+    # Calculate carbon abatement cost (£/tCO2 over analysis horizon)
+    if co2_reduction > 0 and analysis_horizon > 0:
+        total_co2_tonnes = (co2_reduction * analysis_horizon) / 1000
+        carbon_abatement_cost_val = capital_cost / total_co2_tonnes if total_co2_tonnes > 0 else np.inf
+    else:
+        carbon_abatement_cost_val = np.inf
+
+    # Calculate discounted payback
+    if bill_savings > 0 and capital_cost > 0:
+        cumulative = 0.0
+        discounted_payback_years_val = np.inf
+        for year in range(1, 51):
+            discounted = bill_savings / ((1 + discount_rate) ** year)
+            cumulative += discounted
+            if cumulative >= capital_cost:
+                discounted_payback_years_val = float(year)
+                break
+    else:
+        discounted_payback_years_val = np.inf
+
+    # Determine if upgrade is recommended
+    upgrade_recommended_val = is_upgrade_recommended(
+        payback_years,
+        max_payback_threshold=max_payback_threshold
+    )
+
     return PropertyUpgrade(
         property_id=str(property_dict.get('LMK_KEY', 'unknown')),
         uprn=str(property_dict.get('UPRN', '')),
@@ -568,6 +524,10 @@ def _calculate_property_upgrade_core(
         costing_basis=','.join(sorted({src for src in cost_sources if src})),
         costing_cap_applied=capped_costs > 0,
         costing_notes='; '.join(cost_notes),
+        # Cost-effectiveness fields
+        upgrade_recommended=upgrade_recommended_val,
+        carbon_abatement_cost=carbon_abatement_cost_val if np.isfinite(carbon_abatement_cost_val) else np.inf,
+        discounted_payback_years=discounted_payback_years_val if np.isfinite(discounted_payback_years_val) else np.inf,
     )
 
 
@@ -1362,6 +1322,19 @@ class ScenarioModeler:
             'band_a_guardrail': band_a_guardrail
         }
 
+        # Enhanced EPC band distribution summary
+        band_shift_summary = calculate_band_shift_summary(current_bands, new_bands)
+        results['epc_band_shift_summary'] = band_shift_summary
+
+        # Log EPC band shift summary
+        if band_shift_summary:
+            before_c_pct = band_shift_summary.get('band_c_or_better_before_pct', 0)
+            after_c_pct = band_shift_summary.get('band_c_or_better_after_pct', 0)
+            logger.info(
+                f"  EPC Band C or better: {before_c_pct:.1f}% → {after_c_pct:.1f}% "
+                f"(+{after_c_pct - before_c_pct:.1f}pp)"
+            )
+
         # Payback distribution (handle infinite values)
         payback_categories = {
             '0-5 years': len(numeric_df[(numeric_df['payback_years'] <= 5)]),
@@ -1373,6 +1346,36 @@ class ScenarioModeler:
         }
 
         results['payback_distribution'] = payback_categories
+
+        # Cost-effectiveness summary using threshold-based classification
+        cost_effectiveness_cfg = get_cost_effectiveness_params()
+        max_payback_threshold = cost_effectiveness_cfg.get('max_payback_years', 20)
+
+        if 'upgrade_recommended' in property_df.columns:
+            recommended_count = int(property_df['upgrade_recommended'].sum())
+            results['upgrade_recommended_count'] = recommended_count
+            results['upgrade_recommended_pct'] = (recommended_count / total_properties * 100) if total_properties > 0 else 0
+
+        # Detailed cost-effectiveness summary
+        ce_summary = calculate_cost_effectiveness_summary(property_df, max_payback_threshold)
+        results['cost_effectiveness_summary'] = ce_summary
+
+        # Carbon abatement cost statistics
+        if 'carbon_abatement_cost' in numeric_df.columns:
+            finite_abatement = numeric_df['carbon_abatement_cost'].replace([np.inf, -np.inf], np.nan).dropna()
+            if len(finite_abatement) > 0:
+                results['carbon_abatement_cost_mean'] = float(finite_abatement.mean())
+                results['carbon_abatement_cost_median'] = float(finite_abatement.median())
+                results['carbon_abatement_cost_p10'] = float(finite_abatement.quantile(0.10))
+                results['carbon_abatement_cost_p90'] = float(finite_abatement.quantile(0.90))
+
+        # Log cost-effectiveness summary
+        if ce_summary:
+            ce_pct = ce_summary.get('cost_effective_pct', 0)
+            logger.info(
+                f"  Cost-effective upgrades (payback ≤{max_payback_threshold}yr): "
+                f"{ce_summary.get('cost_effective_count', 0):,} ({ce_pct:.1f}%)"
+            )
 
         return results
 
@@ -1445,13 +1448,67 @@ class ScenarioModeler:
                 'carbon_abatement_cost_per_tonne': carbon_abatement_cost
             }
 
+        # Store for later export
+        self.subsidy_sensitivity_results = sensitivity_results
+        self.subsidy_sensitivity_scenario = scenario_name
+
         return sensitivity_results
+
+    def save_subsidy_sensitivity_results(
+        self,
+        output_path: Optional[Path] = None
+    ) -> Optional[Path]:
+        """
+        Save subsidy sensitivity analysis results to CSV.
+
+        The subsidy sensitivity analysis examines how varying subsidy levels
+        affect uptake rates and cost-effectiveness for heat pump upgrades.
+
+        Args:
+            output_path: Optional path for output file
+
+        Returns:
+            Path to saved CSV file, or None if no results available
+        """
+        if not hasattr(self, 'subsidy_sensitivity_results') or not self.subsidy_sensitivity_results:
+            logger.warning("No subsidy sensitivity results to save. Run model_subsidy_sensitivity() first.")
+            return None
+
+        if output_path is None:
+            output_path = DATA_OUTPUTS_DIR / "subsidy_sensitivity_analysis.csv"
+
+        rows = []
+        for level_key, level_data in self.subsidy_sensitivity_results.items():
+            row = {
+                'scenario': getattr(self, 'subsidy_sensitivity_scenario', 'heat_pump'),
+                'analysis_type': 'Heat Pump Subsidy Sensitivity',
+                **level_data
+            }
+            rows.append(row)
+
+        subsidy_df = pd.DataFrame(rows)
+
+        # Sort by subsidy percentage
+        subsidy_df = subsidy_df.sort_values('subsidy_percentage')
+
+        subsidy_df.to_csv(output_path, index=False)
+        logger.info(f"Subsidy sensitivity results saved to: {output_path}")
+        logger.info(
+            f"  Analysis covers {len(rows)} subsidy levels for "
+            f"'{getattr(self, 'subsidy_sensitivity_scenario', 'heat_pump')}' scenario"
+        )
+
+        return output_path
 
     def _build_summary_dataframe(self) -> pd.DataFrame:
         rows: List[Dict[str, Any]] = []
         for scenario, results in self.results.items():
             if not isinstance(results, dict):
                 continue
+
+            # Extract cost-effectiveness summary values
+            ce_summary = results.get('cost_effectiveness_summary', {})
+            band_summary = results.get('epc_band_shift_summary', {})
 
             rows.append({
                 'scenario': scenario,
@@ -1476,7 +1533,21 @@ class ScenarioModeler:
                 'heat_pump_electricity_total_kwh_high': results.get('heat_pump_electricity_total_kwh_high'),
                 'average_payback_years': results.get('average_payback_years'),
                 'median_payback_years': results.get('median_payback_years'),
+                # Cost-effectiveness metrics
+                'upgrade_recommended_count': results.get('upgrade_recommended_count'),
+                'upgrade_recommended_pct': results.get('upgrade_recommended_pct'),
+                'cost_effective_count': ce_summary.get('cost_effective_count'),
+                'cost_effective_pct': ce_summary.get('cost_effective_pct'),
+                'not_cost_effective_count': ce_summary.get('not_cost_effective_count'),
+                'not_cost_effective_pct': ce_summary.get('not_cost_effective_pct'),
+                'carbon_abatement_cost_mean': results.get('carbon_abatement_cost_mean'),
+                'carbon_abatement_cost_median': results.get('carbon_abatement_cost_median'),
+                # EPC band metrics
+                'band_c_or_better_before_pct': band_summary.get('band_c_or_better_before_pct'),
+                'band_c_or_better_after_pct': band_summary.get('band_c_or_better_after_pct'),
+                # HP readiness
                 'ashp_ready_properties': results.get('ashp_ready_properties'),
+                'ashp_ready_pct': results.get('ashp_ready_pct'),
                 'ashp_fabric_required_properties': results.get('ashp_fabric_required_properties'),
                 'ashp_not_ready_properties': results.get('ashp_not_ready_properties'),
                 'ashp_fabric_applied_properties': results.get('ashp_fabric_applied_properties'),
@@ -1509,9 +1580,62 @@ class ScenarioModeler:
                 f.write(f"\nSCENARIO: {scenario.upper()}\n")
                 f.write("-"*70 + "\n")
 
-                for key, value in results.items():
-                    if key != 'measures':
-                        f.write(f"{key}: {value}\n")
+                # Write basic metrics
+                basic_keys = [
+                    'total_properties', 'capital_cost_total', 'capital_cost_per_property',
+                    'annual_energy_reduction_kwh', 'annual_co2_reduction_kg', 'annual_bill_savings',
+                    'average_payback_years', 'median_payback_years'
+                ]
+                for key in basic_keys:
+                    if key in results:
+                        f.write(f"{key}: {results[key]}\n")
+
+                # Write cost-effectiveness section
+                f.write("\nCost-Effectiveness Analysis:\n")
+                ce_summary = results.get('cost_effectiveness_summary', {})
+                if ce_summary:
+                    f.write(f"  Cost-effective properties: {ce_summary.get('cost_effective_count', 0):,} "
+                            f"({ce_summary.get('cost_effective_pct', 0):.1f}%)\n")
+                    f.write(f"  Marginal properties (payback >{ce_summary.get('payback_threshold_years', 20)}yr): "
+                            f"{ce_summary.get('marginal_count', 0):,} ({ce_summary.get('marginal_pct', 0):.1f}%)\n")
+                    f.write(f"  Not cost-effective: {ce_summary.get('not_cost_effective_count', 0):,} "
+                            f"({ce_summary.get('not_cost_effective_pct', 0):.1f}%)\n")
+
+                if 'upgrade_recommended_count' in results:
+                    f.write(f"  Upgrade recommended: {results['upgrade_recommended_count']:,} "
+                            f"({results.get('upgrade_recommended_pct', 0):.1f}%)\n")
+
+                if 'carbon_abatement_cost_median' in results:
+                    f.write(f"  Carbon abatement cost (median): £{results['carbon_abatement_cost_median']:.0f}/tCO2\n")
+
+                # Write EPC band shift section
+                f.write("\nEPC Band Distribution:\n")
+                band_summary = results.get('epc_band_shift_summary', {})
+                if band_summary:
+                    before_c = band_summary.get('band_c_or_better_before_pct', 0)
+                    after_c = band_summary.get('band_c_or_better_after_pct', 0)
+                    f.write(f"  Band C or better: {before_c:.1f}% → {after_c:.1f}% (+{after_c - before_c:.1f}pp)\n")
+
+                epc_shifts = results.get('epc_band_shifts', {})
+                if epc_shifts:
+                    f.write("  Before intervention:\n")
+                    for band in BAND_ORDER:
+                        count = epc_shifts.get('before', {}).get(band, 0)
+                        if count > 0:
+                            f.write(f"    Band {band}: {count:,}\n")
+                    f.write("  After intervention:\n")
+                    for band in BAND_ORDER:
+                        count = epc_shifts.get('after', {}).get(band, 0)
+                        if count > 0:
+                            f.write(f"    Band {band}: {count:,}\n")
+
+                # Write HP readiness section
+                if 'ashp_ready_properties' in results:
+                    f.write("\nHeat Pump Readiness:\n")
+                    f.write(f"  HP-ready (current fabric): {results['ashp_ready_properties']:,} "
+                            f"({results.get('ashp_ready_pct', 0):.1f}%)\n")
+                    f.write(f"  Require fabric upgrades: {results.get('ashp_fabric_required_properties', 0):,}\n")
+                    f.write(f"  Not suitable for HP: {results.get('ashp_not_ready_properties', 0):,}\n")
 
                 f.write("\n")
 
@@ -1531,11 +1655,62 @@ class ScenarioModeler:
             combined_df.to_parquet(property_path, index=False)
             logger.info(f"Property-level scenario results saved to: {property_path}")
 
+        # Generate EPC band distribution CSV
+        epc_band_path = self._save_epc_band_distribution()
+
+        # Save subsidy sensitivity results if available
+        subsidy_path = self.save_subsidy_sensitivity_results()
+
         return {
             'report_path': output_path,
             'summary_path': summary_path,
             'property_path': property_path,
+            'epc_band_distribution_path': epc_band_path,
+            'subsidy_sensitivity_path': subsidy_path,
         }
+
+    def _save_epc_band_distribution(self) -> Optional[Path]:
+        """Save EPC band distribution summary as CSV."""
+        if not self.results:
+            return None
+
+        rows = []
+        for scenario, results in self.results.items():
+            epc_shifts = results.get('epc_band_shifts', {})
+            band_summary = results.get('epc_band_shift_summary', {})
+
+            before_bands = epc_shifts.get('before', {})
+            after_bands = epc_shifts.get('after', {})
+
+            for band in BAND_ORDER:
+                rows.append({
+                    'scenario': scenario,
+                    'band': band,
+                    'count_before': before_bands.get(band, 0),
+                    'count_after': after_bands.get(band, 0),
+                    'change': after_bands.get(band, 0) - before_bands.get(band, 0),
+                })
+
+            # Add summary row for Band C or better
+            rows.append({
+                'scenario': scenario,
+                'band': 'C_or_better',
+                'count_before': band_summary.get('band_c_or_better_before', 0),
+                'count_after': band_summary.get('band_c_or_better_after', 0),
+                'change': (
+                    band_summary.get('band_c_or_better_after', 0) -
+                    band_summary.get('band_c_or_better_before', 0)
+                ),
+            })
+
+        if not rows:
+            return None
+
+        epc_df = pd.DataFrame(rows)
+        epc_path = DATA_OUTPUTS_DIR / "epc_band_distribution.csv"
+        epc_df.to_csv(epc_path, index=False)
+        logger.info(f"EPC band distribution saved to: {epc_path}")
+        return epc_path
 
 
 def main():
