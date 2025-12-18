@@ -31,6 +31,7 @@ sys.path.append(str(Path(__file__).parent.parent.parent))
 from config.config import (
     load_config,
     get_cost_assumptions,
+    get_cost_rules,
     get_financial_params,
     get_heat_network_params,
     get_uncertainty_params,
@@ -43,6 +44,7 @@ from src.analysis.retrofit_packages import (
     RetrofitPackageAnalyzer
 )
 from src.analysis.methodological_adjustments import MethodologicalAdjustments
+from src.modeling.costing import CostCalculator
 
 
 def _select_baseline_energy_intensity(property_like: pd.Series) -> float:
@@ -198,6 +200,8 @@ class PathwayModeler:
         """Initialize the pathway modeler."""
         self.config = load_config()
         self.costs = get_cost_assumptions()
+        self.cost_rules = get_cost_rules()
+        self.cost_calculator = CostCalculator(self.costs, self.cost_rules)
         self.financial = get_financial_params()
         self.hn_params = get_heat_network_params()
         self.uncertainty = get_uncertainty_params()
@@ -240,7 +244,10 @@ class PathwayModeler:
         self.discount_rate = self.financial.get('discount_rate', 0.035)
 
         # Package analyzer for fabric costs
-        self.package_analyzer = RetrofitPackageAnalyzer(self.output_dir)
+        self.package_analyzer = RetrofitPackageAnalyzer(
+            self.output_dir,
+            cost_calculator=self.cost_calculator
+        )
         self.packages = get_package_definitions()
 
         # Pathway configuration (supports optional shared ground loop proxy)
@@ -261,6 +268,7 @@ class PathwayModeler:
 
         logger.info("Initialized PathwayModeler")
         logger.info(f"  HP SCOP: {self.hp_scop}")
+        logger.info(self.cost_calculator.summary_notes() or "Costing rules configured.")
         logger.info(f"  Shared ground loop COP: {self.ground_loop_scop} (enabled={include_ground_loop_proxy})")
         logger.info(f"  HN tariff: £{self.hn_tariff}/kWh")
         logger.info(f"  HN penetration: {self.hn_penetration * 100:.1f}%")

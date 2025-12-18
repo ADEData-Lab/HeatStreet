@@ -197,6 +197,95 @@ costs:
   # Electrical
   electrical_upgrade: 1500  # 60A -> 100A supply for HP
 
+# Costing rules (uniform basis per m² vs fixed, with caps and rationale)
+cost_rules:
+  loft_insulation_topup:
+    basis: per_m2
+    rate: 30
+    area_share_of_floor: 0.9
+    cap_per_home: 1800
+    floor_area_fallback_m2: 90
+    rationale: "Loft area ~90% of floor; cap mirrors £1.5-1.8k installer quotes."
+  wall_insulation_cavity:
+    basis: fixed
+    fixed_cost: 2500
+    rationale: "BEIS supply-chain mid-terrace cavity fill benchmark."
+  wall_insulation_internal:
+    basis: per_m2
+    rate: 100
+    area_multiplier: 1.5
+    cap_per_home: 15000
+    floor_area_fallback_m2: 90
+    rationale: "Internal wall area ≈1.5x floor; cap restrains large terrace geometries."
+  solid_wall_insulation_ewi:
+    basis: fixed
+    fixed_cost: 10000
+    rationale: "External wall insulation allowance from audited costs."
+  solid_wall_insulation_iwi:
+    basis: fixed
+    fixed_cost: 14000
+    rationale: "Internal wall insulation for conservation areas."
+  double_glazing:
+    basis: per_m2
+    rate: 400
+    area_share_of_floor: 0.2
+    cap_per_home: 7500
+    min_total: 3000
+    floor_area_fallback_m2: 90
+    rationale: "20% glazing fraction; cap keeps totals within £6-7.5k (BEIS/LENDL estimates)."
+  triple_glazing:
+    basis: per_m2
+    rate: 600
+    area_share_of_floor: 0.2
+    cap_per_home: 11000
+    min_total: 6000
+    floor_area_fallback_m2: 90
+    rationale: "Premium units priced higher; cap reflects niche installs."
+  floor_insulation:
+    basis: fixed
+    fixed_cost: 1500
+    rationale: "Suspended timber insulation installer averages."
+  draught_proofing:
+    basis: fixed
+    fixed_cost: 500
+    rationale: "Door/window perimeter draught stripping allowance."
+  ashp_installation:
+    basis: fixed
+    fixed_cost: 12000
+    rationale: "MCS mid-point for 7-10kW ASHP incl. labour."
+  hybrid_heat_pump:
+    basis: fixed
+    fixed_cost: 8000
+    rationale: "Hybrid packages typically lower hardware cost than full ASHP."
+  emitter_upgrades:
+    basis: per_unit
+    unit_rate: 300
+    unit_size_m2: 15
+    min_units: 4
+    cap_per_home: 2500
+    floor_area_fallback_m2: 90
+    rationale: "One radiator per 15 m² at £300 each; cap mirrors readiness averages."
+  radiator_upsizing:
+    basis: per_unit
+    unit_rate: 300
+    unit_size_m2: 15
+    min_units: 4
+    cap_per_home: 2500
+    floor_area_fallback_m2: 90
+    rationale: "Alias for emitter upgrades to keep scenario/pathway/readiness aligned."
+  hot_water_cylinder:
+    basis: fixed
+    fixed_cost: 1200
+    rationale: "200L cylinder + install."
+  district_heating_connection:
+    basis: fixed
+    fixed_cost: 5000
+    rationale: "Connection + HIU allowance."
+  electrical_upgrade:
+    basis: fixed
+    fixed_cost: 1500
+    rationale: "DNO fuse upgrade typical quoted range."
+
 # Measure Savings (kWh/year per typical property or % reduction)
 # See authoritative_sources.sections.energy_savings_parameters
 measure_savings:

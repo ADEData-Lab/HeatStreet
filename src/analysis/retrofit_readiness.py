@@ -14,6 +14,7 @@ from loguru import logger
 import sys
 sys.path.append(str(Path(__file__).parent.parent.parent))
 from config.config import load_config, DATA_OUTPUTS_DIR
+from src.modeling.costing import CostCalculator
 from src.analysis.methodological_adjustments import MethodologicalAdjustments
 
 
@@ -60,8 +61,11 @@ class RetrofitReadinessAnalyzer:
     def __init__(self):
         """Initialize retrofit readiness analyzer."""
         self.config = load_config()
+        self.cost_rules = self.config.get('cost_rules', {})
+        self.cost_calculator = CostCalculator(self.config.get('costs', {}), self.cost_rules)
         self.adjuster = MethodologicalAdjustments()
         logger.info("Initialized Retrofit Readiness Analyzer")
+        logger.info(self.cost_calculator.summary_notes() or "Costing rules configured.")
 
     def assess_heat_pump_readiness(self, df: pd.DataFrame) -> pd.DataFrame:
         """
@@ -416,45 +420,47 @@ class RetrofitReadinessAnalyzer:
 
     def _calculate_fabric_costs(self, df: pd.DataFrame) -> pd.Series:
         """Calculate cost of fabric improvements needed before heat pump."""
-        costs = pd.Series(0, index=df.index)
+        costs = pd.Series(0.0, index=df.index, dtype=float)
 
-        # Loft insulation
-        costs += df['needs_loft_topup'] * self.INTERVENTION_COSTS['loft_insulation_topup']
+        loft_mask = df['needs_loft_topup']
+        cavity_mask = df['wall_insulation_type'] == 'cavity_wall'
+        solid_mask = df['wall_insulation_type'] == 'solid_wall_ewi'
+        glazing_mask = df['needs_glazing_upgrade']
 
-        # Wall insulation
-        solid_wall_cost = self.INTERVENTION_COSTS['solid_wall_insulation_ewi']
-        cavity_wall_cost = self.INTERVENTION_COSTS['cavity_wall_insulation']
-
-        costs += (
-            (df['wall_insulation_type'] == 'solid_wall_ewi') * solid_wall_cost +
-            (df['wall_insulation_type'] == 'cavity_wall') * cavity_wall_cost
-        )
-
-        # Glazing
-        costs += df['needs_glazing_upgrade'] * self.INTERVENTION_COSTS['double_glazing']
+        costs += self._cost_series(df, 'loft_insulation_topup', loft_mask)
+        costs += self._cost_series(df, 'wall_insulation_cavity', cavity_mask)
+        costs += self._cost_series(df, 'solid_wall_insulation_ewi', solid_mask)
+        costs += self._cost_series(df, 'double_glazing', glazing_mask)
 
         return costs
 
     def _calculate_total_retrofit_cost(self, df: pd.DataFrame) -> pd.Series:
         """Calculate total cost including fabric + heat pump + ancillaries."""
-        total_cost = df['fabric_prerequisite_cost'].copy()
+        total_cost = df['fabric_prerequisite_cost'].astype(float).copy()
 
-        # Add radiator upsizing
-        total_cost += df['needs_radiator_upsizing'] * self.INTERVENTION_COSTS['radiator_upsizing']
+        total_cost += self._cost_series(df, 'emitter_upgrades', df['needs_radiator_upsizing'])
+        total_cost += self._cost_series(df, 'hot_water_cylinder')
 
-        # Add hot water cylinder (assume all combi boiler replacements need this)
-        total_cost += self.INTERVENTION_COSTS['hot_water_cylinder']
-
-        # Add heat pump
-        # Use hybrid for Tier 4, standard for others
-        hp_cost = np.where(
-            df['hp_readiness_tier'] == 4,
-            self.INTERVENTION_COSTS['hybrid_heat_pump'],
-            self.INTERVENTION_COSTS['heat_pump_installation']
+        hp_cost = df.apply(
+            lambda row: self.cost_calculator.measure_cost(
+                'hybrid_heat_pump' if row.get('hp_readiness_tier') == 4 else 'ashp_installation',
+                row
+            )[0],
+            axis=1
         )
         total_cost += hp_cost
 
         return total_cost
+
+    def _cost_series(self, df: pd.DataFrame, measure_name: str, mask: Optional[pd.Series] = None) -> pd.Series:
+        """Vectorised helper to apply costing rules with an optional mask."""
+        mask_to_use = mask if mask is not None else pd.Series(True, index=df.index)
+        return df.apply(
+            lambda row: self.cost_calculator.measure_cost(measure_name, row)[0]
+            if mask_to_use.loc[row.name]
+            else 0.0,
+            axis=1
+        )
 
     def _estimate_heat_pump_size(self, df: pd.DataFrame) -> pd.Series:
         """Estimate heat pump size needed (kW)."""

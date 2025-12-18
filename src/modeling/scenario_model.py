@@ -21,6 +21,7 @@ from config.config import (
     load_config,
     get_scenario_definitions,
     get_cost_assumptions,
+    get_cost_rules,
     get_analysis_horizon_years,
     get_measure_savings,
     DATA_PROCESSED_DIR,
@@ -29,6 +30,7 @@ from config.config import (
 from src.analysis.fabric_tipping_point import FabricTippingPointAnalyzer
 from src.analysis.methodological_adjustments import MethodologicalAdjustments
 from src.spatial.heat_network_analysis import HeatNetworkAnalyzer
+from src.modeling.costing import CostCalculator
 
 BAND_ORDER = ['A', 'B', 'C', 'D', 'E', 'F', 'G']
 BAND_THRESHOLD_MAP = {
@@ -229,6 +231,9 @@ class PropertyUpgrade:
     post_measure_bill_high: float = 0.0
     post_measure_co2_kg_low: float = 0.0
     post_measure_co2_kg_high: float = 0.0
+    costing_basis: str = ''
+    costing_cap_applied: bool = False
+    costing_notes: str = ''
 
 
 def _calculate_property_upgrade_worker(args):
@@ -241,6 +246,7 @@ def _calculate_property_upgrade_core(
     scenario_name: str,
     measures: List[str],
     costs: Dict[str, Any],
+    cost_rules: Dict[str, Any],
     config: Dict[str, Any],
     applied_fabric: bool,
     removed_hp: bool,
@@ -260,6 +266,7 @@ def _calculate_property_upgrade_core(
     hp_cfg = config.get('heat_pump', {})
     heating_fraction = float(hp_cfg.get('heating_demand_fraction', 0.8))
     design_flow_temps = hp_cfg.get('design_flow_temps', [])
+    cost_calculator = CostCalculator(costs, cost_rules)
 
     adjuster = getattr(_calculate_property_upgrade_core, "_adjuster", None)
     if adjuster is None:
@@ -311,69 +318,76 @@ def _calculate_property_upgrade_core(
     district_savings = 0.0
     flow_temp_reduction = 0.0
     uses_heat_pump = False
+    cost_notes: List[str] = []
+    cost_sources: List[str] = []
+    capped_costs = 0
+
+    def _apply_cost(measure_name: str, display_name: Optional[str] = None) -> None:
+        nonlocal capital_cost, capped_costs
+        cost, detail = cost_calculator.measure_cost(measure_name, property_dict)
+        capital_cost += cost
+        if detail.get('cap_applied'):
+            capped_costs += 1
+        cost_sources.append(detail.get('source', ''))
+        basis = detail.get('basis', 'fixed')
+        label = display_name or measure_name
+        suffix = " (cap)" if detail.get('cap_applied') else ""
+        cost_notes.append(f"{label}:{basis}{suffix}")
 
     # Calculate costs and impacts for each measure
     for measure in measures:
         if measure == 'loft_insulation_topup':
-            loft_area = floor_area * 0.9
-            capital_cost += loft_area * costs.get('loft_insulation_per_m2', 0)
+            _apply_cost('loft_insulation_topup', 'loft')
             fabric_savings += _measure_saving(measure, wall_type, baseline_kwh)
             flow_temp_reduction += _flow_temp_reduction(measure)
 
         elif measure == 'wall_insulation':
             if wall_type == 'Cavity':
-                capital_cost += costs.get('cavity_wall_insulation', 0)
+                _apply_cost('wall_insulation_cavity', 'cavity_wall')
             else:
-                wall_area_calc = floor_area * 1.5
-                capital_cost += wall_area_calc * costs.get('internal_wall_insulation_per_m2', 0)
+                _apply_cost('wall_insulation_internal', 'solid_wall')
             fabric_savings += _measure_saving(measure, wall_type, baseline_kwh)
             flow_temp_reduction += _flow_temp_reduction(measure)
 
         elif measure == 'double_glazing':
-            window_area = floor_area * 0.2
-            capital_cost += window_area * costs.get('double_glazing_per_m2', 0)
+            _apply_cost('double_glazing')
             fabric_savings += _measure_saving(measure, wall_type, baseline_kwh)
             flow_temp_reduction += _flow_temp_reduction(measure)
 
         elif measure == 'triple_glazing':
-            window_area = floor_area * 0.2
-            capital_cost += costs.get('triple_glazing_upgrade', window_area * costs.get('double_glazing_per_m2', 0))
+            _apply_cost('triple_glazing')
             fabric_savings += _measure_saving(measure, wall_type, baseline_kwh)
             flow_temp_reduction += _flow_temp_reduction(measure)
 
         elif measure == 'floor_insulation':
-            capital_cost += costs.get('floor_insulation', 0)
+            _apply_cost('floor_insulation')
             fabric_savings += _measure_saving(measure, wall_type, baseline_kwh)
             flow_temp_reduction += _flow_temp_reduction(measure)
 
         elif measure == 'draught_proofing':
-            capital_cost += costs.get('draught_proofing', 0)
+            _apply_cost('draught_proofing')
             fabric_savings += _measure_saving(measure, wall_type, baseline_kwh)
             flow_temp_reduction += _flow_temp_reduction(measure)
 
         elif measure == 'ashp_installation':
-            capital_cost += costs.get('ashp_installation', 0)
+            _apply_cost('ashp_installation')
             uses_heat_pump = True
 
         elif measure == 'emitter_upgrades':
-            num_radiators = int(floor_area / 15)
-            capital_cost += num_radiators * costs.get('emitter_upgrade_per_radiator', 0)
+            _apply_cost('emitter_upgrades')
             flow_temp_reduction += _flow_temp_reduction(measure)
 
         elif measure == 'district_heating_connection':
-            capital_cost += costs.get('district_heating_connection', 0)
+            _apply_cost('district_heating_connection')
             district_savings += _measure_saving(measure, wall_type, baseline_kwh)
 
         elif measure in ['fabric_improvements', 'modest_fabric_improvements']:
-            loft_area = floor_area * 0.9
-            capital_cost += loft_area * costs.get('loft_insulation_per_m2', 0)
+            _apply_cost('loft_insulation_topup', 'loft')
             if wall_type == 'Cavity':
-                capital_cost += costs.get('cavity_wall_insulation', 0)
+                _apply_cost('wall_insulation_cavity', 'cavity_wall')
             else:
-                wall_area_calc = floor_area * 1.5
-                capital_cost += wall_area_calc * costs.get('internal_wall_insulation_per_m2', 0)
-            window_area = floor_area * 0.2
-            capital_cost += window_area * costs.get('double_glazing_per_m2', 0)
+                _apply_cost('wall_insulation_internal', 'solid_wall')
+            _apply_cost('double_glazing')
             fabric_savings += baseline_kwh * 0.40
             flow_temp_reduction += sum(
                 _flow_temp_reduction(x) for x in ['loft_insulation_topup', 'wall_insulation', 'double_glazing']
@@ -526,6 +540,9 @@ def _calculate_property_upgrade_core(
         post_measure_bill_high=post_measure_bill_high if not pd.isna(post_measure_bill_high) else 0,
         post_measure_co2_kg_low=post_measure_co2_low if not pd.isna(post_measure_co2_low) else 0,
         post_measure_co2_kg_high=post_measure_co2_high if not pd.isna(post_measure_co2_high) else 0,
+        costing_basis=','.join(sorted({src for src in cost_sources if src})),
+        costing_cap_applied=capped_costs > 0,
+        costing_notes='; '.join(cost_notes),
     )
 
 
@@ -539,6 +556,8 @@ class ScenarioModeler:
         self.config = load_config()
         self.scenarios = get_scenario_definitions()
         self.costs = get_cost_assumptions()
+        self.cost_rules = get_cost_rules()
+        self.cost_calculator = CostCalculator(self.costs, self.cost_rules)
         self.measure_savings = get_measure_savings()
         self.energy_prices = self.config['energy_prices']
         self.carbon_factors = self.config['carbon_factors']
@@ -598,6 +617,7 @@ class ScenarioModeler:
         self.hn_analyzer = HeatNetworkAnalyzer()
 
         logger.info("Initialized Scenario Modeler")
+        logger.info(self.cost_calculator.summary_notes() or "Costing rules configured.")
         logger.info(f"Loaded {len(self.scenarios)} scenarios")
 
     def _ensure_adjusted_baseline(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -704,6 +724,7 @@ class ScenarioModeler:
                     scenario_name,
                     property_measures,
                     self.costs,
+                    self.cost_rules,
                     self.config,
                     applied_fabric,
                     removed_hp,
@@ -981,16 +1002,17 @@ class ScenarioModeler:
         return order.index(band_upper) <= order.index(minimum_upper)
 
     def _calculate_property_upgrade(
-        self,
-        property_data: pd.Series,
-        scenario_name: str,
-        measures: List[str]
-    ) -> PropertyUpgrade:
+            self,
+            property_data: pd.Series,
+            scenario_name: str,
+            measures: List[str]
+        ) -> PropertyUpgrade:
         return _calculate_property_upgrade_core(
             property_data.to_dict(),
             scenario_name,
             measures,
             self.costs,
+            self.cost_rules,
             self.config,
             False,
             False,
@@ -1000,10 +1022,8 @@ class ScenarioModeler:
 
     def _cost_loft_insulation(self, property_data: pd.Series) -> float:
         """Calculate cost of loft insulation top-up."""
-        floor_area = property_data.get('TOTAL_FLOOR_AREA', 100)
-        # Assume loft area is ~90% of floor area
-        loft_area = floor_area * 0.9
-        return loft_area * self.costs['loft_insulation_per_m2']
+        cost, _ = self.cost_calculator.measure_cost('loft_insulation_topup', property_data)
+        return cost
 
     def _get_absolute_energy(self, property_data: pd.Series) -> float:
         """
@@ -1022,15 +1042,13 @@ class ScenarioModeler:
     def _cost_wall_insulation(self, property_data: pd.Series) -> float:
         """Calculate cost of wall insulation."""
         wall_type = property_data.get('wall_type', 'Solid')
-        floor_area = property_data.get('TOTAL_FLOOR_AREA', 100)
 
         if wall_type == 'Cavity':
-            return self.costs['cavity_wall_insulation']
+            cost, _ = self.cost_calculator.measure_cost('wall_insulation_cavity', property_data)
         else:
-            # Internal wall insulation for solid walls
-            # Assume wall area = floor area * 1.5 (simplified)
-            wall_area = floor_area * 1.5
-            return wall_area * self.costs['internal_wall_insulation_per_m2']
+            cost, _ = self.cost_calculator.measure_cost('wall_insulation_internal', property_data)
+
+        return cost
 
     def _savings_wall_insulation(self, property_data: pd.Series) -> float:
         """Calculate energy savings from wall insulation."""
@@ -1048,10 +1066,8 @@ class ScenarioModeler:
 
     def _cost_glazing(self, property_data: pd.Series) -> float:
         """Calculate cost of window glazing upgrade."""
-        floor_area = property_data.get('TOTAL_FLOOR_AREA', 100)
-        # Assume window area = floor area * 0.2 (simplified)
-        window_area = floor_area * 0.2
-        return window_area * self.costs['double_glazing_per_m2']
+        cost, _ = self.cost_calculator.measure_cost('double_glazing', property_data)
+        return cost
 
     def _savings_glazing(self, property_data: pd.Series) -> float:
         """Calculate energy savings from window glazing."""
@@ -1061,7 +1077,8 @@ class ScenarioModeler:
 
     def _cost_triple_glazing(self, property_data: pd.Series) -> float:
         """Calculate cost of triple glazing upgrade."""
-        return self.costs.get('triple_glazing_upgrade', self.costs.get('double_glazing_upgrade', 0))
+        cost, _ = self.cost_calculator.measure_cost('triple_glazing', property_data)
+        return cost
 
     def _savings_triple_glazing(self, property_data: pd.Series) -> float:
         """Calculate energy savings from triple glazing."""
@@ -1071,7 +1088,8 @@ class ScenarioModeler:
 
     def _cost_floor_insulation(self, property_data: pd.Series) -> float:
         """Calculate cost of suspended timber floor insulation."""
-        return self.costs.get('floor_insulation', 0)
+        cost, _ = self.cost_calculator.measure_cost('floor_insulation', property_data)
+        return cost
 
     def _savings_floor_insulation(self, property_data: pd.Series) -> float:
         """Calculate savings from insulating suspended timber floors."""
@@ -1081,7 +1099,8 @@ class ScenarioModeler:
 
     def _cost_draught_proofing(self, property_data: pd.Series) -> float:
         """Calculate cost of draught proofing."""
-        return self.costs.get('draught_proofing', 0)
+        cost, _ = self.cost_calculator.measure_cost('draught_proofing', property_data)
+        return cost
 
     def _savings_draught_proofing(self, property_data: pd.Series) -> float:
         """Calculate savings from draught proofing."""
@@ -1103,10 +1122,8 @@ class ScenarioModeler:
 
     def _cost_emitter_upgrade(self, property_data: pd.Series) -> float:
         """Calculate cost of radiator emitter upgrades for heat pump."""
-        floor_area = property_data.get('TOTAL_FLOOR_AREA', 100)
-        # Assume 1 radiator per 15 m²
-        num_radiators = int(floor_area / 15)
-        return num_radiators * self.costs['emitter_upgrade_per_radiator']
+        cost, _ = self.cost_calculator.measure_cost('emitter_upgrades', property_data)
+        return cost
 
     def _savings_district_heating(self, property_data: pd.Series) -> float:
         """Calculate savings from district heating connection."""
@@ -1266,6 +1283,23 @@ class ScenarioModeler:
         if 'hybrid_pathway' in property_df.columns:
             results['hn_assigned_properties'] = int((property_df['hybrid_pathway'] == 'heat_network').sum())
             results['ashp_assigned_properties'] = int((property_df['hybrid_pathway'] == 'ashp').sum())
+
+        if 'costing_cap_applied' in property_df.columns:
+            results['costing_caps_applied_properties'] = int(property_df['costing_cap_applied'].sum())
+
+        if 'costing_basis' in property_df.columns:
+            bases = sorted(
+                b for b in property_df['costing_basis'].dropna().unique().tolist() if b
+            )
+            if bases:
+                results['costing_bases_used'] = bases
+
+        if results.get('costing_caps_applied_properties', 0) > 0:
+            logger.info(
+                f"  Cost caps applied for {results['costing_caps_applied_properties']:,} properties (per cost_rules)."
+            )
+        if results.get('costing_bases_used'):
+            logger.info(f"  Costing bases used: {', '.join(results['costing_bases_used'])}.")
 
         # Log payback summary
         if np.isfinite(avg_payback):
