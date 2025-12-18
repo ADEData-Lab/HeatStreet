@@ -246,6 +246,8 @@ class AdditionalReports:
             report_lines.append(f"Inconsistent built form:      {validation_report.get('inconsistent_built_form', 0):,}")
             report_lines.append(f"Missing critical fields:      {validation_report.get('missing_critical_fields', 0):,}")
             report_lines.append(f"Construction date mismatches: {validation_report.get('construction_date_mismatches', 0):,}")
+            report_lines.append(f"Negative energy values:       {validation_report.get('negative_energy_values', 0):,}")
+            report_lines.append(f"Negative CO₂ values:          {validation_report.get('negative_co2_values', 0):,}")
         report_lines.append("")
 
         # Field completeness
