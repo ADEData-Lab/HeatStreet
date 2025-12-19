@@ -46,7 +46,7 @@ export EPC_API_KEY="your_api_key_here"
 
 ### Quick Start
 
-Download all London EPC data for Edwardian terraced houses:
+Download EPC data for configured local authorities:
 
 ```python
 from src.acquisition.epc_api_downloader import EPCAPIDownloader
@@ -54,20 +54,20 @@ from src.acquisition.epc_api_downloader import EPCAPIDownloader
 # Initialize downloader (reads credentials from .env)
 downloader = EPCAPIDownloader()
 
-# Download all London boroughs (this will take a while!)
-df = downloader.download_all_london_boroughs(
-    property_types=['house'],
+# Download all configured local authorities (this will take a while!)
+df = downloader.download_all_local_authorities(
+    property_types=['house', 'flat'],
     from_year=2015
 )
 
-# Apply Edwardian filters
-df_filtered = downloader.apply_edwardian_filters(df)
+# Apply configured property filters
+df_filtered = downloader.apply_property_filters(df)
 
 # Save results
-downloader.save_data(df_filtered, "epc_london_edwardian.csv")
+downloader.save_data(df_filtered, "epc_england_wales_filtered.csv")
 ```
 
-### Download a Single Borough
+### Download a Single Local Authority
 
 ```python
 from src.acquisition.epc_api_downloader import EPCAPIDownloader
@@ -87,8 +87,8 @@ print(f"Downloaded {len(df):,} records for Camden")
 ### Limit Results for Testing
 
 ```python
-# Download only first 1000 records per borough
-df = downloader.download_all_london_boroughs(
+# Download only first 1000 records per local authority
+df = downloader.download_all_local_authorities(
     property_types=['house'],
     from_year=2015,
     max_results_per_borough=1000
@@ -105,64 +105,34 @@ python src/acquisition/epc_api_downloader.py
 ```
 
 This will:
-1. Download all London house EPCs from 2015 onwards
-2. Apply Edwardian terraced filters
+1. Download all configured local authority EPCs from 2015 onwards
+2. Apply configured property filters
 3. Save both raw and filtered data to `data/raw/`
 
-## Available London Boroughs
+## Configuring Local Authorities
 
-The downloader automatically handles all 33 London boroughs:
+To analyze England and Wales, populate `config/config.yaml` with local authority codes:
 
-- Barking and Dagenham
-- Barnet
-- Bexley
-- Brent
-- Bromley
-- Camden
-- City of London
-- Croydon
-- Ealing
-- Enfield
-- Greenwich
-- Hackney
-- Hammersmith and Fulham
-- Haringey
-- Harrow
-- Havering
-- Hillingdon
-- Hounslow
-- Islington
-- Kensington and Chelsea
-- Kingston upon Thames
-- Lambeth
-- Lewisham
-- Merton
-- Newham
-- Redbridge
-- Richmond upon Thames
-- Southwark
-- Sutton
-- Tower Hamlets
-- Waltham Forest
-- Wandsworth
-- Westminster
+```yaml
+geography:
+  local_authority_codes:
+    Camden: "E09000007"
+    Islington: "E09000019"
+    Cardiff: "W06000015"
+```
+
+If no codes are provided, the downloader defaults to London boroughs and logs a warning.
 
 ## Filters Applied
 
 ### Property Type
-- `house` - All house types (detached, semi-detached, terraced)
+- Configurable via `property_filters.property_types`
 
-### Construction Period (Edwardian)
-- Before 1900
-- 1900-1929
-- 1900-1920
-- 1920-1929
+### Construction Age Bands
+- Configurable via `property_filters.construction_age_bands`
 
-### Built Form (Terraced)
-- Mid-Terrace
-- End-Terrace
-- Enclosed Mid-Terrace
-- Enclosed End-Terrace
+### Built Form
+- Configurable via `property_filters.built_forms`
 
 ## Advanced Usage
 
@@ -170,17 +140,17 @@ The downloader automatically handles all 33 London boroughs:
 
 ```python
 # Download multiple property types
-df = downloader.download_all_london_boroughs(
-    property_types=['house', 'bungalow'],
+df = downloader.download_all_local_authorities(
+    property_types=['house', 'bungalow', 'flat'],
     from_year=2010
 )
 
-# Download specific boroughs only
-target_boroughs = ['Camden', 'Islington', 'Hackney']
+# Download specific local authorities only
+target_authorities = ['Camden', 'Islington', 'Hackney']
 
 all_data = []
-for borough in target_boroughs:
-    df = downloader.download_borough_data(borough)
+for authority in target_authorities:
+    df = downloader.download_borough_data(authority)
     all_data.append(df)
 
 combined = pd.concat(all_data, ignore_index=True)
@@ -210,10 +180,10 @@ df, next_search_after = downloader._make_api_request(query_params)
 ## Data Output
 
 Downloaded data is saved to:
-- `data/raw/epc_london_raw.csv` - All downloaded data
-- `data/raw/epc_london_raw.parquet` - Same data in Parquet format (faster)
-- `data/raw/epc_london_edwardian_filtered.csv` - Filtered for Edwardian terraced
-- `data/raw/epc_london_edwardian_filtered.parquet` - Filtered data in Parquet
+- `data/raw/epc_england_wales_raw.csv` - All downloaded data
+- `data/raw/epc_england_wales_raw.parquet` - Same data in Parquet format (faster)
+- `data/raw/epc_england_wales_filtered.csv` - Filtered based on config
+- `data/raw/epc_england_wales_filtered.parquet` - Filtered data in Parquet
 
 ## Troubleshooting
 
@@ -235,13 +205,13 @@ You've hit the API rate limit. The downloader will automatically wait and retry.
 
 ### Download is slow
 
-This is normal! Downloading all London EPCs can take several hours due to:
+This is normal! Downloading all England and Wales EPCs can take several hours due to:
 - Large number of records (~500k+)
 - API pagination (5000 records per page)
 - Network latency
 
 Tips:
-- Start with a single borough for testing
+- Start with a single local authority for testing
 - Use `max_results_per_borough` to limit results
 - Download runs in background - you can continue working
 
@@ -265,7 +235,7 @@ from src.acquisition.epc_api_downloader import EPCAPIDownloader
 
 # Download data via API
 downloader = EPCAPIDownloader()
-df = downloader.download_all_london_boroughs()
+df = downloader.download_all_local_authorities()
 
 # Continue with analysis
 from src.cleaning.data_validator import EPCDataValidator
@@ -301,8 +271,8 @@ df = downloader.download_borough_data('Camden', from_year=2015)
 print(f"Downloaded: {len(df):,} records")
 
 # Apply filters
-print("\nApplying Edwardian filters...")
-df_filtered = downloader.apply_edwardian_filters(df)
+print("\nApplying configured property filters...")
+df_filtered = downloader.apply_property_filters(df)
 print(f"After filtering: {len(df_filtered):,} records")
 
 # Check what we got
@@ -313,8 +283,8 @@ print("\nConstruction Age Bands:")
 print(df_filtered['CONSTRUCTION_AGE_BAND'].value_counts())
 
 # Save
-downloader.save_data(df_filtered, "camden_edwardian.csv")
-print("\nData saved to data/raw/camden_edwardian.csv")
+downloader.save_data(df_filtered, "camden_filtered.csv")
+print("\nData saved to data/raw/camden_filtered.csv")
 ```
 
 ## API Documentation

@@ -1,6 +1,6 @@
-# Manual GIS Data Installation
+# Manual GIS Data Installation (London-only)
 
-If the automatic download fails, follow these steps to manually install the London GIS data:
+If the automatic download fails, follow these steps to manually install the London GIS data used for optional London spatial analysis:
 
 ## Step 1: Download the ZIP File
 
