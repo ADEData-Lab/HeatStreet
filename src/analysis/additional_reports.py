@@ -414,22 +414,26 @@ class AdditionalReports:
 
         logger.info(f"Running subsidy sensitivity analysis for {len(subsidy_levels)} levels...")
 
+        scenario_lookup = {str(key).lower(): value for key, value in scenario_results.items()}
+        heat_pump_results = scenario_lookup.get('heat_pump', {})
+        fabric_results = scenario_lookup.get('fabric_only', {})
+
         results = []
 
         for subsidy in subsidy_levels:
             # Get base scenario capital costs
-            heat_pump_cost = scenario_results.get('HEAT_PUMP', {}).get('capital_cost_per_property', 20000)
-            fabric_cost = scenario_results.get('FABRIC_ONLY', {}).get('capital_cost_per_property', 12000)
+            heat_pump_cost = heat_pump_results.get('capital_cost_per_property', 20000)
+            fabric_cost = fabric_results.get('capital_cost_per_property', 12000)
 
             # Net cost after subsidy
             net_heat_pump_cost = max(0, heat_pump_cost - subsidy)
             net_fabric_cost = max(0, fabric_cost - subsidy)
 
             # Annual savings
-            heat_pump_savings = scenario_results.get('HEAT_PUMP', {}).get('annual_bill_savings', 0) / \
-                               scenario_results.get('HEAT_PUMP', {}).get('total_properties', 1)
-            fabric_savings = scenario_results.get('FABRIC_ONLY', {}).get('annual_bill_savings', 0) / \
-                           scenario_results.get('FABRIC_ONLY', {}).get('total_properties', 1)
+            heat_pump_savings = heat_pump_results.get('annual_bill_savings', 0) / \
+                               heat_pump_results.get('total_properties', 1)
+            fabric_savings = fabric_results.get('annual_bill_savings', 0) / \
+                           fabric_results.get('total_properties', 1)
 
             # Payback periods
             hp_payback = net_heat_pump_cost / heat_pump_savings if heat_pump_savings > 0 else 999
@@ -449,10 +453,10 @@ class AdditionalReports:
             fabric_public_cost = fabric_properties_upgraded * subsidy
 
             # Carbon abatement
-            hp_co2_reduction_per_property = scenario_results.get('HEAT_PUMP', {}).get('annual_co2_reduction_kg', 0) / \
-                                           scenario_results.get('HEAT_PUMP', {}).get('total_properties', 1)
-            fabric_co2_reduction_per_property = scenario_results.get('FABRIC_ONLY', {}).get('annual_co2_reduction_kg', 0) / \
-                                               scenario_results.get('FABRIC_ONLY', {}).get('total_properties', 1)
+            hp_co2_reduction_per_property = heat_pump_results.get('annual_co2_reduction_kg', 0) / \
+                                           heat_pump_results.get('total_properties', 1)
+            fabric_co2_reduction_per_property = fabric_results.get('annual_co2_reduction_kg', 0) / \
+                                               fabric_results.get('total_properties', 1)
 
             hp_total_co2_reduction = hp_properties_upgraded * hp_co2_reduction_per_property / 1000  # tonnes
             fabric_total_co2_reduction = fabric_properties_upgraded * fabric_co2_reduction_per_property / 1000  # tonnes
