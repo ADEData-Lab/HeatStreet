@@ -1,6 +1,6 @@
-# London GIS Data Integration
+# London GIS Data Integration (Optional, London-only)
 
-The Heat Street EPC Analysis can automatically download and use GIS data from London Datastore to enhance spatial analysis capabilities.
+The Heat Street EPC Analysis can optionally download and use GIS data from London Datastore to enhance spatial analysis capabilities for London-only runs.
 
 ## What's Included
 

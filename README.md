@@ -1,10 +1,10 @@
 # Heat Street EPC Analysis
 
-Large-scale Energy Performance Certificate (EPC) analysis for London's Edwardian terraced housing stock, with a focus on decarbonization pathways and heat network zone planning.
+Large-scale Energy Performance Certificate (EPC) analysis for domestic properties across England and Wales, with configurable geographic coverage and decarbonization pathway modeling.
 
 ## Project Overview
 
-This project analyzes approximately 500,000 EPC certificates for Edwardian and late Victorian terraced houses across London's 33 boroughs to:
+This project analyzes EPC certificates for domestic properties across England and Wales (or a configured subset of local authorities) to:
 
 - **Characterize** the current state of the housing stock (insulation, heating systems, energy efficiency)
 - **Model** different decarbonization pathways (fabric improvements, heat pumps, district heating)
@@ -17,7 +17,7 @@ This project analyzes approximately 500,000 EPC certificates for Edwardian and l
 ✅ **Quality Assurance**: Implements Hardy & Glew validation protocols (addresses 36-62% error rate in EPCs)
 ✅ **Archetype Analysis**: Detailed characterization of building fabric, heating systems, and energy performance
 ✅ **Scenario Modeling**: Cost-benefit analysis for multiple decarbonization pathways
-✅ **Spatial Analysis**: GIS-based heat network zone overlay and property classification
+✅ **Spatial Analysis**: GIS-based heat network zone overlay and property classification (London GIS optional)
 ✅ **Policy Analysis**: Subsidy sensitivity modeling and carbon abatement cost calculations
 ✅ **Visualization**: Charts, maps, and executive summary reports
 
@@ -231,8 +231,10 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 EPC data must be obtained from the UK Government's EPC Register:
 
 1. **Register** at [https://epc.opendatacommunities.org/](https://epc.opendatacommunities.org/)
-2. **Download** bulk data for London boroughs (see `data/raw/DOWNLOAD_INSTRUCTIONS.txt`)
+2. **Download** bulk data for England and Wales local authorities (see `data/raw/DOWNLOAD_INSTRUCTIONS.txt`)
 3. **Place** CSV files in `data/raw/` directory with naming pattern `epc_*.csv`
+
+If you're using the API downloader, populate `config/config.yaml` with `geography.local_authority_codes` to expand beyond the default London borough list.
 
 Alternatively, run:
 ```bash
@@ -242,13 +244,13 @@ This creates detailed download instructions.
 
 ### Supplementary Data
 
-**London Heat Map** (optional but recommended):
+**London Heat Map** (optional, London-only spatial analysis):
 - Heat network locations: Download from [London Datastore](https://data.london.gov.uk/)
 - Heat Network Zones: [GLA Heat Network Zones](https://www.london.gov.uk/programmes-strategies/environment-and-climate-change/energy/london-heat-map)
-- Place GeoJSON/Shapefile in `data/supplementary/`
+- Place GeoJSON/Shapefile in `data/supplementary/` to enable London heat network tiers
 
 **Boundary Files**:
-- London borough boundaries
+- Local authority boundaries (or London boroughs if using London GIS)
 - LSOA boundaries for aggregation
 
 ## Usage
@@ -268,7 +270,7 @@ run.bat         # or run.ps1 for PowerShell
 The interactive CLI will guide you through:
 
 1. **EPC Data Download**
-   - Choose borough(s) to analyze
+   - Choose local authority areas to analyze (or use all configured authorities)
    - Automatically downloads from EPC API
    - Validates and cleans data
 
@@ -285,7 +287,7 @@ The interactive CLI will guide you through:
    - Performs subsidy sensitivity analysis
 
 4. **Spatial Analysis** (if GDAL available)
-   - Auto-downloads London GIS data
+   - Auto-downloads London GIS data (London-only)
    - Classifies properties into heat network tiers
    - Calculates heat density (GWh/km²)
    - Generates interactive HTML maps
@@ -355,8 +357,8 @@ python src/spatial/heat_network_analysis.py
 
 Edit `config/config.yaml` to customize:
 
-- **Geographic scope**: London boroughs to include
-- **Property filters**: Construction period, property types
+- **Geographic scope**: Local authority codes to include
+- **Property filters**: Construction age bands, property types, built forms
 - **Quality thresholds**: Floor area ranges, required fields
 - **Scenario definitions**: Measures for each pathway
 - **Cost assumptions**: Installation costs, energy prices
@@ -364,12 +366,20 @@ Edit `config/config.yaml` to customize:
 
 Example:
 ```yaml
+geography:
+  local_authority_codes:
+    Camden: "E09000007"
+    Islington: "E09000019"
+    Cardiff: "W06000015"
+
 property_filters:
-  construction_period:
-    end_year: 1930
+  construction_age_bands:
+    - "England and Wales: 1900-1929"
   property_types:
-    - "Mid-terrace"
-    - "End-terrace"
+    - "house"
+  built_forms:
+    - "mid-terrace"
+    - "end-terrace"
 
 scenarios:
   heat_pump:
@@ -384,8 +394,8 @@ scenarios:
 
 ### Data Files
 
-- `data/processed/epc_london_validated.csv` - Cleaned EPC dataset
-- `data/processed/epc_london_with_tiers.geojson` - Properties with heat network tier classification
+- `data/processed/epc_england_wales_validated.csv` - Cleaned EPC dataset
+- `data/processed/epc_england_wales_with_tiers.geojson` - Properties with heat network tier classification (London only)
 - `data/outputs/pathway_suitability_by_tier.csv` - Recommended pathways by tier
 
 ### Analysis Reports
@@ -453,7 +463,7 @@ The project models five scenarios:
 - Hybrid heat-network targeting currently uses the existing `has_hn_access` flag or the configured heat-network penetration rate. It does **not** dynamically select properties from the spatial tier outputs; add geospatial filtering first if you want the hybrid run to follow map-derived tiers.
 - Fabric packages are shared across scenarios by design. If you want differentiated fabric measures (e.g., lighter fabric for heat networks vs deeper fabric for heat pumps), add explicit branching logic before the packages are applied.
 
-## Heat Network Tier Classification
+## Heat Network Tier Classification (London GIS optional)
 
 Properties are classified into five tiers:
 
@@ -569,7 +579,7 @@ pytest --cov=src tests/
 
 - Hardy, A., & Glew, D. (2019). An analysis of errors in the Energy Performance certificate database. *Energy Policy*, 129, 1168-1178.
 - UK EPC Register: https://epc.opendatacommunities.org/
-- London Heat Map: https://www.london.gov.uk/programmes-strategies/environment-and-climate-change/energy/london-heat-map
+- London Heat Map (optional spatial inputs): https://www.london.gov.uk/programmes-strategies/environment-and-climate-change/energy/london-heat-map
 - RdSAP Methodology: https://www.bre.co.uk/sap/
 
 ## License
@@ -585,7 +595,7 @@ For questions or issues:
 ## Acknowledgments
 
 - UK Government EPC Register for open data access
-- Greater London Authority for London Heat Map data
+- Greater London Authority for optional London Heat Map data
 - Hardy & Glew for EPC quality assurance methodology
 - Case street residents (Shakespeare Crescent) for local calibration data
 
