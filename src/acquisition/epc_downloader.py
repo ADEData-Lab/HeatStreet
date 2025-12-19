@@ -2,7 +2,7 @@
 EPC Data Acquisition Module
 
 Downloads and extracts EPC data from the official UK EPC Register.
-Handles data for London boroughs with filters for Edwardian terraced housing.
+Handles data for configured local authorities with optional property filters.
 """
 
 import os
@@ -21,7 +21,7 @@ sys.path.append(str(Path(__file__).parent.parent.parent))
 from config.config import (
     load_config,
     DATA_RAW_DIR,
-    get_london_boroughs,
+    get_local_authorities,
     get_property_filters
 )
 
@@ -45,13 +45,16 @@ class EPCDownloader:
         """
         self.api_key = api_key
         self.config = load_config()
-        self.boroughs = get_london_boroughs()
+        self.local_authorities = get_local_authorities()
         self.property_filters = get_property_filters()
 
         # Ensure output directory exists
         DATA_RAW_DIR.mkdir(parents=True, exist_ok=True)
 
-        logger.info(f"Initialized EPC Downloader for {len(self.boroughs)} London boroughs")
+        if self.local_authorities:
+            logger.info(f"Initialized EPC Downloader for {len(self.local_authorities)} local authorities")
+        else:
+            logger.info("Initialized EPC Downloader for England and Wales (all local authorities)")
 
     def download_bulk_data(self, output_dir: Optional[Path] = None) -> Path:
         """
@@ -76,7 +79,7 @@ class EPCDownloader:
             "You may need to:\n"
             "1. Register at https://epc.opendatacommunities.org/\n"
             "2. Request API credentials\n"
-            "3. Download bulk data files for each London local authority\n"
+            "3. Download bulk data files for England and Wales local authorities\n"
             "4. Place CSV files in data/raw/ directory"
         )
 
@@ -87,11 +90,15 @@ class EPCDownloader:
             f.write("=" * 50 + "\n\n")
             f.write("1. Visit: https://epc.opendatacommunities.org/\n")
             f.write("2. Navigate to 'Downloads' or 'API' section\n")
-            f.write("3. Download data for the following London boroughs:\n\n")
-            for borough in self.boroughs:
-                f.write(f"   - {borough}\n")
-            f.write("\n4. Save CSV files to: data/raw/\n")
-            f.write("5. Name files as: epc_{borough_name}.csv\n\n")
+            if self.local_authorities:
+                f.write("3. Download data for the following local authorities:\n\n")
+                for authority in self.local_authorities:
+                    f.write(f"   - {authority}\n")
+                f.write("\n4. Save CSV files to: data/raw/\n")
+            else:
+                f.write("3. Download data for all England and Wales local authorities.\n")
+                f.write("4. Save CSV files to: data/raw/\n")
+            f.write("5. Name files as: epc_{local_authority_name}.csv\n\n")
             f.write("Alternative: Use the bulk download API if you have credentials\n")
 
         logger.info(f"Download instructions saved to: {download_instructions}")
@@ -139,7 +146,7 @@ class EPCDownloader:
 
     def apply_initial_filters(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Apply initial filters for Edwardian terraced housing.
+        Apply initial filters based on configured property filters.
 
         Args:
             df: Raw EPC DataFrame
@@ -150,37 +157,38 @@ class EPCDownloader:
         logger.info("Applying initial filters...")
         initial_count = len(df)
 
-        # Filter by construction period (pre-1930)
-        if 'CONSTRUCTION_AGE_BAND' in df.columns:
-            pre_1930_bands = [
-                'before 1900',
-                'England and Wales: before 1900',
-                '1900-1929',
-                'England and Wales: 1900-1929',
-                '1900-1920',
-                '1920-1929'
-            ]
-            df = df[df['CONSTRUCTION_AGE_BAND'].isin(pre_1930_bands)]
-            logger.info(f"After construction period filter: {len(df):,} records ({len(df)/initial_count*100:.1f}%)")
+        construction_age_bands = self.property_filters.get('construction_age_bands') or []
+        if construction_age_bands and 'CONSTRUCTION_AGE_BAND' in df.columns:
+            df = df[df['CONSTRUCTION_AGE_BAND'].isin(construction_age_bands)]
+            logger.info(
+                "After construction age band filter: "
+                f"{len(df):,} records ({len(df)/initial_count*100:.1f}%)"
+            )
 
-        # Filter by property type (terraced)
-        if 'PROPERTY_TYPE' in df.columns:
-            df = df[df['PROPERTY_TYPE'].str.contains('Terrace', case=False, na=False)]
+        property_types = self.property_filters.get('property_types') or []
+        if property_types and 'PROPERTY_TYPE' in df.columns:
+            property_types_lower = {ptype.lower() for ptype in property_types}
+            df = df[df['PROPERTY_TYPE'].str.lower().isin(property_types_lower)]
             logger.info(f"After property type filter: {len(df):,} records")
 
-        # Filter by built form (exclude conversions where identifiable)
-        if 'BUILT_FORM' in df.columns:
-            # Keep mid-terrace and end-terrace, exclude if marked as flat
-            df = df[~df['BUILT_FORM'].str.contains('Flat', case=False, na=False)]
+        built_forms = self.property_filters.get('built_forms') or []
+        if built_forms and 'BUILT_FORM' in df.columns:
+            built_forms_lower = {form.lower() for form in built_forms}
+            df = df[df['BUILT_FORM'].str.lower().isin(built_forms_lower)]
             logger.info(f"After built form filter: {len(df):,} records")
+
+        if self.property_filters.get('exclude_conversions') and 'BUILT_FORM' in df.columns:
+            df = df[~df['BUILT_FORM'].str.contains('Flat', case=False, na=False)]
+            logger.info(f"After conversion exclusion filter: {len(df):,} records")
 
         # Filter by certificate recency (last 10 years)
         if 'LODGEMENT_DATE' in df.columns:
-            recency_years = self.property_filters.get('certificate_recency_years', 10)
-            cutoff_date = datetime.now() - timedelta(days=recency_years*365)
-            df['LODGEMENT_DATE'] = pd.to_datetime(df['LODGEMENT_DATE'], errors='coerce')
-            df = df[df['LODGEMENT_DATE'] >= cutoff_date]
-            logger.info(f"After recency filter: {len(df):,} records")
+            recency_years = self.property_filters.get('certificate_recency_years')
+            if recency_years:
+                cutoff_date = datetime.now() - timedelta(days=recency_years * 365)
+                df['LODGEMENT_DATE'] = pd.to_datetime(df['LODGEMENT_DATE'], errors='coerce')
+                df = df[df['LODGEMENT_DATE'] >= cutoff_date]
+                logger.info(f"After recency filter: {len(df):,} records")
 
         logger.info(f"Filtering complete: {len(df):,} records retained ({len(df)/initial_count*100:.1f}%)")
 
@@ -216,7 +224,7 @@ class EPCDownloader:
 
         return case_df
 
-    def save_processed_data(self, df: pd.DataFrame, filename: str = "epc_london_filtered.csv"):
+    def save_processed_data(self, df: pd.DataFrame, filename: str = "epc_england_wales_filtered.csv"):
         """
         Save processed EPC data.
 
