@@ -63,7 +63,7 @@ class AnalysisLogger:
             'analysis_start': self.start_time.isoformat(),
             'total_properties': 0,
             'data_source': 'EPC API',
-            'analysis_type': 'Edwardian Terraced Housing - Heat Street Analysis'
+            'analysis_type': 'England and Wales Domestic EPC Analysis'
         }
 
     def start_phase(self, phase_name: str, description: str = ""):

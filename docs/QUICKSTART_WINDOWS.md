@@ -104,7 +104,7 @@ This creates a file: `data\raw\DOWNLOAD_INSTRUCTIONS.txt`
 
 1. **Visit**: https://epc.opendatacommunities.org/
 2. **Register** for an account (free)
-3. **Download** bulk EPC data for London boroughs
+3. **Download** bulk EPC data for England and Wales local authorities
 4. **Save** CSV files to: `data\raw\`
 5. **Name** files as: `epc_*.csv` (e.g., `epc_camden.csv`)
 

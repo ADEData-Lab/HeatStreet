@@ -16,59 +16,23 @@
 
 # Project Settings
 project:
-  name: "Heat Street EPC London Analysis"
+  name: "Heat Street EPC England and Wales Analysis"
   version: "1.0.0"
   author: "Heat Street Project Team"
 
 # Geographic Scope
 geography:
-  region: "London"
-  boroughs:
-    - "Barking and Dagenham"
-    - "Barnet"
-    - "Bexley"
-    - "Brent"
-    - "Bromley"
-    - "Camden"
-    - "City of London"
-    - "Croydon"
-    - "Ealing"
-    - "Enfield"
-    - "Greenwich"
-    - "Hackney"
-    - "Hammersmith and Fulham"
-    - "Haringey"
-    - "Harrow"
-    - "Havering"
-    - "Hillingdon"
-    - "Hounslow"
-    - "Islington"
-    - "Kensington and Chelsea"
-    - "Kingston upon Thames"
-    - "Lambeth"
-    - "Lewisham"
-    - "Merton"
-    - "Newham"
-    - "Redbridge"
-    - "Richmond upon Thames"
-    - "Southwark"
-    - "Sutton"
-    - "Tower Hamlets"
-    - "Waltham Forest"
-    - "Wandsworth"
-    - "Westminster"
+  region: "England and Wales"
+  local_authorities: []
+  local_authority_codes: {}
 
 # Property Filters
 property_filters:
-  construction_period:
-    start_year: null  # Any pre-1930
-    end_year: 1930
-  property_types:
-    - "Mid-terrace"
-    - "End-terrace"
-    - "Terraced"
-  exclude_conversions: true
-  certificate_recency_years: 10
+  construction_age_bands: []
+  property_types: []
+  built_forms: []
+  exclude_conversions: false
+  certificate_recency_years: null
 
 # Data Quality Thresholds
 # See authoritative_sources.sections.epc_validation_thresholds

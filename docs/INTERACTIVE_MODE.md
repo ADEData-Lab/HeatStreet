@@ -42,22 +42,22 @@ All in one seamless workflow!
 You'll be asked what to download:
 
 **Quick Test** (2-5 minutes)
-- Single borough
+- Single local authority
 - Limited to 1000 records
 - Perfect for testing the pipeline
 
 **Medium Dataset** (30-60 minutes)
-- 5 boroughs (Camden, Islington, Hackney, Westminster, Tower Hamlets)
+- 5 local authorities (Camden, Islington, Hackney, Westminster, Tower Hamlets)
 - Last 5 years of data
 - Good balance of coverage and speed
 
 **Full Dataset** (2-4 hours)
-- All 33 London boroughs
+- All configured local authorities
 - Complete EPC history from 2015
 - Production-ready dataset
 
 **Custom Selection**
-- Choose specific boroughs
+- Choose specific local authorities
 - Select date range
 - Set record limits
 - Full control over scope
@@ -90,12 +90,12 @@ Real-time progress indicators:
 ### Files Created
 
 **data/raw/**
-- `epc_london_raw.csv` - All downloaded data
-- `epc_london_filtered.csv` - Filtered for Edwardian terraced
+- `epc_england_wales_raw.csv` - All downloaded data
+- `epc_england_wales_filtered.csv` - Filtered based on config
 - `.parquet` versions for faster loading
 
 **data/processed/**
-- `epc_london_validated.csv` - Cleaned and validated data
+- `epc_england_wales_validated.csv` - Cleaned and validated data
 - `validation_report.txt` - Quality assurance summary
 
 **data/outputs/**
@@ -110,7 +110,7 @@ Real-time progress indicators:
 ========================================
 Heat Street EPC Analysis
 Complete Interactive Pipeline
-London Edwardian Terraced Housing Analysis
+England and Wales Domestic EPC Analysis
 ========================================
 
 ✓ API credentials configured
@@ -118,18 +118,18 @@ London Edwardian Terraced Housing Analysis
 Data Download Options:
 
 ? What would you like to download?
-  ❯ Quick test (single borough, limited data)
-    Medium dataset (5 boroughs, last 5 years)
-    Full dataset (all 33 London boroughs)
+  ❯ Quick test (single local authority, limited data)
+    Medium dataset (5 local authorities, last 5 years)
+    Full dataset (all configured local authorities)
     Custom selection
 
-? Select a borough for testing: Camden
+? Select a local authority for testing: Camden
 
 Analysis Configuration
 
 Mode: single
 From year: 2020
-Boroughs: 1
+Local authorities: 1
 
 ? Start analysis? Yes
 
@@ -140,8 +140,8 @@ Phase 1: Data Download
 Downloading Camden data...
 Camden: 100%|██████████| 5234/5234 [00:45<00:00, 115.42 records/s]
 ✓ Downloaded 5,234 records
-Applying Edwardian terraced housing filters...
-✓ Filtered to 1,247 Edwardian terraced houses
+Applying configured property filters...
+✓ Filtered to 1,247 properties
 Saving data...
 ✓ Data saved to data/raw/
 
@@ -220,7 +220,7 @@ Generating reports and visualizations...
 ### Smart Defaults
 
 - Sensible download presets
-- Optimal filtering for Edwardian terraced
+- Configurable filtering based on `config.yaml`
 - Automatic file naming
 - Both CSV and Parquet formats
 
@@ -241,7 +241,7 @@ Generating reports and visualizations...
 ### Interactive Choices
 
 - Multiple download scopes
-- Borough selection
+- Local authority selection (prompt labels may still say "borough")
 - Date range selection
 - Record limits
 
@@ -270,7 +270,7 @@ from run_analysis import (
 # Define custom scope
 scope = {
     'mode': 'multiple',
-    'boroughs': ['Camden', 'Islington'],
+    'boroughs': ['Camden', 'Islington'],  # local authority names
     'from_year': 2020,
     'max_per_borough': 5000
 }
@@ -306,7 +306,7 @@ The script will prompt for credentials. They're saved to `.env` for future runs.
 
 Check:
 - API credentials are correct
-- Borough name is spelled correctly
+- Local authority name is spelled correctly
 - Network connection is working
 - API service is online
 
@@ -314,7 +314,7 @@ Check:
 
 The downloaded data failed validation. Check:
 - Date range isn't too restrictive
-- Borough has EPC data available
+- Local authority has EPC data available
 - Filters aren't too strict
 
 ### Progress bar freezes
