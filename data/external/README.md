@@ -1,14 +1,13 @@
-# Manual GIS Data Installation (London-only)
+# Manual GIS Data Installation (DESNZ Heat Network Planning Data)
 
-If the automatic download fails, follow these steps to manually install the London GIS data used for optional London spatial analysis:
+If the automatic download fails, follow these steps to manually install the DESNZ heat network planning data used for spatial analysis:
 
 ## Step 1: Download the ZIP File
 
-**Download URL**: https://data.london.gov.uk/download/2ogw5/1c75726b-0b5e-4f2c-9fd6-25fc83b32454/GIS_All_Data.zip
+**Download URL**: See the DESNZ heat network planning database download portal
 
-- File name: `GIS_All_Data.zip`
-- Size: ~2.2 MB
-- Use your browser or download manager to save this file
+- Download the latest package (format may vary: ZIP, GeoPackage, or GeoJSON)
+- Use your browser or download manager to save the file
 
 ## Step 2: Extract to This Directory
 
@@ -17,34 +16,23 @@ If the automatic download fails, follow these steps to manually install the Lond
 ```
 data/external/
 ├── .gitkeep
-├── GIS_All_Data.zip           ← The downloaded ZIP file (optional to keep)
-└── GIS_All_Data/              ← EXTRACTED FOLDER (required!)
-    ├── Heat Loads/
-    │   ├── Heat_Loads_20120411Barking_and_Dagenham.shp
-    │   ├── Heat_Loads_20120411Islington.shp
-    │   └── ... (33 boroughs total)
-    ├── Heat Supply/
-    │   ├── Heat_Supply_20120411Islington.shp
-    │   └── ... (33 boroughs total)
-    ├── Networks/
-    │   ├── 2.3.1_Existing_DH_Networks.shp
-    │   ├── 2.3.2.1_Potential_DH_Transmission_Line.shp
-    │   ├── 2.3.2.2._Potential_DH_Networks.shp
-    │   └── 2.3.2.3_Potential_Networks_2005_Study.shp
-    └── LDD 2010/
-        └── ... (development database)
+├── desnz_heat_network_planning.zip      ← The downloaded ZIP file (optional to keep)
+└── desnz_heat_network_planning/          ← EXTRACTED FOLDER (required!)
+    ├── networks/                         ← Existing heat network layers
+    │   └── networks.gpkg
+    └── zones/                            ← Heat network zone layers
+        └── zones.gpkg
 ```
 
 ## Step 3: Verify Installation
 
 The correct path should be:
-- **Windows**: `data\external\GIS_All_Data\Heat Loads\`
-- **Linux/Mac**: `data/external/GIS_All_Data/Heat Loads/`
+- **Windows**: `data\external\desnz_heat_network_planning\networks\`
+- **Linux/Mac**: `data/external/desnz_heat_network_planning/networks/`
 
-**You should see 3 main folders inside `GIS_All_Data/`:**
-1. `Heat Loads/` - Contains 33 shapefiles (one per London borough)
-2. `Heat Supply/` - Contains 33 shapefiles
-3. `Networks/` - Contains 4 network shapefiles
+**You should see folders inside `desnz_heat_network_planning/`:**
+1. `networks/` - Existing heat network layers
+2. `zones/` - Heat network zone layers
 
 ## Step 4: Run the Analysis
 
@@ -58,7 +46,7 @@ run-conda.bat
 .\run-conda.ps1
 ```
 
-The spatial analysis will automatically detect and use the GIS data!
+The spatial analysis will automatically detect and use the DESNZ data!
 
 ## Troubleshooting
 
@@ -66,17 +54,16 @@ The spatial analysis will automatically detect and use the GIS data!
 
 **Solution**: Check that you have this exact folder structure:
 ```
-data/external/GIS_All_Data/Heat Loads/
-data/external/GIS_All_Data/Heat Supply/
-data/external/GIS_All_Data/Networks/
+data/external/desnz_heat_network_planning/networks/
+data/external/desnz_heat_network_planning/zones/
 ```
 
-**Common mistake**: Extracting creates `data/external/GIS_All_Data/GIS_All_Data/` (double nested)
-- If this happens, move the inner `GIS_All_Data/` folder up one level
+**Common mistake**: Extracting creates `data/external/desnz_heat_network_planning/desnz_heat_network_planning/` (double nested)
+- If this happens, move the inner `desnz_heat_network_planning/` folder up one level
 
 **Still not working?**:
-- Verify you can see `.shp` files inside the `Heat Loads/` folder
-- Each shapefile comes with multiple files (.shp, .shx, .dbf, .prj) - this is normal
+- Verify you can see GIS layers inside the `networks/` or `zones/` folders
+- GeoPackage (`.gpkg`), GeoJSON (`.geojson`), or Shapefile (`.shp`) are supported
 - Make sure you extracted the entire folder, not just individual files
 
 ## Alternative: Download via Python
@@ -88,7 +75,7 @@ If you have the environment set up, you can also download via Python:
 conda activate heatstreet
 
 # Run the downloader
-python -c "from src.acquisition.london_gis_downloader import LondonGISDownloader; LondonGISDownloader().download_and_prepare()"
+python -c "from src.acquisition.desnz_heat_network_downloader import DESNZHeatNetworkDownloader; DESNZHeatNetworkDownloader().download_and_prepare()"
 ```
 
 ---

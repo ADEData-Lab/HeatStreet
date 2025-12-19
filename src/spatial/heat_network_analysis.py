@@ -25,7 +25,7 @@ from config.config import (
     DATA_SUPPLEMENTARY_DIR,
     DATA_OUTPUTS_DIR
 )
-from src.acquisition.london_gis_downloader import LondonGISDownloader
+from src.acquisition.desnz_heat_network_downloader import DESNZHeatNetworkDownloader
 from src.spatial.postcode_geocoder import PostcodeGeocoder
 
 
@@ -56,7 +56,7 @@ class HeatNetworkAnalyzer:
                 "config['eligibility']['heat_network_tiers']."
             )
         self.readiness_config = self.config.get('heat_network', {}).get('readiness', {})
-        self.gis_downloader = LondonGISDownloader()
+        self.gis_downloader = DESNZHeatNetworkDownloader()
 
         # Initialize postcode geocoder with caching
         cache_file = DATA_PROCESSED_DIR / "geocoding_cache.csv"
@@ -64,9 +64,9 @@ class HeatNetworkAnalyzer:
 
         logger.info("Initialized Heat Network Analyzer")
 
-    def download_london_gis_data(self, force_redownload: bool = False) -> bool:
+    def download_desnz_heat_network_data(self, force_redownload: bool = False) -> bool:
         """
-        Download London GIS data from London Datastore.
+        Download DESNZ heat network planning data.
 
         Args:
             force_redownload: If True, download even if data already exists
@@ -76,17 +76,17 @@ class HeatNetworkAnalyzer:
         """
         return self.gis_downloader.download_and_prepare(force_redownload=force_redownload)
 
-    def load_london_heat_map_data(
+    def load_desnz_heat_network_data(
         self,
         heat_networks_file: Optional[Path] = None,
         heat_zones_file: Optional[Path] = None,
         auto_download: bool = True
     ) -> Tuple[Optional[gpd.GeoDataFrame], Optional[gpd.GeoDataFrame]]:
         """
-        Load London Heat Map data for heat networks and zones.
+        Load DESNZ heat network planning data for heat networks and zones.
 
         If files are not specified, automatically attempts to use downloaded
-        London Datastore GIS data.
+        DESNZ heat network planning data.
 
         Args:
             heat_networks_file: Path to existing heat networks shapefile/geojson
@@ -96,7 +96,7 @@ class HeatNetworkAnalyzer:
         Returns:
             Tuple of (heat networks GeoDataFrame, heat zones GeoDataFrame)
         """
-        logger.info("Loading London Heat Map data...")
+        logger.info("Loading DESNZ heat network planning data...")
 
         heat_networks = None
         heat_zones = None
@@ -107,8 +107,8 @@ class HeatNetworkAnalyzer:
             summary = self.gis_downloader.get_data_summary()
 
             if not summary['available'] and auto_download:
-                logger.info("GIS data not found. Downloading from London Datastore...")
-                if self.download_london_gis_data():
+                logger.info("GIS data not found. Downloading from DESNZ source...")
+                if self.download_desnz_heat_network_data():
                     summary = self.gis_downloader.get_data_summary()
 
             if summary['available']:
@@ -118,10 +118,10 @@ class HeatNetworkAnalyzer:
                     heat_networks_file = network_files['existing']
                     logger.info(f"Using downloaded heat networks: {heat_networks_file}")
 
-                # Also load potential networks as zones
-                if 'potential_networks' in network_files:
-                    heat_zones_file = network_files['potential_networks']
-                    logger.info(f"Using potential networks as zones: {heat_zones_file}")
+                # Also load zones if available
+                if 'zones' in network_files:
+                    heat_zones_file = network_files['zones']
+                    logger.info(f"Using heat network zones: {heat_zones_file}")
 
         # Try to load heat networks
         if heat_networks_file and heat_networks_file.exists():
@@ -132,7 +132,7 @@ class HeatNetworkAnalyzer:
                 logger.error(f"Error loading heat networks: {e}")
         else:
             logger.warning("Heat networks file not found.")
-            logger.info("You can download from: https://data.london.gov.uk/dataset/london-heat-map")
+            logger.info("Provide DESNZ heat network planning data in data/external/desnz_heat_network_planning.")
 
         # Try to load heat network zones
         if heat_zones_file and heat_zones_file.exists():
@@ -360,7 +360,7 @@ class HeatNetworkAnalyzer:
             fallback['in_heat_zone'] = False
             return fallback
 
-        heat_networks, heat_zones = self.load_london_heat_map_data(auto_download=auto_download_gis)
+        heat_networks, heat_zones = self.load_desnz_heat_network_data(auto_download=auto_download_gis)
 
         if heat_networks is None and heat_zones is None:
             logger.warning("Heat network readiness skipped: GIS network/zone layers unavailable.")
@@ -940,8 +940,8 @@ class HeatNetworkAnalyzer:
             logger.info(f"✓ Successfully geocoded {len(properties_gdf):,} properties")
 
             # Step 2: Load GIS data
-            logger.info("\nStep 2: Loading London heat network GIS data...")
-            heat_networks, heat_zones = self.load_london_heat_map_data(
+            logger.info("\nStep 2: Loading DESNZ heat network planning GIS data...")
+            heat_networks, heat_zones = self.load_desnz_heat_network_data(
                 auto_download=auto_download_gis
             )
 
@@ -1026,7 +1026,7 @@ def main():
     logger.info("Starting spatial analysis...")
 
     # Load validated data
-    input_file = DATA_PROCESSED_DIR / "epc_london_validated.csv"
+    input_file = DATA_PROCESSED_DIR / "epc_england_wales_validated.csv"
 
     if not input_file.exists():
         logger.error(f"Input file not found: {input_file}")
@@ -1043,10 +1043,10 @@ def main():
 
     if len(properties_gdf) > 0:
         # Load heat network data (if available)
-        heat_networks_file = DATA_SUPPLEMENTARY_DIR / "london_heat_networks.geojson"
-        heat_zones_file = DATA_SUPPLEMENTARY_DIR / "london_heat_zones.geojson"
+        heat_networks_file = DATA_SUPPLEMENTARY_DIR / "desnz_heat_networks.geojson"
+        heat_zones_file = DATA_SUPPLEMENTARY_DIR / "desnz_heat_network_zones.geojson"
 
-        heat_networks, heat_zones = analyzer.load_london_heat_map_data(
+        heat_networks, heat_zones = analyzer.load_desnz_heat_network_data(
             heat_networks_file,
             heat_zones_file
         )
@@ -1062,7 +1062,7 @@ def main():
         pathway_summary = analyzer.analyze_pathway_suitability(properties_classified)
 
         # Save results
-        output_file = DATA_PROCESSED_DIR / "epc_london_with_tiers.geojson"
+        output_file = DATA_PROCESSED_DIR / "epc_england_wales_with_tiers.geojson"
         properties_classified.to_file(output_file, driver='GeoJSON')
         logger.info(f"Classified properties saved to: {output_file}")
 

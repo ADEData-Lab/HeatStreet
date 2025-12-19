@@ -17,7 +17,7 @@ This project analyzes EPC certificates for domestic properties across England an
 ✅ **Quality Assurance**: Implements Hardy & Glew validation protocols (addresses 36-62% error rate in EPCs)
 ✅ **Archetype Analysis**: Detailed characterization of building fabric, heating systems, and energy performance
 ✅ **Scenario Modeling**: Cost-benefit analysis for multiple decarbonization pathways
-✅ **Spatial Analysis**: GIS-based heat network zone overlay and property classification (London GIS optional)
+✅ **Spatial Analysis**: GIS-based heat network zone overlay and property classification (DESNZ heat network planning data)
 ✅ **Policy Analysis**: Subsidy sensitivity modeling and carbon abatement cost calculations
 ✅ **Visualization**: Charts, maps, and executive summary reports
 
@@ -244,13 +244,12 @@ This creates detailed download instructions.
 
 ### Supplementary Data
 
-**London Heat Map** (optional, London-only spatial analysis):
-- Heat network locations: Download from [London Datastore](https://data.london.gov.uk/)
-- Heat Network Zones: [GLA Heat Network Zones](https://www.london.gov.uk/programmes-strategies/environment-and-climate-change/energy/london-heat-map)
-- Place GeoJSON/Shapefile in `data/supplementary/` to enable London heat network tiers
+**DESNZ Heat Network Planning Data** (optional, UK-wide spatial analysis):
+- Download from the DESNZ heat network planning database (UK-wide coverage)
+- Place GIS layers in `data/external/desnz_heat_network_planning/` (see docs/GIS_DATA.md)
 
 **Boundary Files**:
-- Local authority boundaries (or London boroughs if using London GIS)
+- Local authority boundaries
 - LSOA boundaries for aggregation
 
 ## Usage
@@ -287,7 +286,7 @@ The interactive CLI will guide you through:
    - Performs subsidy sensitivity analysis
 
 4. **Spatial Analysis** (if GDAL available)
-   - Auto-downloads London GIS data (London-only)
+   - Uses DESNZ heat network planning data when available
    - Classifies properties into heat network tiers
    - Calculates heat density (GWh/km²)
    - Generates interactive HTML maps
@@ -395,7 +394,7 @@ scenarios:
 ### Data Files
 
 - `data/processed/epc_england_wales_validated.csv` - Cleaned EPC dataset
-- `data/processed/epc_england_wales_with_tiers.geojson` - Properties with heat network tier classification (London only)
+- `data/processed/epc_england_wales_with_tiers.geojson` - Properties with heat network tier classification
 - `data/outputs/pathway_suitability_by_tier.csv` - Recommended pathways by tier
 
 ### Analysis Reports
@@ -463,7 +462,7 @@ The project models five scenarios:
 - Hybrid heat-network targeting currently uses the existing `has_hn_access` flag or the configured heat-network penetration rate. It does **not** dynamically select properties from the spatial tier outputs; add geospatial filtering first if you want the hybrid run to follow map-derived tiers.
 - Fabric packages are shared across scenarios by design. If you want differentiated fabric measures (e.g., lighter fabric for heat networks vs deeper fabric for heat pumps), add explicit branching logic before the packages are applied.
 
-## Heat Network Tier Classification (London GIS optional)
+## Heat Network Tier Classification (DESNZ data)
 
 Properties are classified into five tiers:
 
@@ -579,7 +578,7 @@ pytest --cov=src tests/
 
 - Hardy, A., & Glew, D. (2019). An analysis of errors in the Energy Performance certificate database. *Energy Policy*, 129, 1168-1178.
 - UK EPC Register: https://epc.opendatacommunities.org/
-- London Heat Map (optional spatial inputs): https://www.london.gov.uk/programmes-strategies/environment-and-climate-change/energy/london-heat-map
+- DESNZ Heat Network Planning Database: https://www.gov.uk/government/collections/heat-networks
 - RdSAP Methodology: https://www.bre.co.uk/sap/
 
 ## License
@@ -595,7 +594,7 @@ For questions or issues:
 ## Acknowledgments
 
 - UK Government EPC Register for open data access
-- Greater London Authority for optional London Heat Map data
+- DESNZ for heat network planning data
 - Hardy & Glew for EPC quality assurance methodology
 - Case street residents (Shakespeare Crescent) for local calibration data
 
