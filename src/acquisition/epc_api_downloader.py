@@ -19,6 +19,7 @@ from loguru import logger
 from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
+import getpass
 
 import sys
 sys.path.append(str(Path(__file__).parent.parent.parent))
@@ -84,6 +85,7 @@ class EPCAPIDownloader:
         email: Optional[str] = None,
         api_key: Optional[str] = None,
         local_authority_codes: Optional[Dict[str, str]] = None,
+        prompt_for_credentials: bool = True,
     ):
         """
         Initialize EPC API downloader.
@@ -112,6 +114,12 @@ class EPCAPIDownloader:
         # Get credentials from environment or parameters
         self.email = email or os.getenv('EPC_API_EMAIL')
         self.api_key = api_key or os.getenv('EPC_API_KEY')
+
+        if prompt_for_credentials:
+            if not self.email:
+                self.email = input("Enter EPC API email: ").strip() or None
+            if not self.api_key:
+                self.api_key = getpass.getpass("Enter EPC API key: ").strip() or None
 
         if not self.email or not self.api_key:
             raise ValueError(
