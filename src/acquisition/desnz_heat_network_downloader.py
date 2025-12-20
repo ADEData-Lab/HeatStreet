@@ -17,12 +17,14 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
 EXTERNAL_DIR = DATA_DIR / "external"
 GIS_DIR = EXTERNAL_DIR / "desnz_heat_network_planning"
+DEFAULT_CSV_NAME = "HNPD_Publication_Q3_2025 (1).csv"
 
 
 class DESNZHeatNetworkDownloader:
     """Downloads and manages DESNZ heat network planning data."""
 
     GIS_DATA_URL = os.getenv("DESNZ_HEAT_NETWORK_DATA_URL")
+    CSV_DATA_PATH = os.getenv("DESNZ_HEAT_NETWORK_CSV_PATH")
 
     def __init__(self):
         """Initialize the DESNZ heat network data downloader."""
@@ -147,6 +149,28 @@ class DESNZHeatNetworkDownloader:
 
         return files
 
+    def get_csv_network_path(self, csv_path: Optional[Path] = None) -> Optional[Path]:
+        """
+        Get the CSV fallback path for heat network data.
+
+        Args:
+            csv_path: Optional explicit CSV path to use.
+
+        Returns:
+            Path to CSV file if present, otherwise None.
+        """
+        candidate_path = None
+        if csv_path:
+            candidate_path = csv_path
+        elif self.CSV_DATA_PATH:
+            candidate_path = Path(self.CSV_DATA_PATH)
+        else:
+            candidate_path = EXTERNAL_DIR / DEFAULT_CSV_NAME
+
+        if candidate_path and candidate_path.exists():
+            return candidate_path
+        return None
+
     def download_and_prepare(self, force_redownload: bool = False) -> bool:
         """
         Complete workflow: download and extract DESNZ data.
@@ -177,8 +201,14 @@ class DESNZHeatNetworkDownloader:
         Returns:
             Dictionary with data summary
         """
+        csv_path = self.get_csv_network_path()
         if not GIS_DIR.exists() or not any(GIS_DIR.iterdir()):
-            return {"available": False, "message": "DESNZ data not downloaded yet"}
+            return {
+                "available": False,
+                "csv_available": csv_path is not None,
+                "csv_path": str(csv_path) if csv_path else None,
+                "message": "DESNZ data not downloaded yet",
+            }
 
         networks = self.get_network_files()
 
@@ -187,6 +217,8 @@ class DESNZHeatNetworkDownloader:
             "network_files": len(networks),
             "networks": list(networks.keys()),
             "data_path": str(GIS_DIR),
+            "csv_available": csv_path is not None,
+            "csv_path": str(csv_path) if csv_path else None,
         }
 
 

@@ -54,6 +54,17 @@ replacing any random assignment of heat network access.
 
 Supported formats: GeoPackage (`.gpkg`), GeoJSON (`.geojson`), or Shapefile (`.shp`).
 
+### Option 1b: CSV Fallback for Existing Networks
+
+If you only have the CSV publication extract (for example `HNPD_Publication_Q3_2025 (1).csv`),
+place it in `data/external/`. The analyzer will use it when the GIS layers are missing.
+
+Expected columns:
+- `X-coordinate` (British National Grid Easting)
+- `Y-coordinate` (British National Grid Northing)
+
+You can also point to a different CSV path by setting `DESNZ_HEAT_NETWORK_CSV_PATH`.
+
 ### Option 2: Automatic Download
 
 The interactive CLI can attempt a download if `DESNZ_HEAT_NETWORK_DATA_URL` is set:
@@ -110,6 +121,14 @@ If you see "GIS data not found", verify the directory structure:
 data/external/desnz_heat_network_planning/networks/
 data/external/desnz_heat_network_planning/zones/
 ```
+
+If you only have the CSV extract, ensure it exists at:
+
+```
+data/external/HNPD_Publication_Q3_2025 (1).csv
+```
+
+or set `DESNZ_HEAT_NETWORK_CSV_PATH` to the CSV file location.
 
 ### Cannot Read Layers
 

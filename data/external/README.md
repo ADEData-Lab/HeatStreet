@@ -24,6 +24,24 @@ data/external/
         └── zones.gpkg
 ```
 
+## Optional CSV Fallback (Existing Networks Only)
+
+If you only have the CSV extract (for example `HNPD_Publication_Q3_2025 (1).csv`),
+place it in `data/external/` and the analysis will use it when the GIS layers
+are missing:
+
+```
+data/external/
+├── HNPD_Publication_Q3_2025 (1).csv
+└── desnz_heat_network_planning/
+```
+
+Expected columns:
+- `X-coordinate` (British National Grid Easting)
+- `Y-coordinate` (British National Grid Northing)
+
+To use a different CSV location, set `DESNZ_HEAT_NETWORK_CSV_PATH` to the file path.
+
 ## Step 3: Verify Installation
 
 The correct path should be:
