@@ -44,12 +44,12 @@ def get_local_authorities() -> list:
     """Get list of local authorities from config (optional)."""
     config = load_config()
     geography = config.get('geography', {})
-    local_authorities = geography.get('local_authorities')
-    if local_authorities:
-        return local_authorities
     local_authority_codes = geography.get('local_authority_codes', {})
     if local_authority_codes:
         return list(local_authority_codes.keys())
+    local_authorities = geography.get('local_authorities')
+    if local_authorities:
+        return local_authorities
     return geography.get('boroughs', [])
 
 
