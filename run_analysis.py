@@ -22,9 +22,18 @@ import time
 # Add src to path
 sys.path.append(str(Path(__file__).parent))
 
-from config.config import load_config, ensure_directories, DATA_RAW_DIR, DATA_PROCESSED_DIR
+from config.config import (
+    load_config,
+    ensure_directories,
+    DATA_RAW_DIR,
+    DATA_PROCESSED_DIR,
+    get_local_authorities,
+)
 from src.acquisition.epc_api_downloader import EPCAPIDownloader
-from src.acquisition.desnz_heat_network_downloader import DESNZHeatNetworkDownloader
+from src.acquisition.desnz_heat_network_downloader import (
+    DESNZHeatNetworkDownloader,
+    EXTERNAL_DIR,
+)
 from src.cleaning.data_validator import EPCDataValidator
 from src.analysis.archetype_analysis import ArchetypeAnalyzer
 from src.modeling.scenario_model import ScenarioModeler
@@ -106,6 +115,15 @@ def ask_download_scope():
     console.print("[cyan]Data Download Options:[/cyan]")
     console.print()
 
+    config = load_config()
+    configured_codes = config.get('geography', {}).get('local_authority_codes') or {}
+    available_authorities = list(configured_codes.keys()) or get_local_authorities()
+
+    if not available_authorities:
+        console.print("[yellow]⚠[/yellow] No local authorities configured in config.yaml.")
+        console.print("    Provide at least one local_authorities entry to populate the menu.")
+        console.print()
+
     choice = questionary.select(
         "What would you like to download?",
         choices=[
@@ -117,26 +135,38 @@ def ask_download_scope():
     ).ask()
 
     if choice == "test":
-        borough = questionary.select(
-            "Select a local authority for testing:",
-            choices=["Camden", "Islington", "Hackney", "Westminster", "Southwark"]
-        ).ask()
+        if available_authorities:
+            borough = questionary.select(
+                "Select a local authority for testing:",
+                choices=available_authorities
+            ).ask()
+        else:
+            borough = questionary.text(
+                "Enter the local authority name for testing:"
+            ).ask()
         return {
             'mode': 'single',
             'boroughs': [borough],
             'from_year': 2020,
-            'max_per_borough': 1000
+            'max_per_borough': 1000,
         }
 
     elif choice == "medium":
+        if not available_authorities:
+            console.print("[yellow]⚠[/yellow] Configure local_authorities before running a medium dataset download.")
+            return ask_download_scope()
+        boroughs = available_authorities[:5]
         return {
             'mode': 'multiple',
-            'boroughs': ["Camden", "Islington", "Hackney", "Westminster", "Tower Hamlets"],
+            'boroughs': boroughs,
             'from_year': 2020,
-            'max_per_borough': None
+            'max_per_borough': None,
         }
 
     elif choice == "full":
+        if not available_authorities:
+            console.print("[yellow]⚠[/yellow] Configure local_authorities before running a full dataset download.")
+            return ask_download_scope()
         confirm = questionary.confirm(
             "Full download will take 2-4 hours. Continue?",
             default=False
@@ -153,12 +183,12 @@ def ask_download_scope():
             return ask_download_scope()  # Ask again
 
     else:  # custom
+        if not available_authorities:
+            console.print("[yellow]⚠[/yellow] Configure local_authorities before running a custom selection.")
+            return ask_download_scope()
         boroughs = questionary.checkbox(
             "Select local authorities (space to select, enter to confirm):",
-            choices=[
-                "Camden", "Islington", "Hackney", "Westminster", "Southwark",
-                "Tower Hamlets", "Lambeth", "Wandsworth", "Greenwich", "Lewisham"
-            ]
+            choices=available_authorities
         ).ask()
 
         from_year = questionary.select(
@@ -182,7 +212,7 @@ def ask_download_scope():
             'mode': 'multiple',
             'boroughs': boroughs,
             'from_year': int(from_year),
-            'max_per_borough': max_per_borough
+            'max_per_borough': max_per_borough,
         }
 
 
@@ -204,6 +234,18 @@ def ask_gis_download():
         console.print("[green]✓[/green] GIS data already downloaded")
         console.print(f"    Network files: {summary['network_files']}")
         return True
+
+    zip_path = EXTERNAL_DIR / "desnz_heat_network_planning.zip"
+    if zip_path.exists():
+        console.print("[green]✓[/green] Found existing DESNZ heat network data archive")
+        console.print("    Extracting archive for spatial analysis...")
+        if gis_downloader.extract_gis_data():
+            summary = gis_downloader.get_data_summary()
+            console.print("[green]✓[/green] GIS data extracted and ready")
+            console.print(f"    Network files: {summary.get('network_files', 0)}")
+            return True
+        console.print("[yellow]⚠[/yellow] Existing archive could not be extracted")
+        console.print("    You can re-download or extract manually if needed.")
 
     download = questionary.confirm(
         "Download DESNZ heat network data? (required for spatial analysis)",
@@ -761,6 +803,15 @@ def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None):
         return True
 
     if not check_spatial_dependencies():
+        return None, None
+
+    if not ask_gis_download():
+        console.print("[yellow]⚠ Spatial analysis skipped: DESNZ heat network data unavailable.[/yellow]")
+        if analysis_logger:
+            analysis_logger.skip_phase(
+                "Spatial Analysis",
+                "DESNZ heat network data unavailable or download declined",
+            )
         return None, None
 
     try:
@@ -1427,9 +1478,6 @@ def main():
     analysis_logger = AnalysisLogger()
     console.print("[green]✓[/green] Analysis logger initialized")
     console.print()
-
-    # Ask about GIS data download
-    ask_gis_download()
 
     # Check for existing data
     has_existing, existing_file, record_count = check_existing_data()
