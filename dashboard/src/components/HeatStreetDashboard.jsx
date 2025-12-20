@@ -517,7 +517,7 @@ export default function HeatStreetDashboard() {
                 <tbody>
                   {constituencyData.map((row) => (
                     <tr key={row.constituency} onClick={() => tableClick(row)} style={{ cursor: 'pointer' }}>
-                      <td>{row.constituency_name || row.constituency}</td>
+                      <td>{row.constituency}</td>
                       <td>{row.meanEPC}</td>
                       <td>{row.energy}</td>
                       <td>{row.count?.toLocaleString?.() || row.count}</td>

@@ -34,7 +34,7 @@ async function exportExcel(data) {
 function exportCSV(data) {
   const headers = ['Constituency,Mean EPC,Energy,Count'];
   const rows = (data.constituencyData || []).map(
-    (row) => `${row.constituency_name || row.constituency},${row.meanEPC},${row.energy},${row.count}`
+    (row) => `${row.constituency},${row.meanEPC},${row.energy},${row.count}`
   );
   const csv = [...headers, ...rows].join('\n');
   saveAs(new Blob([csv], { type: 'text/csv;charset=utf-8;' }), 'constituencies.csv');

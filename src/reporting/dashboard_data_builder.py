@@ -371,14 +371,7 @@ class DashboardDataBuilder:
         constituency_data = []
         df = constituency_breakdown.reset_index()
         for _, row in df.iterrows():
-            name = str(
-                row.get("CONSTITUENCY_NAME")
-                or row.get("CONSTITUENCY")
-                or row.get("WESTMINSTER_PARLIAMENTARY_CONSTITUENCY")
-                or row.get("PCON_NAME")
-                or row.get("index")
-                or ""
-            ).strip()
+            name = str(row.get("CONSTITUENCY") or "").strip()
             constituency_data.append(
                 {
                     "constituency": name,

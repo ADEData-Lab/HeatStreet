@@ -168,22 +168,11 @@ class AdditionalReports:
         """
         logger.info("Generating constituency-level breakdown...")
 
-        constituency_column = None
-        for candidate in [
-            "CONSTITUENCY_NAME",
-            "CONSTITUENCY",
-            "WESTMINSTER_PARLIAMENTARY_CONSTITUENCY",
-            "PCON_NAME",
-        ]:
-            if candidate in df.columns:
-                constituency_column = candidate
-                break
-
-        if constituency_column is None:
+        if "CONSTITUENCY" not in df.columns:
             logger.warning("No constituency column found; skipping constituency breakdown.")
             return pd.DataFrame()
 
-        constituency_breakdown = df.groupby(constituency_column).agg({
+        constituency_breakdown = df.groupby("CONSTITUENCY").agg({
             'LMK_KEY': 'count',  # Property count
             'CURRENT_ENERGY_EFFICIENCY': 'mean',
             'ENERGY_CONSUMPTION_CURRENT': 'mean',

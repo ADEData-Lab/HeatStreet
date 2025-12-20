@@ -62,7 +62,7 @@ export function DashboardProvider({ children }) {
     const match = (value) => !search || String(value).toLowerCase().includes(search);
 
     const filteredConstituencies = (data.constituencyData || []).filter((item) => {
-      const name = item.constituency_name || item.constituency;
+      const name = item.constituency;
       const constituencyMatch = filters.constituency === 'all' || name === filters.constituency;
       return constituencyMatch && match(name);
     });
