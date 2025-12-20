@@ -234,7 +234,7 @@ EPC data must be obtained from the UK Government's EPC Register:
 2. **Download** bulk data for England and Wales local authorities (see `data/raw/DOWNLOAD_INSTRUCTIONS.txt`)
 3. **Place** CSV files in `data/raw/` directory with naming pattern `epc_*.csv`
 
-If you're using the API downloader, populate `config/config.yaml` with `geography.local_authority_codes` to expand beyond the default London borough list.
+If you're using the API downloader, populate `config/config.yaml` with `geography.local_authority_codes` to expand beyond the default configured local authority list.
 
 Alternatively, run:
 ```bash

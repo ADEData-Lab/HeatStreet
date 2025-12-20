@@ -361,13 +361,13 @@ def download_data(scope, email, api_key, analysis_logger: AnalysisLogger = None)
 
         # Save data
         console.print("[cyan]Saving data...[/cyan]")
-        downloader.save_data(df, "epc_london_raw.csv")
-        downloader.save_data(df_filtered, "epc_london_filtered.csv")
+        downloader.save_data(df, "epc_raw.csv")
+        downloader.save_data(df_filtered, "epc_filtered.csv")
         console.print(f"[green]✓[/green] Data saved to data/raw/")
 
         if analysis_logger:
-            analysis_logger.add_output("data/raw/epc_london_raw.csv", "csv", "Raw EPC data from API")
-            analysis_logger.add_output("data/raw/epc_london_filtered.csv", "csv", "Filtered Edwardian terraced houses")
+            analysis_logger.add_output("data/raw/epc_raw.csv", "csv", "Raw EPC data from API")
+            analysis_logger.add_output("data/raw/epc_filtered.csv", "csv", "Filtered Edwardian terraced properties")
             analysis_logger.complete_phase(success=True, message=f"Downloaded {len(df_filtered):,} Edwardian properties")
 
         return df_filtered
@@ -417,7 +417,7 @@ def validate_data(df, analysis_logger: AnalysisLogger = None):
 
     # Save validated data
     import pandas as pd
-    output_file = DATA_PROCESSED_DIR / "epc_london_validated.csv"
+    output_file = DATA_PROCESSED_DIR / "epc_validated.csv"
     df_validated.to_csv(output_file, index=False)
 
     # Try to save parquet (optional for performance)
@@ -475,7 +475,7 @@ def apply_methodological_adjustments(df, analysis_logger: AnalysisLogger = None)
 
     # Generate summary
     summary = adjuster.generate_adjustment_summary(df_adjusted)
-    output_file = DATA_PROCESSED_DIR / "epc_london_adjusted.csv"
+    output_file = DATA_PROCESSED_DIR / "epc_adjusted.csv"
     df_adjusted.to_csv(output_file, index=False)
     parquet_file = None
     try:
@@ -1392,8 +1392,8 @@ def load_json_if_exists(file_path: Path):
 
 def check_existing_data():
     """Check if previously downloaded data exists."""
-    raw_csv = DATA_RAW_DIR / "epc_london_raw.csv"
-    filtered_csv = DATA_RAW_DIR / "epc_london_filtered.csv"
+    raw_csv = DATA_RAW_DIR / "epc_raw.csv"
+    filtered_csv = DATA_RAW_DIR / "epc_filtered.csv"
 
     if raw_csv.exists() or filtered_csv.exists():
         # Get file info
@@ -1413,7 +1413,7 @@ def check_existing_data():
                 console.print()
                 console.print(Panel(
                     f"[bold cyan]Existing Data Found[/bold cyan]\n\n"
-                    f"File: epc_london_filtered.csv\n"
+                    f"File: epc_filtered.csv\n"
                     f"Size: {file_size:.1f} MB\n"
                     f"Records: ~{line_count:,}\n"
                     f"Last modified: {mod_date}",
@@ -1436,7 +1436,7 @@ def check_existing_data():
             console.print()
             console.print(Panel(
                 f"[bold cyan]Existing Data Found[/bold cyan]\n\n"
-                f"File: epc_london_raw.csv\n"
+                f"File: epc_raw.csv\n"
                 f"Size: {file_size:.1f} MB\n"
                 f"Last modified: {mod_date}",
                 border_style="green"
@@ -1556,7 +1556,7 @@ def main():
     df_raw = df.copy()
 
     # Phase 2: Check for existing validated data before running validation
-    validated_path = DATA_PROCESSED_DIR / "epc_london_validated.csv"
+    validated_path = DATA_PROCESSED_DIR / "epc_validated.csv"
     df_validated = prompt_use_existing_dataframe(
         "Data Validation",
         "validated EPC dataset",
@@ -1583,7 +1583,7 @@ def main():
         return
 
     # Phase 2.5: Methodological Adjustments (check for existing adjusted data)
-    adjusted_path = DATA_PROCESSED_DIR / "epc_london_adjusted.csv"
+    adjusted_path = DATA_PROCESSED_DIR / "epc_adjusted.csv"
     df_adjusted = prompt_use_existing_dataframe(
         "Methodological Adjustments",
         "methodologically adjusted dataset",

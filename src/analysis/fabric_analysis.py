@@ -448,11 +448,11 @@ def main():
     logger.info("Starting fabric analysis...")
 
     # Load validated data
-    input_file = DATA_PROCESSED_DIR / "epc_london_validated.parquet"
+    input_file = DATA_PROCESSED_DIR / "epc_validated.parquet"
 
     if not input_file.exists():
         # Try CSV fallback
-        input_file = DATA_PROCESSED_DIR / "epc_london_validated.csv"
+        input_file = DATA_PROCESSED_DIR / "epc_validated.csv"
         if not input_file.exists():
             logger.error(f"Input file not found: {input_file}")
             logger.info("Please run data validation first")

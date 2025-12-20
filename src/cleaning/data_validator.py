@@ -1165,7 +1165,7 @@ def main():
     logger.info("Starting EPC data validation...")
 
     # Load raw data
-    input_file = DATA_RAW_DIR / "epc_london_filtered.csv"
+    input_file = DATA_RAW_DIR / "epc_filtered.csv"
 
     if not input_file.exists():
         logger.error(f"Input file not found: {input_file}")
@@ -1183,7 +1183,7 @@ def main():
     df_validated = flag_epc_anomalies(df_validated)
 
     # Save validated data
-    output_file = DATA_PROCESSED_DIR / "epc_london_validated.csv"
+    output_file = DATA_PROCESSED_DIR / "epc_validated.csv"
     df_validated.to_csv(output_file, index=False)
     logger.info(f"Validated data saved to: {output_file}")
 

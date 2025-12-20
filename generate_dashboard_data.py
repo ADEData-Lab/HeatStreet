@@ -57,12 +57,12 @@ def load_analysis_outputs() -> Dict:
         import pandas as pd
 
         # Load validated data
-        validated_file = processed_dir / "epc_london_validated.parquet"
+        validated_file = processed_dir / "epc_validated.parquet"
         if validated_file.exists():
             df_validated = pd.read_parquet(validated_file)
             logger.info(f"Loaded validated data: {len(df_validated)} properties")
         else:
-            validated_file = processed_dir / "epc_london_validated.csv"
+            validated_file = processed_dir / "epc_validated.csv"
             if validated_file.exists():
                 df_validated = pd.read_csv(validated_file, low_memory=False)
                 logger.info(f"Loaded validated data: {len(df_validated)} properties")

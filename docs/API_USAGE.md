@@ -74,7 +74,7 @@ from src.acquisition.epc_api_downloader import EPCAPIDownloader
 
 downloader = EPCAPIDownloader()
 
-# Download just Camden
+# Download just Camden (local authority)
 df = downloader.download_borough_data(
     borough_name='Camden',
     property_type='house',
@@ -121,7 +121,7 @@ geography:
     Cardiff: "W06000015"
 ```
 
-If no codes are provided, the downloader defaults to London boroughs and logs a warning.
+If no codes are provided, the downloader defaults to a predefined local authority list and logs a warning.
 
 ## Filters Applied
 

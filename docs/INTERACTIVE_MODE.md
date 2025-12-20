@@ -241,7 +241,7 @@ Generating reports and visualizations...
 ### Interactive Choices
 
 - Multiple download scopes
-- Local authority selection (prompt labels may still say "borough")
+- Local authority selection (prompt labels use local authority naming)
 - Date range selection
 - Record limits
 
@@ -270,7 +270,7 @@ from run_analysis import (
 # Define custom scope
 scope = {
     'mode': 'multiple',
-    'boroughs': ['Camden', 'Islington'],  # local authority names
+    'boroughs': ['Camden', 'Islington'],  # local authority names (config key: "boroughs")
     'from_year': 2020,
     'max_per_borough': 5000
 }

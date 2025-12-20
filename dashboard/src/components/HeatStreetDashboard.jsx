@@ -240,8 +240,8 @@ export default function HeatStreetDashboard() {
               <h3 style={styles.introTitle}>What the visuals answer</h3>
               <ul style={styles.introList}>
                 <li>
-                  Band mix and case street vs London chart show the scale of the EPC gap and where the case street diverges most
-                  from the city baseline.
+                  Band mix and case street vs benchmark chart show the scale of the EPC gap and where the case street diverges most
+                  from the wider baseline.
                 </li>
                 <li>Headline stats call out portfolio size, SAP scores, and common band to orient the conversation quickly.</li>
                 <li>
@@ -278,7 +278,7 @@ export default function HeatStreetDashboard() {
               </div>
 
               <div style={styles.card}>
-                <h3 style={styles.cardTitle}>Case street vs London</h3>
+                <h3 style={styles.cardTitle}>Case street vs benchmark</h3>
                 <ResponsiveContainer width="100%" height={320}>
                   <ComposedChart data={epcComparisonData}>
                     <CartesianGrid strokeDasharray="3 3" />
@@ -287,7 +287,7 @@ export default function HeatStreetDashboard() {
                     <Tooltip />
                     <Legend />
                     <Bar dataKey="shakespeareCrescent" name="Case street" fill={COLORS.primary} isAnimationActive={isAnimated} />
-                    <Line type="monotone" dataKey="londonAverage" name="London" stroke={COLORS.accent} strokeWidth={3} isAnimationActive={isAnimated} />
+                    <Line type="monotone" dataKey="londonAverage" name="Benchmark" stroke={COLORS.accent} strokeWidth={3} isAnimationActive={isAnimated} />
                   </ComposedChart>
                 </ResponsiveContainer>
               </div>

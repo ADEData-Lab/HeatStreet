@@ -12,7 +12,7 @@ export const epcBandData = [
   { band: 'G', count: 3054, percentage: 0.4, color: '#9d0208' }
 ];
 
-// Section 5.2: Case Street vs London Comparison
+// Section 5.2: Case Street vs Benchmark Comparison
 export const epcComparisonData = [
   { band: 'A', shakespeareCrescent: 0.0, londonAverage: 0.3 },
   { band: 'B', shakespeareCrescent: 0.0, londonAverage: 3.4 },
