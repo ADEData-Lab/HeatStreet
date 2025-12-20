@@ -246,34 +246,34 @@ class OutputValidator:
 
         return all_passed
 
-    def validate_borough_breakdown(self) -> bool:
-        """Validate borough breakdown exists and has all boroughs."""
+    def validate_constituency_breakdown(self) -> bool:
+        """Validate constituency breakdown exists and has records."""
         logger.info("\n" + "="*60)
-        logger.info("VALIDATING BOROUGH BREAKDOWN")
+        logger.info("VALIDATING CONSTITUENCY BREAKDOWN")
         logger.info("="*60)
 
         all_passed = True
 
         # Check file exists
-        borough_file = DATA_OUTPUTS_DIR / "borough_breakdown.csv"
+        constituency_file = DATA_OUTPUTS_DIR / "constituency_breakdown.csv"
 
-        if not borough_file.exists():
-            self.check(False, "Borough breakdown file exists")
+        if not constituency_file.exists():
+            self.check(False, "Constituency breakdown file exists")
             return False
 
         # Load and check
-        df = pd.read_csv(borough_file)
-        n_boroughs = len(df)
+        df = pd.read_csv(constituency_file)
+        n_constituencies = len(df)
 
         all_passed &= self.check(
-            n_boroughs > 0,
-            f"Borough breakdown has records ({n_boroughs} boroughs)"
+            n_constituencies > 0,
+            f"Constituency breakdown has records ({n_constituencies} constituencies)"
         )
 
-        # Ideally should have all 33 London boroughs
+        # Rough expectation for London constituencies (warning only)
         all_passed &= self.check(
-            n_boroughs >= 10,
-            f"Borough breakdown has at least 10 boroughs (found {n_boroughs})",
+            n_constituencies >= 10,
+            f"Constituency breakdown has at least 10 constituencies (found {n_constituencies})",
             is_critical=False
         )
 
@@ -304,7 +304,7 @@ class OutputValidator:
         all_passed &= self.validate_wall_insulation(df)
         all_passed &= self.validate_payback_calculations(df)
         all_passed &= self.validate_case_street_extract()
-        all_passed &= self.validate_borough_breakdown()
+        all_passed &= self.validate_constituency_breakdown()
 
         # Summary
         logger.info("\n" + "="*70)

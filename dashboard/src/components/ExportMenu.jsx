@@ -7,15 +7,6 @@ import { useDashboard } from '../context/DashboardContext';
 
 async function exportExcel(data) {
   const workbook = new ExcelJS.Workbook();
-  const boroughSheet = workbook.addWorksheet('Boroughs');
-  boroughSheet.columns = [
-    { header: 'Borough', key: 'borough', width: 20 },
-    { header: 'EPC', key: 'meanEPC', width: 10 },
-    { header: 'Energy', key: 'energy', width: 12 },
-    { header: 'Count', key: 'count', width: 12 },
-  ];
-  (data.boroughData || []).forEach((row) => boroughSheet.addRow(row));
-
   const scenarioSheet = workbook.addWorksheet('Scenarios');
   scenarioSheet.columns = [
     { header: 'Scenario', key: 'scenario', width: 20 },
@@ -27,17 +18,26 @@ async function exportExcel(data) {
   ];
   (data.scenarioData || []).forEach((row) => scenarioSheet.addRow(row));
 
+  const constituencySheet = workbook.addWorksheet('Constituencies');
+  constituencySheet.columns = [
+    { header: 'Constituency', key: 'constituency', width: 26 },
+    { header: 'EPC', key: 'meanEPC', width: 10 },
+    { header: 'Energy', key: 'energy', width: 12 },
+    { header: 'Count', key: 'count', width: 12 },
+  ];
+  (data.constituencyData || []).forEach((row) => constituencySheet.addRow(row));
+
   const buffer = await workbook.xlsx.writeBuffer();
   saveAs(new Blob([buffer]), 'heat-street-dashboard.xlsx');
 }
 
 function exportCSV(data) {
-  const headers = ['Borough,Mean EPC,Energy,Count'];
-  const rows = (data.boroughData || []).map(
-    (row) => `${row.borough_name || row.borough},${row.meanEPC},${row.energy},${row.count}`
+  const headers = ['Constituency,Mean EPC,Energy,Count'];
+  const rows = (data.constituencyData || []).map(
+    (row) => `${row.constituency_name || row.constituency},${row.meanEPC},${row.energy},${row.count}`
   );
   const csv = [...headers, ...rows].join('\n');
-  saveAs(new Blob([csv], { type: 'text/csv;charset=utf-8;' }), 'boroughs.csv');
+  saveAs(new Blob([csv], { type: 'text/csv;charset=utf-8;' }), 'constituencies.csv');
 }
 
 async function exportPDF() {

@@ -162,23 +162,13 @@ export const interventionData = [
   { intervention: 'Ventilation System', percentage: 15.3, count: 107786 }
 ];
 
-// Section 5.9: Borough Data
-export const boroughData = [
-  { borough: 'Newham', borough_name: 'Newham', code: 'E09000025', count: 89234, meanEPC: 62.1, energy: 238 },
-  { borough: 'Croydon', borough_name: 'Croydon', code: 'E09000008', count: 76512, meanEPC: 64.3, energy: 227 },
-  { borough: 'Lambeth', borough_name: 'Lambeth', code: 'E09000022', count: 68947, meanEPC: 63.8, energy: 230 },
-  { borough: 'Wandsworth', borough_name: 'Wandsworth', code: 'E09000032', count: 64823, meanEPC: 65.2, energy: 223 },
-  { borough: 'Lewisham', borough_name: 'Lewisham', code: 'E09000023', count: 58392, meanEPC: 63.4, energy: 232 },
-  { borough: 'Southwark', borough_name: 'Southwark', code: 'E09000028', count: 52167, meanEPC: 62.9, energy: 235 },
-  { borough: 'Ealing', borough_name: 'Ealing', code: 'E09000009', count: 48934, meanEPC: 64.7, energy: 225 },
-  { borough: 'Brent', borough_name: 'Brent', code: 'E09000005', count: 45621, meanEPC: 63.2, energy: 233 },
-  { borough: 'Haringey', borough_name: 'Haringey', code: 'E09000014', count: 42156, meanEPC: 63.5, energy: 231 },
-  { borough: 'Islington', borough_name: 'Islington', code: 'E09000019', count: 39874, meanEPC: 64.1, energy: 228 },
-  { borough: 'Hackney', borough_name: 'Hackney', code: 'E09000012', count: 37295, meanEPC: 62.8, energy: 236 },
-  { borough: 'Greenwich', borough_name: 'Greenwich', code: 'E09000011', count: 35418, meanEPC: 63.9, energy: 229 },
-  { borough: 'Hammersmith and Fulham', borough_name: 'Hammersmith and Fulham', code: 'E09000013', count: 32567, meanEPC: 65.8, energy: 220 },
-  { borough: 'Camden', borough_name: 'Camden', code: 'E09000007', count: 29834, meanEPC: 64.5, energy: 226 },
-  { borough: 'Westminster', borough_name: 'Westminster', code: 'E09000033', count: 27705, meanEPC: 66.2, energy: 218 }
+// Section 5.9: Constituency Data
+export const constituencyData = [
+  { constituency: 'Poplar and Limehouse', constituency_name: 'Poplar and Limehouse', count: 28412, meanEPC: 63.1, energy: 232 },
+  { constituency: 'Tottenham', constituency_name: 'Tottenham', count: 25104, meanEPC: 62.4, energy: 235 },
+  { constituency: 'Camden Town and Holborn', constituency_name: 'Camden Town and Holborn', count: 23897, meanEPC: 64.8, energy: 226 },
+  { constituency: 'Battersea', constituency_name: 'Battersea', count: 22411, meanEPC: 65.4, energy: 222 },
+  { constituency: 'Lewisham East', constituency_name: 'Lewisham East', count: 21934, meanEPC: 63.7, energy: 231 }
 ];
 
 // Section 5.10: Heat Demand Confidence Bands
@@ -351,7 +341,7 @@ export const defaultDashboardData = {
   tierData,
   retrofitReadinessData,
   interventionData,
-  boroughData,
+  constituencyData,
   confidenceBandsData,
   sensitivityData,
   gridPeakData,

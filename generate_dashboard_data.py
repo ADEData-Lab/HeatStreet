@@ -45,7 +45,7 @@ def load_analysis_outputs() -> Dict:
     scenario_results = None
     readiness_summary = None
     pathway_summary = None
-    borough_breakdown = None
+    constituency_breakdown = None
     case_street_summary = None
     subsidy_results = None
     df_validated = None
@@ -94,11 +94,11 @@ def load_analysis_outputs() -> Dict:
             pathway_summary = pd.read_csv(pathway_file)
             logger.info("Loaded pathway summary")
 
-        # Load borough breakdown
-        borough_file = outputs_dir / "borough_breakdown.csv"
-        if borough_file.exists():
-            borough_breakdown = pd.read_csv(borough_file)
-            logger.info("Loaded borough breakdown")
+        # Load constituency breakdown
+        constituency_file = outputs_dir / "constituency_breakdown.csv"
+        if constituency_file.exists():
+            constituency_breakdown = pd.read_csv(constituency_file)
+            logger.info("Loaded constituency breakdown")
 
         # Load load profiles
         load_profiles_file = outputs_dir / "pathway_load_profile_summary.csv"
@@ -126,7 +126,7 @@ def load_analysis_outputs() -> Dict:
         "scenario_results": scenario_results,
         "readiness_summary": readiness_summary,
         "pathway_summary": pathway_summary,
-        "borough_breakdown": borough_breakdown,
+        "constituency_breakdown": constituency_breakdown,
         "case_street_summary": case_street_summary,
         "subsidy_results": subsidy_results,
         "df_validated": df_validated,
@@ -223,16 +223,13 @@ def generate_sample_dashboard_data() -> Dict:
             {"intervention": "Draught Proofing", "percentage": 52.8, "count": 371967},
             {"intervention": "Window Upgrade", "percentage": 21.5, "count": 151465},
         ],
-        # Section 11: Borough Data
-        "boroughData": [
-            {"borough": "Newham", "code": "E09000025", "count": 89234, "meanEPC": 62.1, "energy": 238},
-            {"borough": "Croydon", "code": "E09000008", "count": 76512, "meanEPC": 64.3, "energy": 227},
-            {"borough": "Lambeth", "code": "E09000022", "count": 68947, "meanEPC": 63.8, "energy": 230},
-            {"borough": "Wandsworth", "code": "E09000032", "count": 64823, "meanEPC": 65.2, "energy": 223},
-            {"borough": "Lewisham", "code": "E09000023", "count": 58392, "meanEPC": 63.4, "energy": 232},
-            {"borough": "Southwark", "code": "E09000028", "count": 52167, "meanEPC": 62.9, "energy": 235},
-            {"borough": "Ealing", "code": "E09000009", "count": 48934, "meanEPC": 64.7, "energy": 225},
-            {"borough": "Brent", "code": "E09000005", "count": 45621, "meanEPC": 63.2, "energy": 233},
+        # Section 11: Constituency Data
+        "constituencyData": [
+            {"constituency": "Poplar and Limehouse", "constituency_name": "Poplar and Limehouse", "count": 28412, "meanEPC": 63.1, "energy": 232},
+            {"constituency": "Tottenham", "constituency_name": "Tottenham", "count": 25104, "meanEPC": 62.4, "energy": 235},
+            {"constituency": "Camden Town and Holborn", "constituency_name": "Camden Town and Holborn", "count": 23897, "meanEPC": 64.8, "energy": 226},
+            {"constituency": "Battersea", "constituency_name": "Battersea", "count": 22411, "meanEPC": 65.4, "energy": 222},
+            {"constituency": "Lewisham East", "constituency_name": "Lewisham East", "count": 21934, "meanEPC": 63.7, "energy": 231},
         ],
         # Section 7: Confidence Bands (Uncertainty)
         "confidenceBandsData": [
@@ -345,7 +342,7 @@ def generate_dashboard_data(from_outputs: bool = False, sample: bool = False) ->
                 scenario_results=data_sources.get("scenario_results"),
                 readiness_summary=data_sources.get("readiness_summary"),
                 pathway_summary=data_sources.get("pathway_summary"),
-                borough_breakdown=data_sources.get("borough_breakdown"),
+                constituency_breakdown=data_sources.get("constituency_breakdown"),
                 case_street_summary=data_sources.get("case_street_summary"),
                 subsidy_results=data_sources.get("subsidy_results"),
                 df_validated=data_sources.get("df_validated"),
