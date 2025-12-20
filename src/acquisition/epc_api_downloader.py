@@ -165,8 +165,11 @@ class EPCAPIDownloader:
         # Get local authority code
         la_code = self.local_authority_codes.get(borough_name)
         if not la_code:
-            logger.error(f"Unknown local authority: {borough_name}")
-            return pd.DataFrame()
+            logger.warning(
+                "Local authority code not configured for %s; using the name directly.",
+                borough_name,
+            )
+            la_code = borough_name
 
         logger.info(f"Downloading EPC data for {borough_name} (LA: {la_code})...")
 
