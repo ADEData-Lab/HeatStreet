@@ -109,7 +109,7 @@ def ask_download_scope():
     choice = questionary.select(
         "What would you like to download?",
         choices=[
-            questionary.Choice("Quick test (single borough, limited data)", value="test"),
+            questionary.Choice("Quick test (single local authority, limited data)", value="test"),
             questionary.Choice("Medium dataset (5 local authorities, last 5 years)", value="medium"),
             questionary.Choice("Full dataset (all configured local authorities)", value="full"),
             questionary.Choice("Custom selection", value="custom")
@@ -118,7 +118,7 @@ def ask_download_scope():
 
     if choice == "test":
         borough = questionary.select(
-            "Select a borough for testing:",
+            "Select a local authority for testing:",
             choices=["Camden", "Islington", "Hackney", "Westminster", "Southwark"]
         ).ask()
         return {
