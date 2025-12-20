@@ -25,8 +25,8 @@ export default function FilterBar() {
         <select value={filters.constituency} onChange={(e) => updateField('constituency', e.target.value)}>
           <option value="all">All constituencies</option>
           {constituencyOptions.map((item) => (
-            <option key={item.constituency_name || item.constituency} value={item.constituency_name || item.constituency}>
-              {item.constituency_name || item.constituency}
+            <option key={item.constituency} value={item.constituency}>
+              {item.constituency}
             </option>
           ))}
         </select>

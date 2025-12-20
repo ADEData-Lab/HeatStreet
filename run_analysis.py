@@ -398,6 +398,33 @@ def validate_data(df, analysis_logger: AnalysisLogger = None):
     validator = EPCDataValidator()
     df_validated, report = validator.validate_dataset(df)
 
+    # Enrich with Westminster constituency data based on postcode
+    try:
+        from src.spatial.constituency_enricher import ConstituencyEnricher
+
+        console.print("[cyan]Enriching constituencies from postcode...[/cyan]")
+        cache_file = DATA_PROCESSED_DIR / "postcode_constituency_cache.csv"
+        enricher = ConstituencyEnricher(cache_file=cache_file)
+        df_validated, constituency_summary = enricher.enrich_dataframe(df_validated)
+
+        console.print(
+            f"[green]✓[/green] Constituency enrichment complete "
+            f"({constituency_summary.get('filled', 0):,}/{constituency_summary.get('total', 0):,} populated)"
+        )
+        if analysis_logger:
+            analysis_logger.add_metric(
+                "constituency_populated",
+                constituency_summary.get("filled", 0),
+                "Records with constituency assigned",
+            )
+            analysis_logger.add_metric(
+                "constituency_missing",
+                constituency_summary.get("missing", 0),
+                "Records missing constituency after enrichment",
+            )
+    except Exception as e:
+        console.print(f"[yellow]⚠ Constituency enrichment skipped: {e}[/yellow]")
+
     console.print(f"[green]✓[/green] Validation complete")
     console.print(f"    Records passed: {len(df_validated):,} ({len(df_validated)/report['total_records']*100:.1f}%)")
     console.print(f"    Duplicates removed: {report['duplicates_removed']:,}")
