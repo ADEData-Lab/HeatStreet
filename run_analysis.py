@@ -24,7 +24,10 @@ sys.path.append(str(Path(__file__).parent))
 
 from config.config import load_config, ensure_directories, DATA_RAW_DIR, DATA_PROCESSED_DIR
 from src.acquisition.epc_api_downloader import EPCAPIDownloader
-from src.acquisition.desnz_heat_network_downloader import DESNZHeatNetworkDownloader
+from src.acquisition.desnz_heat_network_downloader import (
+    DESNZHeatNetworkDownloader,
+    EXTERNAL_DIR,
+)
 from src.cleaning.data_validator import EPCDataValidator
 from src.analysis.archetype_analysis import ArchetypeAnalyzer
 from src.modeling.scenario_model import ScenarioModeler
@@ -204,6 +207,18 @@ def ask_gis_download():
         console.print("[green]✓[/green] GIS data already downloaded")
         console.print(f"    Network files: {summary['network_files']}")
         return True
+
+    zip_path = EXTERNAL_DIR / "desnz_heat_network_planning.zip"
+    if zip_path.exists():
+        console.print("[green]✓[/green] Found existing DESNZ heat network data archive")
+        console.print("    Extracting archive for spatial analysis...")
+        if gis_downloader.extract_gis_data():
+            summary = gis_downloader.get_data_summary()
+            console.print("[green]✓[/green] GIS data extracted and ready")
+            console.print(f"    Network files: {summary.get('network_files', 0)}")
+            return True
+        console.print("[yellow]⚠[/yellow] Existing archive could not be extracted")
+        console.print("    You can re-download or extract manually if needed.")
 
     download = questionary.confirm(
         "Download DESNZ heat network data? (required for spatial analysis)",
@@ -761,6 +776,15 @@ def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None):
         return True
 
     if not check_spatial_dependencies():
+        return None, None
+
+    if not ask_gis_download():
+        console.print("[yellow]⚠ Spatial analysis skipped: DESNZ heat network data unavailable.[/yellow]")
+        if analysis_logger:
+            analysis_logger.skip_phase(
+                "Spatial Analysis",
+                "DESNZ heat network data unavailable or download declined",
+            )
         return None, None
 
     try:
@@ -1427,9 +1451,6 @@ def main():
     analysis_logger = AnalysisLogger()
     console.print("[green]✓[/green] Analysis logger initialized")
     console.print()
-
-    # Ask about GIS data download
-    ask_gis_download()
 
     # Check for existing data
     has_existing, existing_file, record_count = check_existing_data()
