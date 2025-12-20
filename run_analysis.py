@@ -90,12 +90,18 @@ def check_credentials():
 
         email = questionary.text(
             "Email address:",
-            validate=lambda x: '@' in x
+            validate=lambda x: '@' in x if x else "Email is required."
         ).ask()
 
-        api_key = questionary.text(
+        if not email:
+            return None, None
+
+        api_key = questionary.password(
             "API key:"
         ).ask()
+
+        if not api_key:
+            return None, None
 
         # Save to .env
         with open('.env', 'w') as f:
@@ -105,11 +111,13 @@ def check_credentials():
 
         # Reload environment
         load_dotenv(override=True)
+        os.environ['EPC_API_EMAIL'] = email
+        os.environ['EPC_API_KEY'] = api_key
 
         console.print("[green]✓[/green] Credentials saved to .env file")
         console.print()
 
-    return True
+    return email, api_key
 
 
 def ask_download_scope():
@@ -276,7 +284,7 @@ def ask_gis_download():
     return False
 
 
-def download_data(scope, analysis_logger: AnalysisLogger = None):
+def download_data(scope, email, api_key, analysis_logger: AnalysisLogger = None):
     """Download EPC data via API."""
     console.print()
     console.print(Panel("[bold]Phase 1: Data Download[/bold]", border_style="blue"))
@@ -290,7 +298,10 @@ def download_data(scope, analysis_logger: AnalysisLogger = None):
 
     try:
         downloader = EPCAPIDownloader(
-            local_authority_codes=scope.get('local_authority_codes')
+            email=email,
+            api_key=api_key,
+            local_authority_codes=scope.get('local_authority_codes'),
+            prompt_for_credentials=False,
         )
 
         if scope['mode'] == 'single':
@@ -1476,7 +1487,8 @@ def main():
     print_header()
 
     # Check credentials
-    if not check_credentials():
+    email, api_key = check_credentials()
+    if not email or not api_key:
         console.print("[red]Cannot proceed without API credentials[/red]")
         return
 
@@ -1538,7 +1550,7 @@ def main():
         start_time = time.time()
 
         # Phase 1: Download
-        df = download_data(scope, analysis_logger)
+        df = download_data(scope, email, api_key, analysis_logger)
         if df is None or df.empty:
             console.print("[red]✗ Analysis stopped - no data available[/red]")
             return
