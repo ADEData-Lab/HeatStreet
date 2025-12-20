@@ -59,6 +59,9 @@ def print_header():
 
 def check_credentials():
     """Check if API credentials are configured."""
+    from dotenv import load_dotenv
+    load_dotenv(override=True)
+
     email = os.getenv('EPC_API_EMAIL')
     api_key = os.getenv('EPC_API_KEY')
 
@@ -101,7 +104,6 @@ def check_credentials():
             f.write(f"EPC_API_KEY={api_key}\n")
 
         # Reload environment
-        from dotenv import load_dotenv
         load_dotenv(override=True)
 
         console.print("[green]✓[/green] Credentials saved to .env file")
