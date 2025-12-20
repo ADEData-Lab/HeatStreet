@@ -268,7 +268,7 @@ def get_package_definitions() -> Dict[str, RetrofitPackage]:
             package_id='wall_only',
             name='Wall Insulation Only',
             description='Wall insulation (cavity fill or EWI for solid)',
-            measures=['solid_wall_insulation_ewi']  # Default to solid for Edwardian
+            measures=['solid_wall_insulation_ewi']  # Default to solid walls
         ),
 
         'glazing_only': RetrofitPackage(

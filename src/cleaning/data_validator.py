@@ -473,7 +473,7 @@ class EPCDataValidator:
         Standardize wall construction types with detailed insulation status.
 
         Creates:
-        - wall_type: solid_brick, cavity, stone, timber_frame, system_built, other
+        - wall_type: solid_brick, solid, cavity, stone, timber_frame, system_built, other
         - wall_insulation_status: none, internal, external, cavity_filled, partial, unknown
         """
         if 'WALLS_DESCRIPTION' not in df.columns:
@@ -490,13 +490,22 @@ class EPCDataValidator:
         df['wall_insulated'] = False
 
         # Wall type classification
-        # Solid brick (most common for Edwardian)
+        # Solid brick explicitly called out
         solid_brick = walls_desc.str.contains(r'solid.*brick|brick.*solid', na=False)
         df.loc[solid_brick, 'wall_type'] = 'solid_brick'
 
         # Generic solid walls
         solid_general = walls_desc.str.contains('solid', na=False) & ~solid_brick
-        df.loc[solid_general, 'wall_type'] = 'solid_brick'  # Default solid to brick for Edwardian
+        if 'CONSTRUCTION_AGE_BAND' in df.columns:
+            age_band = df['CONSTRUCTION_AGE_BAND'].fillna('').str.lower()
+            likely_brick = age_band.str.contains(
+                r'pre-?1900|before\s*1900|1900-1929|1919-1944|1930-1949',
+                na=False
+            )
+            df.loc[solid_general & likely_brick, 'wall_type'] = 'solid_brick'
+            df.loc[solid_general & ~likely_brick, 'wall_type'] = 'solid'
+        else:
+            df.loc[solid_general, 'wall_type'] = 'solid'
 
         # Cavity walls
         cavity = walls_desc.str.contains('cavity', na=False)
@@ -823,9 +832,9 @@ class EPCDataValidator:
         - CO2_EMISSIONS_CURRENT: Total annual CO2 emissions in tonnes/year
 
         Note: We apply validation checks to catch unit errors early.
-        Expected ranges for Edwardian terraced houses:
-        - Energy: 100-400 kWh/m²/year (mean typically 150-250)
-        - CO2: 20-100 kgCO₂/m²/year (mean typically 40-60)
+        Expected ranges for domestic EPC data:
+        - Energy: 50-500 kWh/m²/year
+        - CO2: 0-200 kgCO₂/m²/year (typical values vary by fuel and floor area)
         """
         # Handle energy consumption
         if 'ENERGY_CONSUMPTION_CURRENT' in df.columns and 'TOTAL_FLOOR_AREA' in df.columns:
@@ -967,7 +976,7 @@ def filter_properties(
         epc_band_range: Tuple of (min_band, max_band) e.g. ('D', 'G') for D-G inclusive
         year_built_range: Tuple of (start_year, end_year) e.g. (1900, 1930)
         property_type: Filter by property type (e.g., 'Terraced', 'Mid-terrace')
-        wall_type: Filter by wall type ('solid_brick', 'cavity', etc.)
+        wall_type: Filter by wall type ('solid_brick', 'solid', 'cavity', etc.)
         has_wall_insulation: Filter by wall insulation status (True/False/None)
 
     Returns:

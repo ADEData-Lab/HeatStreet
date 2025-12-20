@@ -156,7 +156,7 @@ class EPCAPIDownloader:
     def download_borough_data(
         self,
         borough_name: str,
-        property_type: str = 'house',
+        property_type: Optional[str] = None,
         from_year: int = 2015,
         max_results: Optional[int] = None
     ) -> pd.DataFrame:
@@ -165,7 +165,7 @@ class EPCAPIDownloader:
 
         Args:
             borough_name: Name of the local authority
-            property_type: Property type filter (default: 'house')
+            property_type: Property type filter (optional)
             from_year: Earliest year for certificates (default: 2015)
             max_results: Maximum number of results to download (None = all)
 
@@ -186,10 +186,11 @@ class EPCAPIDownloader:
         # Build query parameters
         query_params = {
             'local-authority': la_code,
-            'property-type': property_type,
             'from-year': from_year,
             'size': 5000  # Max page size
         }
+        if property_type:
+            query_params['property-type'] = property_type
 
         all_data = []
         search_after = None
@@ -300,7 +301,7 @@ class EPCAPIDownloader:
         Download EPC data for all configured local authorities with parallel processing.
 
         Args:
-            property_types: List of property types to download (default: ['house'])
+            property_types: List of property types to download (optional)
             from_year: Earliest year for certificates (default: 2015)
             max_results_per_borough: Max results per local authority (None = all)
             max_workers: Number of parallel download threads (default: 4)
@@ -309,17 +310,20 @@ class EPCAPIDownloader:
             Combined DataFrame for all local authorities
         """
         if property_types is None:
-            property_types = ['house']
+            property_types = [None]
 
         logger.info(f"Downloading EPC data for all {len(self.local_authority_codes)} local authorities...")
-        logger.info(f"Property types: {property_types}")
+        if any(property_types):
+            logger.info(f"Property types: {property_types}")
+        else:
+            logger.info("Property types: all")
         logger.info(f"From year: {from_year}")
         logger.info(f"Using {max_workers} parallel download threads")
 
         all_borough_data = []
         download_lock = threading.Lock()
 
-        def download_borough_wrapper(borough_name: str, property_type: str):
+        def download_borough_wrapper(borough_name: str, property_type: Optional[str]):
             """Wrapper function for parallel local authority downloads."""
             try:
                 df = self.download_borough_data(
@@ -336,7 +340,8 @@ class EPCAPIDownloader:
                     return len(df)
                 return 0
             except Exception as e:
-                logger.error(f"Error downloading {borough_name} ({property_type}): {e}")
+                property_label = property_type or "all types"
+                logger.error(f"Error downloading {borough_name} ({property_label}): {e}")
                 return 0
 
         # Create list of download tasks
@@ -362,9 +367,11 @@ class EPCAPIDownloader:
                 borough, prop_type = futures[future]
                 try:
                     records = future.result()
-                    logger.info(f"[{completed}/{total_tasks}] Completed {borough} ({prop_type}): {records:,} records")
+                    property_label = prop_type or "all types"
+                    logger.info(f"[{completed}/{total_tasks}] Completed {borough} ({property_label}): {records:,} records")
                 except Exception as e:
-                    logger.error(f"[{completed}/{total_tasks}] Failed {borough} ({prop_type}): {e}")
+                    property_label = prop_type or "all types"
+                    logger.error(f"[{completed}/{total_tasks}] Failed {borough} ({property_label}): {e}")
 
         if all_borough_data:
             combined_df = pd.concat(all_borough_data, ignore_index=True)
@@ -463,7 +470,6 @@ def main():
 
         # Download data for all configured local authorities
         df = downloader.download_all_local_authorities(
-            property_types=['house', 'flat'],
             from_year=2015,
             max_results_per_borough=None  # Download all
         )

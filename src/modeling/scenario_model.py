@@ -1,7 +1,7 @@
 """
 Scenario Modeling Module
 
-Models decarbonization pathway scenarios for Edwardian terraced housing stock.
+Models decarbonization pathway scenarios for housing stock.
 Implements Section 4 of the project specification.
 """
 
@@ -575,11 +575,27 @@ class ScenarioModeler:
         self.ashp_min_epc_band = eligibility_cfg.get('min_epc_band', 'C')
 
         # Fabric bundles derived from marginal benefit analysis
+        property_filters = self.config.get('property_filters', {}) or {}
+        construction_age_bands = property_filters.get('construction_age_bands') or []
+        if len(construction_age_bands) == 1:
+            construction_age_band_label = construction_age_bands[0]
+        elif construction_age_bands:
+            construction_age_band_label = ", ".join(construction_age_bands)
+        else:
+            construction_age_band_label = None
+
+        typical_heat_demand_kwh = float(
+            self.config.get('analysis', {}).get('typical_annual_heat_demand_kwh', 15000)
+        )
+
         tipping_analyzer = FabricTippingPointAnalyzer(output_dir=DATA_OUTPUTS_DIR)
-        curve_df, _ = tipping_analyzer.run_analysis()
+        curve_df, _ = tipping_analyzer.run_analysis(
+            typical_annual_heat_demand_kwh=typical_heat_demand_kwh,
+            construction_age_band=construction_age_band_label
+        )
         self.fabric_bundles = tipping_analyzer.derive_fabric_bundles(
             curve_df,
-            typical_annual_heat_demand_kwh=15000
+            typical_annual_heat_demand_kwh=typical_heat_demand_kwh
         )
         self.fabric_placeholder_map = {
             'fabric_improvements': self._map_fabric_bundle_to_scenario(
