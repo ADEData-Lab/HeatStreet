@@ -111,6 +111,8 @@ class EPCAPIDownloader:
                 "Update config.geography.local_authority_codes for England and Wales coverage."
             )
 
+        load_dotenv(override=True)
+
         # Get credentials from environment or parameters
         self.email = email or os.getenv('EPC_API_EMAIL')
         self.api_key = api_key or os.getenv('EPC_API_KEY')
