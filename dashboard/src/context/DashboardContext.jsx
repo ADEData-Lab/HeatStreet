@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useMemo, useState } from '
 import useDashboardData from '../data/useDashboardData';
 
 const DashboardContext = createContext(null);
-const DEFAULT_FILTERS = { search: '', borough: 'all', pathway: 'all', tenure: 'all' };
+const DEFAULT_FILTERS = { search: '', constituency: 'all', pathway: 'all', tenure: 'all' };
 const DEFAULT_PREFS = { theme: 'system', animations: true, savedViews: [] };
 
 function getStoredPreferences() {
@@ -61,10 +61,10 @@ export function DashboardProvider({ children }) {
     const search = filters.search.toLowerCase();
     const match = (value) => !search || String(value).toLowerCase().includes(search);
 
-    const filteredBoroughs = (data.boroughData || []).filter((item) => {
-      const name = item.borough_name || item.borough;
-      const boroughMatch = filters.borough === 'all' || name === filters.borough;
-      return boroughMatch && (match(name) || match(item.code));
+    const filteredConstituencies = (data.constituencyData || []).filter((item) => {
+      const name = item.constituency_name || item.constituency;
+      const constituencyMatch = filters.constituency === 'all' || name === filters.constituency;
+      return constituencyMatch && match(name);
     });
 
     const filteredScenarios = (data.scenarioData || []).filter((item) => {
@@ -74,7 +74,7 @@ export function DashboardProvider({ children }) {
 
     return {
       ...data,
-      boroughData: filteredBoroughs,
+      constituencyData: filteredConstituencies,
       scenarioData: filteredScenarios,
     };
   }, [data, filters]);

@@ -10,7 +10,7 @@ export default function DrillDownModal() {
     <div className="modal-backdrop" onClick={() => setDrilldownTarget(null)}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
-          <h3>{drilldownTarget.borough || drilldownTarget.scenario || 'Details'}</h3>
+          <h3>{drilldownTarget.constituency || drilldownTarget.borough || drilldownTarget.scenario || 'Details'}</h3>
           <button type="button" className="ghost" onClick={() => setDrilldownTarget(null)}>
             Close
           </button>
