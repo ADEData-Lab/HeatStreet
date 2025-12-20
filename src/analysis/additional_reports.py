@@ -136,7 +136,7 @@ class AdditionalReports:
             f.write(f"Mean Floor Area: {summary['case_street']['mean_floor_area']:.1f} m²\n")
             f.write(f"Mean EPC Rating: {summary['case_street']['mean_epc_rating']:.1f}\n\n")
 
-            f.write("LONDON-WIDE AVERAGE (Edwardian Terraces)\n")
+            f.write("LONDON-WIDE AVERAGE (Study Sample)\n")
             f.write("-" * 80 + "\n")
             f.write(f"Property Count: {summary['london_wide']['property_count']:,}\n")
             f.write(f"Mean Energy Consumption: {summary['london_wide']['mean_energy_consumption']:.1f} kWh/m²/year\n")
@@ -379,7 +379,7 @@ class AdditionalReports:
             "for all combi boiler replacements",
             "7. Loft insulation thickness often unspecified (recorded as efficiency rating only) "
             "- top-up needs estimated from rating where possible",
-            "8. Solid floor insulation rarely feasible in Edwardian properties - excluded from "
+            "8. Solid floor insulation rarely feasible in some properties - excluded from "
             "cost estimates despite potential benefits",
             "9. EPC data represents modelled (SAP) consumption, not actual metered usage - "
             "savings estimates should be treated as indicative",

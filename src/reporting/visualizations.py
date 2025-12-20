@@ -71,7 +71,7 @@ class ReportGenerator:
 
         ax.set_xlabel('EPC Band', fontsize=12, fontweight='bold')
         ax.set_ylabel('Number of Properties', fontsize=12, fontweight='bold')
-        ax.set_title('Current EPC Band Distribution\nEdwardian Terraced Housing, Study Sample',
+        ax.set_title('Current EPC Band Distribution\nEPC Study Sample',
                     fontsize=14, fontweight='bold', pad=20)
 
         # Add grid
@@ -130,7 +130,7 @@ class ReportGenerator:
 
         ax.set_xlabel('SAP Score', fontsize=12, fontweight='bold')
         ax.set_ylabel('Number of Properties', fontsize=12, fontweight='bold')
-        ax.set_title('SAP Score Distribution\nEdwardian Terraced Housing, Study Sample',
+        ax.set_title('SAP Score Distribution\nEPC Study Sample',
                     fontsize=14, fontweight='bold', pad=20)
 
         ax.legend(loc='upper right', fontsize=10)
@@ -494,7 +494,7 @@ class ReportGenerator:
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write("="*80 + "\n")
             f.write("HEAT STREET PROJECT: EXECUTIVE SUMMARY\n")
-            f.write("Edwardian Terraced Housing - Constituency EPC Analysis\n")
+            f.write("Housing Stock - Constituency EPC Analysis\n")
             f.write("="*80 + "\n\n")
 
             # Archetype Summary
@@ -600,7 +600,7 @@ class ReportGenerator:
 
         # Header
         lines.append("# Heat Street Project: Executive Summary")
-        lines.append("Edwardian Terraced Housing - Constituency EPC Analysis")
+        lines.append("Housing Stock - Constituency EPC Analysis")
         lines.append("")
 
         # Archetype Summary

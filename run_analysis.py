@@ -310,7 +310,6 @@ def download_data(scope, email, api_key, analysis_logger: AnalysisLogger = None)
 
             df = downloader.download_borough_data(
                 borough_name=borough,
-                property_type='house',
                 from_year=scope['from_year'],
                 max_results=scope.get('max_per_borough')
             )
@@ -319,7 +318,6 @@ def download_data(scope, email, api_key, analysis_logger: AnalysisLogger = None)
             console.print("[cyan]Downloading ALL configured local authorities (this will take a while)...[/cyan]")
 
             df = downloader.download_all_local_authorities(
-                property_types=['house', 'flat'],
                 from_year=scope['from_year'],
                 max_results_per_borough=scope.get('max_per_borough')
             )
@@ -331,7 +329,6 @@ def download_data(scope, email, api_key, analysis_logger: AnalysisLogger = None)
             for borough in scope['boroughs']:
                 df_borough = downloader.download_borough_data(
                     borough_name=borough,
-                    property_type='house',
                     from_year=scope['from_year'],
                     max_results=scope.get('max_per_borough')
                 )
@@ -367,8 +364,8 @@ def download_data(scope, email, api_key, analysis_logger: AnalysisLogger = None)
 
         if analysis_logger:
             analysis_logger.add_output("data/raw/epc_raw.csv", "csv", "Raw EPC data from API")
-            analysis_logger.add_output("data/raw/epc_filtered.csv", "csv", "Filtered Edwardian terraced properties")
-            analysis_logger.complete_phase(success=True, message=f"Downloaded {len(df_filtered):,} Edwardian properties")
+            analysis_logger.add_output("data/raw/epc_filtered.csv", "csv", "Filtered EPC properties")
+            analysis_logger.complete_phase(success=True, message=f"Downloaded {len(df_filtered):,} properties")
 
         return df_filtered
 
@@ -529,7 +526,7 @@ def analyze_archetype(df, analysis_logger: AnalysisLogger = None):
     if analysis_logger:
         analysis_logger.start_phase(
             "Archetype Analysis",
-            "Characterize Edwardian housing stock by EPC bands, insulation, heating systems, etc."
+            "Characterize housing stock by EPC bands, insulation, heating systems, etc."
         )
 
     console.print("[cyan]Analyzing property characteristics...[/cyan]")
