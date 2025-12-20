@@ -208,6 +208,14 @@ def ask_download_scope():
                 default="5000"
             ).ask())
 
+        local_authority_codes = {}
+        if not configured_codes:
+            for borough in boroughs:
+                la_code = questionary.text(
+                    f"Enter the local authority code for {borough} (e.g., E09000007):"
+                ).ask()
+                local_authority_codes[borough] = la_code
+
         return {
             'mode': 'multiple',
             'boroughs': boroughs,
@@ -279,7 +287,9 @@ def download_data(scope, analysis_logger: AnalysisLogger = None):
         )
 
     try:
-        downloader = EPCAPIDownloader()
+        downloader = EPCAPIDownloader(
+            local_authority_codes=scope.get('local_authority_codes')
+        )
 
         if scope['mode'] == 'single':
             borough = scope['boroughs'][0]
