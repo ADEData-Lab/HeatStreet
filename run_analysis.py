@@ -987,7 +987,7 @@ def generate_additional_reports(df_raw, df_validated, validation_report, archety
     if analysis_logger:
         analysis_logger.start_phase(
             "Additional Reports",
-            "Generate specialized reports (case streets, borough breakdown, data quality, subsidy analysis)"
+            "Generate specialized reports (case streets, constituency breakdown, data quality, subsidy analysis)"
         )
 
     from src.analysis.additional_reports import AdditionalReports
@@ -1016,18 +1016,18 @@ def generate_additional_reports(df_raw, df_validated, validation_report, archety
         console.print(f"[yellow]⚠ Could not generate case street extract: {e}[/yellow]")
         case_street_df, case_street_summary = None, None
 
-    # 2. Borough-level Breakdown
+    # 2. Constituency-level Breakdown
     try:
-        console.print("[cyan]Generating borough-level breakdown...[/cyan]")
-        borough_path = output_dir / "borough_breakdown.csv"
-        borough_df = reporter.generate_borough_breakdown(
+        console.print("[cyan]Generating constituency-level breakdown...[/cyan]")
+        constituency_path = output_dir / "constituency_breakdown.csv"
+        constituency_df = reporter.generate_constituency_breakdown(
             df_validated,
-            output_path=borough_path
+            output_path=constituency_path
         )
-        reports_created.append(f"✓ Local authority breakdown ({len(borough_df)} areas)")
+        reports_created.append(f"✓ Constituency breakdown ({len(constituency_df)} areas)")
     except Exception as e:
-        console.print(f"[yellow]⚠ Could not generate borough breakdown: {e}[/yellow]")
-        borough_df = None
+        console.print(f"[yellow]⚠ Could not generate constituency breakdown: {e}[/yellow]")
+        constituency_df = None
 
     # 3. Data Quality Report
     try:
@@ -1086,7 +1086,7 @@ def generate_additional_reports(df_raw, df_validated, validation_report, archety
 
     if analysis_logger:
         analysis_logger.add_metric("additional_reports", len(reports_created), f"{len(reports_created)} specialized reports")
-        analysis_logger.add_output("data/outputs/borough_breakdown.csv", "csv", "Borough-level breakdown")
+        analysis_logger.add_output("data/outputs/constituency_breakdown.csv", "csv", "Constituency-level breakdown")
         analysis_logger.add_output("data/outputs/subsidy_sensitivity_analysis.csv", "csv", "Subsidy sensitivity analysis")
         analysis_logger.add_output("data/outputs/data_quality_report.txt", "report", "Data quality assessment")
         analysis_logger.complete_phase(success=True, message=f"{len(reports_created)} additional specialized reports generated")
@@ -1094,7 +1094,7 @@ def generate_additional_reports(df_raw, df_validated, validation_report, archety
     return {
         "case_street_df": case_street_df,
         "case_street_summary": case_street_summary,
-        "borough_breakdown": borough_df,
+        "constituency_breakdown": constituency_df,
     }
 
 
@@ -1141,7 +1141,7 @@ def package_dashboard_assets(
 
         builder = DashboardDataBuilder()
         case_summary = (additional_reports or {}).get("case_street_summary") if additional_reports else None
-        borough_breakdown = (additional_reports or {}).get("borough_breakdown") if additional_reports else None
+        constituency_breakdown = (additional_reports or {}).get("constituency_breakdown") if additional_reports else None
 
         # Load additional data files if they exist
         load_profile_summary = None
@@ -1182,7 +1182,7 @@ def package_dashboard_assets(
             scenario_results,
             readiness_summary,
             pathway_summary,
-            borough_breakdown,
+            constituency_breakdown,
             case_summary,
             subsidy_results,
             df_validated,
