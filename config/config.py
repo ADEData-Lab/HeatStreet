@@ -40,10 +40,22 @@ def load_config(config_file: str = "config.yaml") -> Dict[str, Any]:
     return config
 
 
-def get_london_boroughs() -> list:
-    """Get list of London boroughs from config."""
+def get_local_authorities() -> list:
+    """Get list of local authorities from config (optional)."""
     config = load_config()
-    return config['geography']['boroughs']
+    geography = config.get('geography', {})
+    local_authorities = geography.get('local_authorities')
+    if local_authorities:
+        return local_authorities
+    local_authority_codes = geography.get('local_authority_codes', {})
+    if local_authority_codes:
+        return list(local_authority_codes.keys())
+    return geography.get('boroughs', [])
+
+
+def get_london_boroughs() -> list:
+    """Backward-compatible alias for local authority list."""
+    return get_local_authorities()
 
 
 def get_property_filters() -> Dict[str, Any]:
@@ -278,7 +290,8 @@ if __name__ == "__main__":
     config = load_config()
     print("Configuration loaded successfully!")
     print(f"Project: {config['project']['name']}")
-    print(f"Number of London boroughs: {len(config['geography']['boroughs'])}")
+    local_authorities = config.get('geography', {}).get('local_authorities', [])
+    print(f"Number of configured local authorities: {len(local_authorities)}")
 
     # Ensure directories exist
     ensure_directories()

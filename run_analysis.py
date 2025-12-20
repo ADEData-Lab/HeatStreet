@@ -24,7 +24,7 @@ sys.path.append(str(Path(__file__).parent))
 
 from config.config import load_config, ensure_directories, DATA_RAW_DIR, DATA_PROCESSED_DIR
 from src.acquisition.epc_api_downloader import EPCAPIDownloader
-from src.acquisition.london_gis_downloader import LondonGISDownloader
+from src.acquisition.desnz_heat_network_downloader import DESNZHeatNetworkDownloader
 from src.cleaning.data_validator import EPCDataValidator
 from src.analysis.archetype_analysis import ArchetypeAnalyzer
 from src.modeling.scenario_model import ScenarioModeler
@@ -42,7 +42,7 @@ def print_header():
     rprint(Panel.fit(
         "[bold cyan]Heat Street EPC Analysis[/bold cyan]\n"
         "[white]Complete Interactive Pipeline[/white]\n"
-        "[dim]London Edwardian Terraced Housing Analysis[/dim]",
+        "[dim]England and Wales Domestic EPC Analysis[/dim]",
         border_style="cyan"
     ))
     print()
@@ -109,16 +109,16 @@ def ask_download_scope():
     choice = questionary.select(
         "What would you like to download?",
         choices=[
-            questionary.Choice("Quick test (single borough, limited data)", value="test"),
-            questionary.Choice("Medium dataset (5 boroughs, last 5 years)", value="medium"),
-            questionary.Choice("Full dataset (all 33 London boroughs)", value="full"),
+            questionary.Choice("Quick test (single local authority, limited data)", value="test"),
+            questionary.Choice("Medium dataset (5 local authorities, last 5 years)", value="medium"),
+            questionary.Choice("Full dataset (all configured local authorities)", value="full"),
             questionary.Choice("Custom selection", value="custom")
         ]
     ).ask()
 
     if choice == "test":
         borough = questionary.select(
-            "Select a borough for testing:",
+            "Select a local authority for testing:",
             choices=["Camden", "Islington", "Hackney", "Westminster", "Southwark"]
         ).ask()
         return {
@@ -154,7 +154,7 @@ def ask_download_scope():
 
     else:  # custom
         boroughs = questionary.checkbox(
-            "Select boroughs (space to select, enter to confirm):",
+            "Select local authorities (space to select, enter to confirm):",
             choices=[
                 "Camden", "Islington", "Hackney", "Westminster", "Southwark",
                 "Tower Hamlets", "Lambeth", "Wandsworth", "Greenwich", "Lewisham"
@@ -167,14 +167,14 @@ def ask_download_scope():
         ).ask()
 
         limit = questionary.confirm(
-            "Limit results per borough (faster)?",
+            "Limit results per local authority (faster)?",
             default=False
         ).ask()
 
         max_per_borough = None
         if limit:
             max_per_borough = int(questionary.text(
-                "Maximum records per borough:",
+                "Maximum records per local authority:",
                 default="5000"
             ).ask())
 
@@ -187,35 +187,32 @@ def ask_download_scope():
 
 
 def ask_gis_download():
-    """Ask if user wants to download London GIS data for spatial analysis."""
+    """Ask if user wants to download DESNZ heat network planning data for spatial analysis."""
     console.print()
-    console.print("[cyan]London GIS Data (Optional)[/cyan]")
+    console.print("[cyan]DESNZ Heat Network Planning Data (Optional)[/cyan]")
     console.print()
-    console.print("This analysis can optionally use GIS data from London Datastore for:")
+    console.print("This analysis can optionally use DESNZ heat network planning data for:")
     console.print("  • Existing district heating networks")
-    console.print("  • Potential heat network zones")
-    console.print("  • Heat load and supply data by borough")
+    console.print("  • Heat network zones")
     console.print()
 
     # Check if already downloaded
-    gis_downloader = LondonGISDownloader()
+    gis_downloader = DESNZHeatNetworkDownloader()
     summary = gis_downloader.get_data_summary()
 
     if summary['available']:
         console.print("[green]✓[/green] GIS data already downloaded")
-        console.print(f"    Heat load files: {summary['heat_load_files']}")
         console.print(f"    Network files: {summary['network_files']}")
-        console.print(f"    Heat supply files: {summary['heat_supply_files']}")
         return True
 
     download = questionary.confirm(
-        "Download London GIS data? (~2 MB, required for spatial analysis)",
+        "Download DESNZ heat network data? (required for spatial analysis)",
         default=True
     ).ask()
 
     if download:
         console.print()
-        console.print("[cyan]Downloading London GIS data...[/cyan]")
+        console.print("[cyan]Downloading DESNZ heat network data...[/cyan]")
 
         if gis_downloader.download_and_prepare():
             console.print("[green]✓[/green] GIS data downloaded and ready")
@@ -236,7 +233,7 @@ def download_data(scope, analysis_logger: AnalysisLogger = None):
     if analysis_logger:
         analysis_logger.start_phase(
             "Data Download",
-            "Download EPC data from API and filter for Edwardian terraced houses"
+            "Download EPC data from API and apply configured property filters"
         )
 
     try:
@@ -254,16 +251,16 @@ def download_data(scope, analysis_logger: AnalysisLogger = None):
             )
 
         elif scope['mode'] == 'all':
-            console.print(f"[cyan]Downloading ALL London boroughs (this will take a while)...[/cyan]")
+            console.print("[cyan]Downloading ALL configured local authorities (this will take a while)...[/cyan]")
 
-            df = downloader.download_all_london_boroughs(
-                property_types=['house'],
+            df = downloader.download_all_local_authorities(
+                property_types=['house', 'flat'],
                 from_year=scope['from_year'],
                 max_results_per_borough=scope.get('max_per_borough')
             )
 
         else:  # multiple
-            console.print(f"[cyan]Downloading {len(scope['boroughs'])} boroughs...[/cyan]")
+            console.print(f"[cyan]Downloading {len(scope['boroughs'])} local authorities...[/cyan]")
 
             all_data = []
             for borough in scope['boroughs']:
@@ -289,7 +286,10 @@ def download_data(scope, analysis_logger: AnalysisLogger = None):
 
         if analysis_logger:
             analysis_logger.add_metric("raw_records_downloaded", len(df), "Total records from API")
-            analysis_logger.add_metric("boroughs_requested", len(scope['boroughs']) if scope['boroughs'] else 33)
+            analysis_logger.add_metric(
+                "local_authorities_requested",
+                len(scope['boroughs']) if scope['boroughs'] else "all_configured"
+            )
             analysis_logger.add_metric("from_year", scope['from_year'])
 
         # Apply Edwardian filters
@@ -776,7 +776,7 @@ def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None):
 
         console.print("[cyan]Running spatial analysis...[/cyan]")
         console.print("  • Geocoding properties from lat/lon coordinates")
-        console.print("  • Loading London heat network GIS data")
+        console.print("  • Loading DESNZ heat network planning data")
         console.print("  • Calculating heat density (GWh/km²)")
         console.print("  • Classifying into 5 heat network tiers")
         console.print()
@@ -1024,7 +1024,7 @@ def generate_additional_reports(df_raw, df_validated, validation_report, archety
             df_validated,
             output_path=borough_path
         )
-        reports_created.append(f"✓ Borough breakdown ({len(borough_df)} boroughs)")
+        reports_created.append(f"✓ Local authority breakdown ({len(borough_df)} areas)")
     except Exception as e:
         console.print(f"[yellow]⚠ Could not generate borough breakdown: {e}[/yellow]")
         borough_df = None
@@ -1460,7 +1460,7 @@ def main():
             f"[bold]Analysis Configuration[/bold]\n\n"
             f"Mode: {scope['mode']}\n"
             f"From year: {scope['from_year']}\n"
-            f"Boroughs: {len(scope['boroughs']) if scope['boroughs'] else 'All (33)'}",
+            f"Local authorities: {len(scope['boroughs']) if scope['boroughs'] else 'All configured'}",
             border_style="cyan"
         ))
         console.print()
