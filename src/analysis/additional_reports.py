@@ -170,6 +170,7 @@ class AdditionalReports:
 
         constituency_column = None
         for candidate in [
+            "CONSTITUENCY_LABEL",
             "CONSTITUENCY_NAME",
             "CONSTITUENCY",
             "WESTMINSTER_PARLIAMENTARY_CONSTITUENCY",
