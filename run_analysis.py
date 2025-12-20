@@ -22,7 +22,13 @@ import time
 # Add src to path
 sys.path.append(str(Path(__file__).parent))
 
-from config.config import load_config, ensure_directories, DATA_RAW_DIR, DATA_PROCESSED_DIR
+from config.config import (
+    load_config,
+    ensure_directories,
+    DATA_RAW_DIR,
+    DATA_PROCESSED_DIR,
+    get_local_authorities,
+)
 from src.acquisition.epc_api_downloader import EPCAPIDownloader
 from src.acquisition.desnz_heat_network_downloader import (
     DESNZHeatNetworkDownloader,
@@ -109,6 +115,15 @@ def ask_download_scope():
     console.print("[cyan]Data Download Options:[/cyan]")
     console.print()
 
+    config = load_config()
+    configured_codes = config.get('geography', {}).get('local_authority_codes') or {}
+    available_authorities = list(configured_codes.keys()) or get_local_authorities()
+
+    if not available_authorities:
+        console.print("[yellow]⚠[/yellow] No local authorities configured in config.yaml.")
+        console.print("    Provide at least one local_authority_codes entry or enter a manual test authority.")
+        console.print()
+
     choice = questionary.select(
         "What would you like to download?",
         choices=[
@@ -120,26 +135,57 @@ def ask_download_scope():
     ).ask()
 
     if choice == "test":
-        borough = questionary.select(
-            "Select a local authority for testing:",
-            choices=["Camden", "Islington", "Hackney", "Westminster", "Southwark"]
-        ).ask()
+        if available_authorities:
+            borough = questionary.select(
+                "Select a local authority for testing:",
+                choices=available_authorities
+            ).ask()
+            local_authority_codes = {}
+            if not configured_codes:
+                la_code = questionary.text(
+                    f"Enter the local authority code for {borough} (e.g., E09000007):"
+                ).ask()
+                local_authority_codes[borough] = la_code
+        else:
+            borough = questionary.text(
+                "Enter the local authority name for testing:"
+            ).ask()
+            la_code = questionary.text(
+                f"Enter the local authority code for {borough} (e.g., E09000007):"
+            ).ask()
+            local_authority_codes = {borough: la_code}
         return {
             'mode': 'single',
             'boroughs': [borough],
             'from_year': 2020,
-            'max_per_borough': 1000
+            'max_per_borough': 1000,
+            'local_authority_codes': local_authority_codes or None,
         }
 
     elif choice == "medium":
+        if not available_authorities:
+            console.print("[yellow]⚠[/yellow] Configure local_authority_codes before running a medium dataset download.")
+            return ask_download_scope()
+        boroughs = available_authorities[:5]
+        local_authority_codes = {}
+        if not configured_codes:
+            for borough in boroughs:
+                la_code = questionary.text(
+                    f"Enter the local authority code for {borough} (e.g., E09000007):"
+                ).ask()
+                local_authority_codes[borough] = la_code
         return {
             'mode': 'multiple',
-            'boroughs': ["Camden", "Islington", "Hackney", "Westminster", "Tower Hamlets"],
+            'boroughs': boroughs,
             'from_year': 2020,
-            'max_per_borough': None
+            'max_per_borough': None,
+            'local_authority_codes': local_authority_codes or None,
         }
 
     elif choice == "full":
+        if not available_authorities or not configured_codes:
+            console.print("[yellow]⚠[/yellow] Configure local_authority_codes before running a full dataset download.")
+            return ask_download_scope()
         confirm = questionary.confirm(
             "Full download will take 2-4 hours. Continue?",
             default=False
@@ -156,12 +202,12 @@ def ask_download_scope():
             return ask_download_scope()  # Ask again
 
     else:  # custom
+        if not available_authorities:
+            console.print("[yellow]⚠[/yellow] Configure local_authority_codes before running a custom selection.")
+            return ask_download_scope()
         boroughs = questionary.checkbox(
             "Select local authorities (space to select, enter to confirm):",
-            choices=[
-                "Camden", "Islington", "Hackney", "Westminster", "Southwark",
-                "Tower Hamlets", "Lambeth", "Wandsworth", "Greenwich", "Lewisham"
-            ]
+            choices=available_authorities
         ).ask()
 
         from_year = questionary.select(
@@ -181,11 +227,20 @@ def ask_download_scope():
                 default="5000"
             ).ask())
 
+        local_authority_codes = {}
+        if not configured_codes:
+            for borough in boroughs:
+                la_code = questionary.text(
+                    f"Enter the local authority code for {borough} (e.g., E09000007):"
+                ).ask()
+                local_authority_codes[borough] = la_code
+
         return {
             'mode': 'multiple',
             'boroughs': boroughs,
             'from_year': int(from_year),
-            'max_per_borough': max_per_borough
+            'max_per_borough': max_per_borough,
+            'local_authority_codes': local_authority_codes or None,
         }
 
 
@@ -252,7 +307,9 @@ def download_data(scope, analysis_logger: AnalysisLogger = None):
         )
 
     try:
-        downloader = EPCAPIDownloader()
+        downloader = EPCAPIDownloader(
+            local_authority_codes=scope.get('local_authority_codes')
+        )
 
         if scope['mode'] == 'single':
             borough = scope['boroughs'][0]

@@ -79,7 +79,12 @@ class EPCAPIDownloader:
         'Westminster': 'E09000033'
     }
 
-    def __init__(self, email: Optional[str] = None, api_key: Optional[str] = None):
+    def __init__(
+        self,
+        email: Optional[str] = None,
+        api_key: Optional[str] = None,
+        local_authority_codes: Optional[Dict[str, str]] = None,
+    ):
         """
         Initialize EPC API downloader.
 
@@ -90,7 +95,7 @@ class EPCAPIDownloader:
         self.config = load_config()
         self.property_filters = get_property_filters()
         self.local_authorities = get_local_authorities()
-        self.local_authority_codes = (
+        self.local_authority_codes = local_authority_codes or (
             self.config.get('geography', {}).get('local_authority_codes') or {}
         )
 
