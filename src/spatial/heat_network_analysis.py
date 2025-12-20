@@ -79,6 +79,7 @@ class HeatNetworkAnalyzer:
     def load_desnz_heat_network_data(
         self,
         heat_networks_file: Optional[Path] = None,
+        heat_networks_csv: Optional[Path] = None,
         heat_zones_file: Optional[Path] = None,
         auto_download: bool = True
     ) -> Tuple[Optional[gpd.GeoDataFrame], Optional[gpd.GeoDataFrame]]:
@@ -90,6 +91,7 @@ class HeatNetworkAnalyzer:
 
         Args:
             heat_networks_file: Path to existing heat networks shapefile/geojson
+            heat_networks_csv: Path to CSV fallback for existing heat networks
             heat_zones_file: Path to Heat Network Zones shapefile/geojson
             auto_download: If True, automatically download GIS data if not present
 
@@ -131,8 +133,15 @@ class HeatNetworkAnalyzer:
             except Exception as e:
                 logger.error(f"Error loading heat networks: {e}")
         else:
-            logger.warning("Heat networks file not found.")
-            logger.info("Provide DESNZ heat network planning data in data/external/desnz_heat_network_planning.")
+            csv_path = self.gis_downloader.get_csv_network_path(heat_networks_csv)
+            if csv_path:
+                heat_networks = self._load_csv_heat_networks(csv_path)
+            else:
+                logger.warning("Heat networks file not found.")
+                logger.info(
+                    "Provide DESNZ heat network planning data in data/external/desnz_heat_network_planning "
+                    "or a CSV in data/external."
+                )
 
         # Try to load heat network zones
         if heat_zones_file and heat_zones_file.exists():
@@ -145,6 +154,49 @@ class HeatNetworkAnalyzer:
             logger.warning("Heat network zones file not found.")
 
         return heat_networks, heat_zones
+
+    def _load_csv_heat_networks(self, csv_path: Path) -> Optional[gpd.GeoDataFrame]:
+        """
+        Load existing heat networks from a CSV fallback.
+
+        Args:
+            csv_path: Path to the CSV file.
+
+        Returns:
+            GeoDataFrame of existing heat networks or None if invalid.
+        """
+        logger.info(f"Loading heat networks from CSV: {csv_path}")
+        try:
+            df = pd.read_csv(csv_path)
+        except Exception as e:
+            logger.error(f"Error reading heat network CSV: {e}")
+            return None
+
+        x_col = "X-coordinate"
+        y_col = "Y-coordinate"
+
+        if x_col not in df.columns or y_col not in df.columns:
+            logger.error(
+                "CSV missing required columns for coordinates. "
+                f"Expected '{x_col}' and '{y_col}'."
+            )
+            return None
+
+        df[x_col] = pd.to_numeric(df[x_col], errors="coerce")
+        df[y_col] = pd.to_numeric(df[y_col], errors="coerce")
+
+        valid = df[[x_col, y_col]].notna().all(axis=1)
+        df = df.loc[valid].copy()
+
+        if df.empty:
+            logger.warning("CSV fallback has no valid coordinate rows.")
+            return None
+
+        geometry = gpd.points_from_xy(df[x_col], df[y_col])
+        gdf = gpd.GeoDataFrame(df, geometry=geometry, crs="EPSG:27700")
+        gdf = gdf.to_crs("EPSG:4326")
+        logger.info(f"✓ Loaded {len(gdf)} existing heat network points from CSV")
+        return gdf
 
     def geocode_properties(self, df: pd.DataFrame) -> gpd.GeoDataFrame:
         """
