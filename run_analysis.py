@@ -357,14 +357,7 @@ def download_data(scope, email, api_key, analysis_logger: AnalysisLogger = None)
             )
             analysis_logger.add_metric("from_year", scope['from_year'])
 
-        # Apply Edwardian filters
-        console.print("[cyan]Applying Edwardian terraced housing filters...[/cyan]")
-        df_filtered = downloader.apply_edwardian_filters(df)
-        console.print(f"[green]✓[/green] Filtered to {len(df_filtered):,} Edwardian terraced houses")
-
-        if analysis_logger:
-            analysis_logger.add_metric("filtered_records", len(df_filtered), "Edwardian terraced houses after filtering")
-            analysis_logger.add_metric("filter_rate", len(df_filtered) / len(df) * 100, "Percentage retained after filtering")
+        df_filtered = df
 
         # Save data
         console.print("[cyan]Saving data...[/cyan]")
