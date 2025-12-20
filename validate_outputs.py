@@ -286,7 +286,7 @@ class OutputValidator:
         logger.info("="*70)
 
         # Load validated data
-        validated_file = DATA_PROCESSED_DIR / "epc_london_validated.csv"
+        validated_file = DATA_PROCESSED_DIR / "epc_validated.csv"
 
         if not validated_file.exists():
             logger.error("Validated data file not found. Run analysis first.")

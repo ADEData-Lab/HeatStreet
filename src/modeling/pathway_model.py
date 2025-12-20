@@ -913,10 +913,10 @@ def main():
     test_hybrid_cost_bug()
 
     # Load validated data
-    input_file = DATA_PROCESSED_DIR / "epc_london_validated.parquet"
+    input_file = DATA_PROCESSED_DIR / "epc_validated.parquet"
 
     if not input_file.exists():
-        input_file = DATA_PROCESSED_DIR / "epc_london_validated.csv"
+        input_file = DATA_PROCESSED_DIR / "epc_validated.csv"
         if not input_file.exists():
             logger.error("Input file not found")
             return

@@ -18,7 +18,7 @@ export default function ExecutiveSummary() {
       <div className="card">
         <h2 className="card-header">Executive Summary</h2>
         <p className="card-description">
-          Comprehensive analysis of {executiveSummary.totalProperties.toLocaleString()} Edwardian terraced properties across London.
+          Comprehensive analysis of {executiveSummary.totalProperties.toLocaleString()} Edwardian terraced properties across selected constituencies.
           This dashboard addresses all client requirements for fabric analysis, retrofit measures, pathways, and sensitivity analysis.
         </p>
 

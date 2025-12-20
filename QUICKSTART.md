@@ -77,7 +77,7 @@
 The interactive CLI guides you through:
 
 ### Phase 1: Data Download
-- Select London borough(s)
+- Select local authority areas
 - Auto-downloads from EPC Register API
 - Example: "Islington" → downloads ~4,200 properties
 
@@ -133,8 +133,8 @@ The interactive CLI guides you through:
 - Tiers 1-3 → District heating preferred
 - Tiers 4-5 → Heat pumps recommended
 
-**Auto-downloads London GIS data**:
-- Heat loads (33 boroughs)
+**Auto-downloads GIS data**:
+- Heat loads (national coverage)
 - Existing district heating networks
 - Planned Heat Network Zones
 - Heat supply infrastructure
@@ -185,11 +185,11 @@ Starting Interactive Analysis
 
 Phase 1: Data Acquisition
 --------------------------
-Enter borough name (or 'all' for all London): Islington
+Enter local authority name (or 'all' for all configured areas): Islington
 Downloading EPC data for Islington...
 ✓ Downloaded 4,234 properties
 ✓ Validated and cleaned
-✓ Saved to data/processed/epc_islington_validated.csv
+✓ Saved to data/processed/epc_validated.csv
 
 Phase 2: Archetype Analysis
 ----------------------------
@@ -227,7 +227,7 @@ Hybrid (Optimal)      £67.2M         £4.8M/year        14 years   70%
 
 Phase 4: Spatial Analysis
 --------------------------
-Checking for London GIS data...
+Checking for GIS data...
 ✓ GIS data found: data/supplementary/GIS_All_Data/
 ✓ Loading heat loads for Islington...
 ✓ Loading existing heat networks...
@@ -318,7 +318,7 @@ data/outputs/
 Edit `config/config.yaml` before running:
 
 ```yaml
-# Which boroughs to analyze
+# Which local authorities to analyze
 geographic_scope:
   boroughs:
     - "Islington"
@@ -368,8 +368,8 @@ energy_prices:
 → Run: `Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser`
 
 ### No properties downloaded
-→ Check borough spelling (case-sensitive)
-→ Try "all" to download all London boroughs
+→ Check local authority spelling (case-sensitive)
+→ Try "all" to download all configured local authorities
 → Check internet connection
 
 ### Analysis works but no spatial outputs
@@ -383,7 +383,7 @@ energy_prices:
 
 - **[README.md](README.md)** - Full project documentation
 - **[docs/SPATIAL_SETUP.md](docs/SPATIAL_SETUP.md)** - Detailed GDAL installation guide
-- **[docs/GIS_DATA.md](docs/GIS_DATA.md)** - London GIS data documentation
+- **[docs/GIS_DATA.md](docs/GIS_DATA.md)** - GIS data documentation
 - **[docs/QUICKSTART_WINDOWS.md](docs/QUICKSTART_WINDOWS.md)** - Windows-specific guide
 
 ---

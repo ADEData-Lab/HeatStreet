@@ -86,7 +86,7 @@ def run_cleaning_phase(args):
     logger.info("="*70)
 
     from config.config import DATA_RAW_DIR, DATA_PROCESSED_DIR
-    input_file = DATA_RAW_DIR / "epc_london_filtered.csv"
+    input_file = DATA_RAW_DIR / "epc_filtered.csv"
 
     if not input_file.exists():
         logger.error(f"Input file not found: {input_file}")
@@ -100,7 +100,7 @@ def run_cleaning_phase(args):
     df_validated, report = validator.validate_dataset(df)
 
     # Save validated data
-    output_file = DATA_PROCESSED_DIR / "epc_london_validated.csv"
+    output_file = DATA_PROCESSED_DIR / "epc_validated.csv"
     df_validated.to_csv(output_file, index=False)
 
     parquet_file = output_file.with_suffix('.parquet')
@@ -122,7 +122,7 @@ def run_analysis_phase(args):
     from config.config import DATA_PROCESSED_DIR
     import pandas as pd
 
-    input_file = DATA_PROCESSED_DIR / "epc_london_validated.csv"
+    input_file = DATA_PROCESSED_DIR / "epc_validated.csv"
     if not input_file.exists():
         logger.error("Validated data not found. Run cleaning phase first.")
         return None
@@ -153,10 +153,10 @@ def run_modeling_phase(args):
     from src.analysis.fabric_tipping_point import FabricTippingPointAnalyzer
     from src.reporting.comparisons import ComparisonReporter
 
-    input_file = DATA_PROCESSED_DIR / "epc_london_validated.csv"
+    input_file = DATA_PROCESSED_DIR / "epc_validated.csv"
     if not input_file.exists():
         # Try parquet
-        input_file = DATA_PROCESSED_DIR / "epc_london_validated.parquet"
+        input_file = DATA_PROCESSED_DIR / "epc_validated.parquet"
         if not input_file.exists():
             logger.error("Validated data not found. Run cleaning phase first.")
             return None
@@ -259,7 +259,7 @@ def run_spatial_phase(args):
     from config.config import DATA_PROCESSED_DIR, DATA_SUPPLEMENTARY_DIR
     import pandas as pd
 
-    input_file = DATA_PROCESSED_DIR / "epc_london_validated.csv"
+    input_file = DATA_PROCESSED_DIR / "epc_validated.csv"
     if not input_file.exists():
         logger.error("Validated data not found. Run cleaning phase first.")
         return None
@@ -293,7 +293,7 @@ def run_spatial_phase(args):
 
         # Save results
         from config.config import DATA_OUTPUTS_DIR
-        output_file = DATA_PROCESSED_DIR / "epc_london_with_tiers.geojson"
+        output_file = DATA_PROCESSED_DIR / "epc_with_tiers.geojson"
         properties_classified.to_file(output_file, driver='GeoJSON')
 
         pathway_file = DATA_OUTPUTS_DIR / "pathway_suitability_by_tier.csv"
