@@ -26,13 +26,13 @@ data/external/
 
 ## Optional CSV Fallback (Existing Networks Only)
 
-If you only have the CSV extract (for example `HNPD_Publication_Q3_2025 (1).csv`),
+If you only have the CSV extract (for example `hnpd-january-2024.csv`),
 place it in `data/external/` and the analysis will use it when the GIS layers
 are missing:
 
 ```
 data/external/
-├── HNPD_Publication_Q3_2025 (1).csv
+├── hnpd-january-2024.csv
 └── desnz_heat_network_planning/
 ```
 
