@@ -56,7 +56,7 @@ Supported formats: GeoPackage (`.gpkg`), GeoJSON (`.geojson`), or Shapefile (`.s
 
 ### Option 1b: CSV Fallback for Existing Networks
 
-If you only have the CSV publication extract (for example `HNPD_Publication_Q3_2025 (1).csv`),
+If you only have the CSV publication extract (for example `hnpd-january-2024.csv`),
 place it in `data/external/`. The analyzer will use it when the GIS layers are missing.
 
 Expected columns:
@@ -125,7 +125,7 @@ data/external/desnz_heat_network_planning/zones/
 If you only have the CSV extract, ensure it exists at:
 
 ```
-data/external/HNPD_Publication_Q3_2025 (1).csv
+data/external/hnpd-january-2024.csv
 ```
 
 or set `DESNZ_HEAT_NETWORK_CSV_PATH` to the CSV file location.
