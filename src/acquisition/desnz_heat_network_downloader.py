@@ -7,6 +7,8 @@ heat network analysis.
 
 import os
 import subprocess
+import urllib.request
+from shutil import which
 import zipfile
 from pathlib import Path
 from typing import Dict, List, Optional
@@ -17,13 +19,16 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 DATA_DIR = PROJECT_ROOT / "data"
 EXTERNAL_DIR = DATA_DIR / "external"
 GIS_DIR = EXTERNAL_DIR / "desnz_heat_network_planning"
-DEFAULT_CSV_NAME = "HNPD_Publication_Q3_2025 (1).csv"
+DEFAULT_CSV_NAME = "hnpd-january-2024.csv"
 
 
 class DESNZHeatNetworkDownloader:
     """Downloads and manages DESNZ heat network planning data."""
 
-    GIS_DATA_URL = os.getenv("DESNZ_HEAT_NETWORK_DATA_URL")
+    DEFAULT_GIS_DATA_URL = (
+        "https://assets.publishing.service.gov.uk/media/65c9f7b89c5b7f000c951cad/hnpd-january-2024.csv"
+    )
+    GIS_DATA_URL = os.getenv("DESNZ_HEAT_NETWORK_DATA_URL", DEFAULT_GIS_DATA_URL)
     CSV_DATA_PATH = os.getenv("DESNZ_HEAT_NETWORK_CSV_PATH")
 
     def __init__(self):
@@ -51,9 +56,15 @@ class DESNZHeatNetworkDownloader:
             )
             return False
 
+        is_csv_url = self.GIS_DATA_URL.lower().endswith(".csv")
         zip_path = EXTERNAL_DIR / "desnz_heat_network_planning.zip"
+        csv_path = EXTERNAL_DIR / DEFAULT_CSV_NAME
 
-        if zip_path.exists() and not force_redownload:
+        if is_csv_url and csv_path.exists() and not force_redownload:
+            logger.info(f"DESNZ data already downloaded: {csv_path}")
+            return True
+
+        if zip_path.exists() and not force_redownload and not is_csv_url:
             logger.info(f"DESNZ data already downloaded: {zip_path}")
             return True
 
@@ -61,24 +72,29 @@ class DESNZHeatNetworkDownloader:
         logger.info(f"URL: {self.GIS_DATA_URL}")
 
         try:
-            cmd = [
-                "wget",
-                "--no-check-certificate",
-                "--progress=bar:force",
-                "-O",
-                str(zip_path),
-                self.GIS_DATA_URL,
-            ]
+            output_path = csv_path if is_csv_url else zip_path
+            wget_path = which("wget")
+            if wget_path:
+                cmd = [
+                    wget_path,
+                    "--no-check-certificate",
+                    "--progress=bar:force",
+                    "-O",
+                    str(output_path),
+                    self.GIS_DATA_URL,
+                ]
+                result = subprocess.run(cmd, capture_output=False, text=True)
+                if result.returncode != 0:
+                    logger.error(f"Download failed with exit code {result.returncode}")
+                    return False
+            else:
+                logger.info("wget not available; using Python downloader instead.")
+                urllib.request.urlretrieve(self.GIS_DATA_URL, output_path)
 
-            result = subprocess.run(cmd, capture_output=False, text=True)
-
-            if result.returncode == 0:
-                logger.info(
-                    f"✓ Downloaded DESNZ data: {zip_path.stat().st_size / 1024 / 1024:.1f} MB"
-                )
-                return True
-            logger.error(f"Download failed with exit code {result.returncode}")
-            return False
+            logger.info(
+                f"✓ Downloaded DESNZ data: {output_path.stat().st_size / 1024 / 1024:.1f} MB"
+            )
+            return True
 
         except Exception as exc:
             logger.error(f"Error downloading DESNZ data: {exc}")
@@ -183,6 +199,10 @@ class DESNZHeatNetworkDownloader:
         """
         if not self.download_gis_data(force_redownload=force_redownload):
             return False
+
+        if self.GIS_DATA_URL.lower().endswith(".csv"):
+            logger.info("✓ DESNZ CSV download ready (no extraction needed)")
+            return True
 
         if not self.extract_gis_data(force_extract=force_redownload):
             return False
