@@ -119,7 +119,7 @@ xdg-open data/outputs/maps/heat_network_tiers.html  # Linux
 
 | File | What It Shows |
 |------|---------------|
-| `epc_london_validated.csv` | Your cleaned dataset |
+| `epc_england_wales_validated.csv` | Your cleaned dataset |
 | `archetype_analysis_results.txt` | Summary statistics of the housing stock |
 | `scenario_modeling_results.txt` | Cost-benefit analysis of different pathways |
 | `scenario_results_summary.csv` | Scenario-level metrics including HN/ASHP splits |
@@ -134,9 +134,9 @@ xdg-open data/outputs/maps/heat_network_tiers.html  # Linux
 Edit `config/config.yaml` to change:
 
 ```yaml
-# Example: Focus on specific boroughs
+# Example: Focus on specific local authorities
 geography:
-  boroughs:
+  local_authorities:
     - "Camden"
     - "Islington"
     - "Hackney"
@@ -187,7 +187,7 @@ To test with a smaller dataset first:
 import pandas as pd
 
 # Load full dataset
-df = pd.read_csv('data/raw/epc_london_filtered.csv')
+df = pd.read_csv('data/raw/epc_england_wales_filtered.csv')
 
 # Create 10,000 record sample
 sample = df.sample(n=10000, random_state=42)

@@ -329,14 +329,14 @@ def main():
     logger.info("Starting penetration sensitivity analysis...")
 
     # Try to load validated properties for realistic demand calculation
-    input_file = DATA_PROCESSED_DIR / "epc_london_validated.parquet"
+    input_file = DATA_PROCESSED_DIR / "epc_validated.parquet"
     properties_df = None
 
     if input_file.exists():
         logger.info(f"Loading properties from: {input_file}")
         properties_df = pd.read_parquet(input_file)
     else:
-        input_file = DATA_PROCESSED_DIR / "epc_london_validated.csv"
+        input_file = DATA_PROCESSED_DIR / "epc_validated.csv"
         if input_file.exists():
             properties_df = pd.read_csv(input_file, low_memory=False)
 

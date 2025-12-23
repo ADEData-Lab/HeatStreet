@@ -22,7 +22,6 @@ import FilterBar from './FilterBar';
 import ExportMenu from './ExportMenu';
 import PreferencesPanel from './PreferencesPanel';
 import ComparisonDrawer from './ComparisonDrawer';
-import MapView from './MapView';
 import DrillDownModal from './DrillDownModal';
 import { useDashboard } from '../context/DashboardContext';
 import { defaultDashboardData } from '../data/dashboardData';
@@ -60,7 +59,7 @@ export default function HeatStreetDashboard() {
     tierData = [],
     retrofitReadinessData = [],
     interventionData = [],
-    boroughData = [],
+    constituencyData = [],
     confidenceBandsData = [],
     sensitivityData = [],
     gridPeakData = [],
@@ -184,7 +183,7 @@ export default function HeatStreetDashboard() {
     { id: 'scenarios', label: 'Scenarios' },
     { id: 'readiness', label: 'Retrofit Readiness' },
     { id: 'costbenefit', label: 'Cost-Benefit' },
-    { id: 'boroughs', label: 'Boroughs' },
+    { id: 'constituencies', label: 'Constituencies' },
     { id: 'uncertainty', label: 'Uncertainty' },
     { id: 'grid', label: 'Grid & Climate' },
     { id: 'policy', label: 'Policy' },
@@ -241,8 +240,8 @@ export default function HeatStreetDashboard() {
               <h3 style={styles.introTitle}>What the visuals answer</h3>
               <ul style={styles.introList}>
                 <li>
-                  Band mix and case street vs London chart show the scale of the EPC gap and where the case street diverges most
-                  from the city baseline.
+                  Band mix and case street vs benchmark chart show the scale of the EPC gap and where the case street diverges most
+                  from the wider baseline.
                 </li>
                 <li>Headline stats call out portfolio size, SAP scores, and common band to orient the conversation quickly.</li>
                 <li>
@@ -279,7 +278,7 @@ export default function HeatStreetDashboard() {
               </div>
 
               <div style={styles.card}>
-                <h3 style={styles.cardTitle}>Case street vs London</h3>
+                <h3 style={styles.cardTitle}>Case street vs benchmark</h3>
                 <ResponsiveContainer width="100%" height={320}>
                   <ComposedChart data={epcComparisonData}>
                     <CartesianGrid strokeDasharray="3 3" />
@@ -288,7 +287,7 @@ export default function HeatStreetDashboard() {
                     <Tooltip />
                     <Legend />
                     <Bar dataKey="shakespeareCrescent" name="Case street" fill={COLORS.primary} isAnimationActive={isAnimated} />
-                    <Line type="monotone" dataKey="londonAverage" name="London" stroke={COLORS.accent} strokeWidth={3} isAnimationActive={isAnimated} />
+                    <Line type="monotone" dataKey="londonAverage" name="Benchmark" stroke={COLORS.accent} strokeWidth={3} isAnimationActive={isAnimated} />
                   </ComposedChart>
                 </ResponsiveContainer>
               </div>
@@ -493,32 +492,32 @@ export default function HeatStreetDashboard() {
           </section>
         )}
 
-        {activeTab === 'boroughs' && (
+        {activeTab === 'constituencies' && (
           <section>
             <div style={styles.introBlock}>
               <div style={styles.introLabel}>Geographic lens</div>
               <h3 style={styles.introTitle}>How this answers client questions</h3>
               <ul style={styles.introList}>
-                <li>Table ranks boroughs by EPC and energy so you can spot outliers for targeted engagement.</li>
-                <li>Map pairs the ranking with spatial context to explain clusters and delivery logistics.</li>
+                <li>Table ranks constituencies by EPC and energy so you can spot outliers for targeted engagement.</li>
+                <li>Use this view to align retrofit outreach with Westminster parliamentary seats.</li>
                 <li>Use when asked “where should we pilot first and why there?”</li>
               </ul>
             </div>
             <div style={styles.card}>
-              <h3 style={styles.cardTitle}>Borough performance</h3>
+              <h3 style={styles.cardTitle}>Constituency performance</h3>
               <table style={styles.table}>
                 <thead>
                   <tr>
-                    <th>Borough</th>
+                    <th>Constituency</th>
                     <th>EPC</th>
                     <th>Energy</th>
                     <th>Properties</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {boroughData.map((row) => (
-                    <tr key={row.borough} onClick={() => tableClick(row)} style={{ cursor: 'pointer' }}>
-                      <td>{row.borough_name || row.borough}</td>
+                  {constituencyData.map((row) => (
+                    <tr key={row.constituency} onClick={() => tableClick(row)} style={{ cursor: 'pointer' }}>
+                      <td>{row.constituency}</td>
                       <td>{row.meanEPC}</td>
                       <td>{row.energy}</td>
                       <td>{row.count?.toLocaleString?.() || row.count}</td>
@@ -527,7 +526,6 @@ export default function HeatStreetDashboard() {
                 </tbody>
               </table>
             </div>
-            <MapView />
           </section>
         )}
 

@@ -51,7 +51,7 @@ This to-do list captures the follow-up items from the review call and assigns ow
 ## 4) EPC data treatment and uncertainty
 - **Tenure filtering**  
   - *Owner:* Phil  
-  - *Action:* Re-run key stats for owner-occupied Edwardian terraces; note if findings change materially.  
+  - *Action:* Re-run key stats for owner-occupied domestic stock (optionally by archetype); note if findings change materially.  
   - *Target:* Next EPC data cut.
 - **EPC anomalies (uninsulated but band D)**  
   - *Owner:* Phil with DEA input  

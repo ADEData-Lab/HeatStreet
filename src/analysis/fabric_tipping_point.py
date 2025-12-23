@@ -170,7 +170,8 @@ class FabricTippingPointAnalyzer:
     def calculate_tipping_point_curve(
         self,
         typical_annual_heat_demand_kwh: float = 15000,
-        property_archetype: str = "typical_edwardian_terrace"
+        property_archetype: Optional[str] = None,
+        construction_age_band: Optional[str] = None
     ) -> pd.DataFrame:
         """
         Calculate the fabric tipping point curve for a representative property.
@@ -183,13 +184,21 @@ class FabricTippingPointAnalyzer:
         Args:
             typical_annual_heat_demand_kwh: Baseline annual heating demand (kWh)
             property_archetype: Description of representative property
+            construction_age_band: Optional construction age band label for reporting
 
         Returns:
             DataFrame with curve data
 
         Output file: fabric_tipping_point_curve.csv
         """
-        logger.info(f"Calculating tipping point curve for {property_archetype}...")
+        if property_archetype:
+            archetype_label = property_archetype
+        elif construction_age_band:
+            archetype_label = f"properties in {construction_age_band}"
+        else:
+            archetype_label = "representative properties"
+
+        logger.info(f"Calculating tipping point curve for {archetype_label}...")
         logger.info(f"  Baseline heating demand: {typical_annual_heat_demand_kwh:,.0f} kWh/year")
 
         sequence = self.generate_fabric_measure_sequence(
@@ -379,13 +388,17 @@ class FabricTippingPointAnalyzer:
 
     def run_analysis(
         self,
-        typical_annual_heat_demand_kwh: float = 15000
+        typical_annual_heat_demand_kwh: float = 15000,
+        property_archetype: Optional[str] = None,
+        construction_age_band: Optional[str] = None
     ) -> Tuple[pd.DataFrame, Dict]:
         """
         Run the complete tipping point analysis.
 
         Args:
             typical_annual_heat_demand_kwh: Baseline annual heating demand
+            property_archetype: Description of representative property
+            construction_age_band: Optional construction age band label for reporting
 
         Returns:
             Tuple of (curve_df, summary_metrics)
@@ -396,7 +409,9 @@ class FabricTippingPointAnalyzer:
         self.build_cost_performance_table(typical_annual_heat_demand_kwh)
 
         curve_df = self.calculate_tipping_point_curve(
-            typical_annual_heat_demand_kwh=typical_annual_heat_demand_kwh
+            typical_annual_heat_demand_kwh=typical_annual_heat_demand_kwh,
+            property_archetype=property_archetype,
+            construction_age_band=construction_age_band
         )
 
         summary = self.generate_summary_metrics(curve_df)
@@ -456,8 +471,6 @@ def main():
 
     analyzer = FabricTippingPointAnalyzer()
 
-    # Use typical Edwardian terrace heating demand
-    # (from literature: ~150 kWh/m²/year × 100m² floor area)
     curve_df, summary = analyzer.run_analysis(
         typical_annual_heat_demand_kwh=15000
     )

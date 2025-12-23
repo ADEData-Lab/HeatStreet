@@ -3,7 +3,7 @@ Additional Analysis and Reporting Module
 
 Provides specialized reports and extracts for client presentations:
 - Case street (Shakespeare Crescent) extract
-- Borough-level aggregations
+- Constituency-level aggregations
 - Data quality reports
 - Subsidy sensitivity analysis
 """
@@ -136,7 +136,7 @@ class AdditionalReports:
             f.write(f"Mean Floor Area: {summary['case_street']['mean_floor_area']:.1f} m²\n")
             f.write(f"Mean EPC Rating: {summary['case_street']['mean_epc_rating']:.1f}\n\n")
 
-            f.write("LONDON-WIDE AVERAGE (Edwardian Terraces)\n")
+            f.write("LONDON-WIDE AVERAGE (Study Sample)\n")
             f.write("-" * 80 + "\n")
             f.write(f"Property Count: {summary['london_wide']['property_count']:,}\n")
             f.write(f"Mean Energy Consumption: {summary['london_wide']['mean_energy_consumption']:.1f} kWh/m²/year\n")
@@ -151,24 +151,28 @@ class AdditionalReports:
 
         logger.info(f"Saved case street summary to {path}")
 
-    def generate_borough_breakdown(
+    def generate_constituency_breakdown(
         self,
         df: pd.DataFrame,
         output_path: Optional[Path] = None
     ) -> pd.DataFrame:
         """
-        Generate borough-level aggregated statistics.
+        Generate constituency-level aggregated statistics.
 
         Args:
-            df: Full dataset with LOCAL_AUTHORITY column
+            df: Full dataset with constituency column
             output_path: Optional path to save breakdown
 
         Returns:
-            DataFrame with borough-level aggregations
+            DataFrame with constituency-level aggregations
         """
-        logger.info("Generating borough-level breakdown...")
+        logger.info("Generating constituency-level breakdown...")
 
-        borough_breakdown = df.groupby('LOCAL_AUTHORITY').agg({
+        if "CONSTITUENCY" not in df.columns:
+            logger.warning("No constituency column found; skipping constituency breakdown.")
+            return pd.DataFrame()
+
+        constituency_breakdown = df.groupby("CONSTITUENCY").agg({
             'LMK_KEY': 'count',  # Property count
             'CURRENT_ENERGY_EFFICIENCY': 'mean',
             'ENERGY_CONSUMPTION_CURRENT': 'mean',
@@ -177,7 +181,7 @@ class AdditionalReports:
             'CURRENT_ENERGY_RATING': lambda x: x.mode()[0] if len(x.mode()) > 0 else 'Unknown',
         }).round(1)
 
-        borough_breakdown.columns = [
+        constituency_breakdown.columns = [
             'property_count',
             'mean_epc_rating',
             'mean_energy_kwh_m2_year',
@@ -187,16 +191,16 @@ class AdditionalReports:
         ]
 
         # Sort by property count descending
-        borough_breakdown = borough_breakdown.sort_values('property_count', ascending=False)
+        constituency_breakdown = constituency_breakdown.sort_values('property_count', ascending=False)
 
-        logger.info(f"Generated breakdown for {len(borough_breakdown)} boroughs")
+        logger.info(f"Generated breakdown for {len(constituency_breakdown)} constituencies")
 
         # Save if path provided
         if output_path:
-            borough_breakdown.to_csv(output_path)
-            logger.info(f"Saved borough breakdown to {output_path}")
+            constituency_breakdown.to_csv(output_path)
+            logger.info(f"Saved constituency breakdown to {output_path}")
 
-        return borough_breakdown
+        return constituency_breakdown
 
     def generate_data_quality_report(
         self,
@@ -364,7 +368,7 @@ class AdditionalReports:
             "for all combi boiler replacements",
             "7. Loft insulation thickness often unspecified (recorded as efficiency rating only) "
             "- top-up needs estimated from rating where possible",
-            "8. Solid floor insulation rarely feasible in Edwardian properties - excluded from "
+            "8. Solid floor insulation rarely feasible in some properties - excluded from "
             "cost estimates despite potential benefits",
             "9. EPC data represents modelled (SAP) consumption, not actual metered usage - "
             "savings estimates should be treated as indicative",

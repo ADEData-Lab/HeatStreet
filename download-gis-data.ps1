@@ -1,11 +1,11 @@
-# Download London GIS Data
+# Download DESNZ heat network planning data
 #
-# Downloads heat network and spatial data from London Datastore
-# for use with the Heat Street EPC analysis spatial features.
+# Downloads heat network planning data for use with the Heat Street EPC
+# analysis spatial features.
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "London GIS Data Downloader" -ForegroundColor Cyan
+Write-Host "DESNZ Heat Network Data Downloader" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -27,16 +27,14 @@ Write-Host "Starting GIS data download..." -ForegroundColor Cyan
 Write-Host ""
 
 python -c "
-from src.acquisition.london_gis_downloader import LondonGISDownloader
+from src.acquisition.desnz_heat_network_downloader import DESNZHeatNetworkDownloader
 
-downloader = LondonGISDownloader()
+downloader = DESNZHeatNetworkDownloader()
 
-print('Downloading London GIS data from London Datastore...')
+print('Downloading DESNZ heat network planning data...')
 print('This includes:')
-print('  - Existing district heating networks')
-print('  - Potential heat network zones')
-print('  - Heat load data by borough')
-print('  - Heat supply sources')
+print('  - Existing heat networks')
+print('  - Heat network zones')
 print()
 
 success = downloader.download_and_prepare()
@@ -49,9 +47,7 @@ if success:
 
     summary = downloader.get_data_summary()
     print()
-    print(f'Heat load files: {summary[\"heat_load_files\"]}')
     print(f'Network files: {summary[\"network_files\"]}')
-    print(f'Heat supply files: {summary[\"heat_supply_files\"]}')
     print()
     print(f'Data location: {summary[\"data_path\"]}')
     print()

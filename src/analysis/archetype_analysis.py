@@ -1,7 +1,7 @@
 """
 Archetype Characterization Module
 
-Produces summary statistics and distributions for Edwardian terraced housing stock.
+Produces summary statistics and distributions for housing stock.
 Implements Section 3.1 of the project specification.
 """
 
@@ -25,7 +25,7 @@ from config.config import (
 
 class ArchetypeAnalyzer:
     """
-    Analyzes EPC data to characterize the Edwardian terraced housing archetype.
+    Analyzes EPC data to characterize a housing stock archetype.
     """
 
     def __init__(self):
@@ -664,7 +664,7 @@ def main():
     logger.info("Starting archetype characterization...")
 
     # Load validated data
-    input_file = DATA_PROCESSED_DIR / "epc_london_validated.csv"
+    input_file = DATA_PROCESSED_DIR / "epc_validated.csv"
 
     if not input_file.exists():
         logger.error(f"Input file not found: {input_file}")

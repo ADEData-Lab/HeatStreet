@@ -615,7 +615,7 @@ def main():
 
     # Load sample data
     validator = DataValidator()
-    df = validator.load_data(Path("data/processed/epc_london_validated.csv"))
+    df = validator.load_data(Path("data/processed/epc_validated.csv"))
 
     # Run readiness analysis
     analyzer = RetrofitReadinessAnalyzer()

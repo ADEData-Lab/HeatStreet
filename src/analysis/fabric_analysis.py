@@ -1,7 +1,7 @@
 """
 Fabric Analysis Module
 
-Generates detailed fabric breakdown summaries and outputs for Edwardian terraces.
+Generates detailed fabric breakdown summaries and outputs for housing stock.
 Produces CSV and parquet outputs for downstream analysis and visualization.
 
 Outputs:
@@ -219,7 +219,7 @@ class FabricAnalyzer:
             # Wall type distribution
             if 'wall_type' in df.columns:
                 wall_counts = df_tenure['wall_type'].value_counts(normalize=True) * 100
-                for wt in ['solid_brick', 'cavity', 'stone', 'other']:
+                for wt in ['solid_brick', 'solid', 'cavity', 'stone', 'other']:
                     row[f'wall_type_{wt}_pct'] = wall_counts.get(wt, 0)
 
             # Wall insulation
@@ -448,11 +448,11 @@ def main():
     logger.info("Starting fabric analysis...")
 
     # Load validated data
-    input_file = DATA_PROCESSED_DIR / "epc_london_validated.parquet"
+    input_file = DATA_PROCESSED_DIR / "epc_validated.parquet"
 
     if not input_file.exists():
         # Try CSV fallback
-        input_file = DATA_PROCESSED_DIR / "epc_london_validated.csv"
+        input_file = DATA_PROCESSED_DIR / "epc_validated.csv"
         if not input_file.exists():
             logger.error(f"Input file not found: {input_file}")
             logger.info("Please run data validation first")

@@ -87,7 +87,7 @@ df = downloader.download_all_london_boroughs(
     max_results_per_borough=$limit
 )
 df_filtered = downloader.apply_edwardian_filters(df)
-downloader.save_data(df_filtered, 'epc_london_edwardian_limited.csv')
+downloader.save_data(df_filtered, 'epc_edwardian_limited.csv')
 print(f'\nDownloaded {len(df):,} total records')
 print(f'Filtered to {len(df_filtered):,} Edwardian terraced houses')
 "@

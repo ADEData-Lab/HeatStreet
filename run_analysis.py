@@ -22,9 +22,18 @@ import time
 # Add src to path
 sys.path.append(str(Path(__file__).parent))
 
-from config.config import load_config, ensure_directories, DATA_RAW_DIR, DATA_PROCESSED_DIR
+from config.config import (
+    load_config,
+    ensure_directories,
+    DATA_RAW_DIR,
+    DATA_PROCESSED_DIR,
+    get_local_authorities,
+)
 from src.acquisition.epc_api_downloader import EPCAPIDownloader
-from src.acquisition.london_gis_downloader import LondonGISDownloader
+from src.acquisition.desnz_heat_network_downloader import (
+    DESNZHeatNetworkDownloader,
+    EXTERNAL_DIR,
+)
 from src.cleaning.data_validator import EPCDataValidator
 from src.analysis.archetype_analysis import ArchetypeAnalyzer
 from src.modeling.scenario_model import ScenarioModeler
@@ -42,7 +51,7 @@ def print_header():
     rprint(Panel.fit(
         "[bold cyan]Heat Street EPC Analysis[/bold cyan]\n"
         "[white]Complete Interactive Pipeline[/white]\n"
-        "[dim]London Edwardian Terraced Housing Analysis[/dim]",
+        "[dim]England and Wales Domestic EPC Analysis[/dim]",
         border_style="cyan"
     ))
     print()
@@ -50,6 +59,9 @@ def print_header():
 
 def check_credentials():
     """Check if API credentials are configured."""
+    from dotenv import load_dotenv
+    load_dotenv(override=True)
+
     email = os.getenv('EPC_API_EMAIL')
     api_key = os.getenv('EPC_API_KEY')
 
@@ -78,12 +90,18 @@ def check_credentials():
 
         email = questionary.text(
             "Email address:",
-            validate=lambda x: '@' in x
+            validate=lambda x: '@' in x if x else "Email is required."
         ).ask()
 
-        api_key = questionary.text(
+        if not email:
+            return None, None
+
+        api_key = questionary.password(
             "API key:"
         ).ask()
+
+        if not api_key:
+            return None, None
 
         # Save to .env
         with open('.env', 'w') as f:
@@ -92,13 +110,14 @@ def check_credentials():
             f.write(f"EPC_API_KEY={api_key}\n")
 
         # Reload environment
-        from dotenv import load_dotenv
         load_dotenv(override=True)
+        os.environ['EPC_API_EMAIL'] = email
+        os.environ['EPC_API_KEY'] = api_key
 
         console.print("[green]✓[/green] Credentials saved to .env file")
         console.print()
 
-    return True
+    return email, api_key
 
 
 def ask_download_scope():
@@ -106,37 +125,58 @@ def ask_download_scope():
     console.print("[cyan]Data Download Options:[/cyan]")
     console.print()
 
+    config = load_config()
+    configured_codes = config.get('geography', {}).get('local_authority_codes') or {}
+    available_authorities = list(configured_codes.keys()) or get_local_authorities()
+
+    if not available_authorities:
+        console.print("[yellow]⚠[/yellow] No local authorities configured in config.yaml.")
+        console.print("    Provide at least one local_authorities entry to populate the menu.")
+        console.print()
+
     choice = questionary.select(
         "What would you like to download?",
         choices=[
-            questionary.Choice("Quick test (single borough, limited data)", value="test"),
-            questionary.Choice("Medium dataset (5 boroughs, last 5 years)", value="medium"),
-            questionary.Choice("Full dataset (all 33 London boroughs)", value="full"),
+            questionary.Choice("Quick test (single local authority, limited data)", value="test"),
+            questionary.Choice("Medium dataset (5 local authorities, last 5 years)", value="medium"),
+            questionary.Choice("Full dataset (all configured local authorities)", value="full"),
             questionary.Choice("Custom selection", value="custom")
         ]
     ).ask()
 
     if choice == "test":
-        borough = questionary.select(
-            "Select a borough for testing:",
-            choices=["Camden", "Islington", "Hackney", "Westminster", "Southwark"]
-        ).ask()
+        if available_authorities:
+            borough = questionary.select(
+                "Select a local authority for testing:",
+                choices=available_authorities
+            ).ask()
+        else:
+            borough = questionary.text(
+                "Enter the local authority name for testing:"
+            ).ask()
         return {
             'mode': 'single',
             'boroughs': [borough],
             'from_year': 2020,
-            'max_per_borough': 1000
+            'max_per_borough': 1000,
         }
 
     elif choice == "medium":
+        if not available_authorities:
+            console.print("[yellow]⚠[/yellow] Configure local_authorities before running a medium dataset download.")
+            return ask_download_scope()
+        boroughs = available_authorities[:5]
         return {
             'mode': 'multiple',
-            'boroughs': ["Camden", "Islington", "Hackney", "Westminster", "Tower Hamlets"],
+            'boroughs': boroughs,
             'from_year': 2020,
-            'max_per_borough': None
+            'max_per_borough': None,
         }
 
     elif choice == "full":
+        if not available_authorities:
+            console.print("[yellow]⚠[/yellow] Configure local_authorities before running a full dataset download.")
+            return ask_download_scope()
         confirm = questionary.confirm(
             "Full download will take 2-4 hours. Continue?",
             default=False
@@ -153,12 +193,12 @@ def ask_download_scope():
             return ask_download_scope()  # Ask again
 
     else:  # custom
+        if not available_authorities:
+            console.print("[yellow]⚠[/yellow] Configure local_authorities before running a custom selection.")
+            return ask_download_scope()
         boroughs = questionary.checkbox(
-            "Select boroughs (space to select, enter to confirm):",
-            choices=[
-                "Camden", "Islington", "Hackney", "Westminster", "Southwark",
-                "Tower Hamlets", "Lambeth", "Wandsworth", "Greenwich", "Lewisham"
-            ]
+            "Select local authorities (space to select, enter to confirm):",
+            choices=available_authorities
         ).ask()
 
         from_year = questionary.select(
@@ -167,55 +207,72 @@ def ask_download_scope():
         ).ask()
 
         limit = questionary.confirm(
-            "Limit results per borough (faster)?",
+            "Limit results per local authority (faster)?",
             default=False
         ).ask()
 
         max_per_borough = None
         if limit:
             max_per_borough = int(questionary.text(
-                "Maximum records per borough:",
+                "Maximum records per local authority:",
                 default="5000"
             ).ask())
+
+        local_authority_codes = {}
+        if not configured_codes:
+            for borough in boroughs:
+                la_code = questionary.text(
+                    f"Enter the local authority code for {borough} (e.g., E09000007):"
+                ).ask()
+                local_authority_codes[borough] = la_code
 
         return {
             'mode': 'multiple',
             'boroughs': boroughs,
             'from_year': int(from_year),
-            'max_per_borough': max_per_borough
+            'max_per_borough': max_per_borough,
         }
 
 
 def ask_gis_download():
-    """Ask if user wants to download London GIS data for spatial analysis."""
+    """Ask if user wants to download DESNZ heat network planning data for spatial analysis."""
     console.print()
-    console.print("[cyan]London GIS Data (Optional)[/cyan]")
+    console.print("[cyan]DESNZ Heat Network Planning Data (Optional)[/cyan]")
     console.print()
-    console.print("This analysis can optionally use GIS data from London Datastore for:")
+    console.print("This analysis can optionally use DESNZ heat network planning data for:")
     console.print("  • Existing district heating networks")
-    console.print("  • Potential heat network zones")
-    console.print("  • Heat load and supply data by borough")
+    console.print("  • Heat network zones")
     console.print()
 
     # Check if already downloaded
-    gis_downloader = LondonGISDownloader()
+    gis_downloader = DESNZHeatNetworkDownloader()
     summary = gis_downloader.get_data_summary()
 
     if summary['available']:
         console.print("[green]✓[/green] GIS data already downloaded")
-        console.print(f"    Heat load files: {summary['heat_load_files']}")
         console.print(f"    Network files: {summary['network_files']}")
-        console.print(f"    Heat supply files: {summary['heat_supply_files']}")
         return True
 
+    zip_path = EXTERNAL_DIR / "desnz_heat_network_planning.zip"
+    if zip_path.exists():
+        console.print("[green]✓[/green] Found existing DESNZ heat network data archive")
+        console.print("    Extracting archive for spatial analysis...")
+        if gis_downloader.extract_gis_data():
+            summary = gis_downloader.get_data_summary()
+            console.print("[green]✓[/green] GIS data extracted and ready")
+            console.print(f"    Network files: {summary.get('network_files', 0)}")
+            return True
+        console.print("[yellow]⚠[/yellow] Existing archive could not be extracted")
+        console.print("    You can re-download or extract manually if needed.")
+
     download = questionary.confirm(
-        "Download London GIS data? (~2 MB, required for spatial analysis)",
+        "Download DESNZ heat network data? (required for spatial analysis)",
         default=True
     ).ask()
 
     if download:
         console.print()
-        console.print("[cyan]Downloading London GIS data...[/cyan]")
+        console.print("[cyan]Downloading DESNZ heat network data...[/cyan]")
 
         if gis_downloader.download_and_prepare():
             console.print("[green]✓[/green] GIS data downloaded and ready")
@@ -227,7 +284,7 @@ def ask_gis_download():
     return False
 
 
-def download_data(scope, analysis_logger: AnalysisLogger = None):
+def download_data(scope, email, api_key, analysis_logger: AnalysisLogger = None):
     """Download EPC data via API."""
     console.print()
     console.print(Panel("[bold]Phase 1: Data Download[/bold]", border_style="blue"))
@@ -236,11 +293,16 @@ def download_data(scope, analysis_logger: AnalysisLogger = None):
     if analysis_logger:
         analysis_logger.start_phase(
             "Data Download",
-            "Download EPC data from API and filter for Edwardian terraced houses"
+            "Download EPC data from API and apply configured property filters"
         )
 
     try:
-        downloader = EPCAPIDownloader()
+        downloader = EPCAPIDownloader(
+            email=email,
+            api_key=api_key,
+            local_authority_codes=scope.get('local_authority_codes'),
+            prompt_for_credentials=False,
+        )
 
         if scope['mode'] == 'single':
             borough = scope['boroughs'][0]
@@ -248,28 +310,25 @@ def download_data(scope, analysis_logger: AnalysisLogger = None):
 
             df = downloader.download_borough_data(
                 borough_name=borough,
-                property_type='house',
                 from_year=scope['from_year'],
                 max_results=scope.get('max_per_borough')
             )
 
         elif scope['mode'] == 'all':
-            console.print(f"[cyan]Downloading ALL London boroughs (this will take a while)...[/cyan]")
+            console.print("[cyan]Downloading ALL configured local authorities (this will take a while)...[/cyan]")
 
-            df = downloader.download_all_london_boroughs(
-                property_types=['house'],
+            df = downloader.download_all_local_authorities(
                 from_year=scope['from_year'],
                 max_results_per_borough=scope.get('max_per_borough')
             )
 
         else:  # multiple
-            console.print(f"[cyan]Downloading {len(scope['boroughs'])} boroughs...[/cyan]")
+            console.print(f"[cyan]Downloading {len(scope['boroughs'])} local authorities...[/cyan]")
 
             all_data = []
             for borough in scope['boroughs']:
                 df_borough = downloader.download_borough_data(
                     borough_name=borough,
-                    property_type='house',
                     from_year=scope['from_year'],
                     max_results=scope.get('max_per_borough')
                 )
@@ -289,28 +348,24 @@ def download_data(scope, analysis_logger: AnalysisLogger = None):
 
         if analysis_logger:
             analysis_logger.add_metric("raw_records_downloaded", len(df), "Total records from API")
-            analysis_logger.add_metric("boroughs_requested", len(scope['boroughs']) if scope['boroughs'] else 33)
+            analysis_logger.add_metric(
+                "local_authorities_requested",
+                len(scope['boroughs']) if scope['boroughs'] else "all_configured"
+            )
             analysis_logger.add_metric("from_year", scope['from_year'])
 
-        # Apply Edwardian filters
-        console.print("[cyan]Applying Edwardian terraced housing filters...[/cyan]")
-        df_filtered = downloader.apply_edwardian_filters(df)
-        console.print(f"[green]✓[/green] Filtered to {len(df_filtered):,} Edwardian terraced houses")
-
-        if analysis_logger:
-            analysis_logger.add_metric("filtered_records", len(df_filtered), "Edwardian terraced houses after filtering")
-            analysis_logger.add_metric("filter_rate", len(df_filtered) / len(df) * 100, "Percentage retained after filtering")
+        df_filtered = df
 
         # Save data
         console.print("[cyan]Saving data...[/cyan]")
-        downloader.save_data(df, "epc_london_raw.csv")
-        downloader.save_data(df_filtered, "epc_london_filtered.csv")
+        downloader.save_data(df, "epc_raw.csv")
+        downloader.save_data(df_filtered, "epc_filtered.csv")
         console.print(f"[green]✓[/green] Data saved to data/raw/")
 
         if analysis_logger:
-            analysis_logger.add_output("data/raw/epc_london_raw.csv", "csv", "Raw EPC data from API")
-            analysis_logger.add_output("data/raw/epc_london_filtered.csv", "csv", "Filtered Edwardian terraced houses")
-            analysis_logger.complete_phase(success=True, message=f"Downloaded {len(df_filtered):,} Edwardian properties")
+            analysis_logger.add_output("data/raw/epc_raw.csv", "csv", "Raw EPC data from API")
+            analysis_logger.add_output("data/raw/epc_filtered.csv", "csv", "Filtered EPC properties")
+            analysis_logger.complete_phase(success=True, message=f"Downloaded {len(df_filtered):,} properties")
 
         return df_filtered
 
@@ -343,6 +398,33 @@ def validate_data(df, analysis_logger: AnalysisLogger = None):
     validator = EPCDataValidator()
     df_validated, report = validator.validate_dataset(df)
 
+    # Enrich with Westminster constituency data based on postcode
+    try:
+        from src.spatial.constituency_enricher import ConstituencyEnricher
+
+        console.print("[cyan]Enriching constituencies from postcode...[/cyan]")
+        cache_file = DATA_PROCESSED_DIR / "postcode_constituency_cache.csv"
+        enricher = ConstituencyEnricher(cache_file=cache_file)
+        df_validated, constituency_summary = enricher.enrich_dataframe(df_validated)
+
+        console.print(
+            f"[green]✓[/green] Constituency enrichment complete "
+            f"({constituency_summary.get('filled', 0):,}/{constituency_summary.get('total', 0):,} populated)"
+        )
+        if analysis_logger:
+            analysis_logger.add_metric(
+                "constituency_populated",
+                constituency_summary.get("filled", 0),
+                "Records with constituency assigned",
+            )
+            analysis_logger.add_metric(
+                "constituency_missing",
+                constituency_summary.get("missing", 0),
+                "Records missing constituency after enrichment",
+            )
+    except Exception as e:
+        console.print(f"[yellow]⚠ Constituency enrichment skipped: {e}[/yellow]")
+
     console.print(f"[green]✓[/green] Validation complete")
     console.print(f"    Records passed: {len(df_validated):,} ({len(df_validated)/report['total_records']*100:.1f}%)")
     console.print(f"    Duplicates removed: {report['duplicates_removed']:,}")
@@ -359,7 +441,7 @@ def validate_data(df, analysis_logger: AnalysisLogger = None):
 
     # Save validated data
     import pandas as pd
-    output_file = DATA_PROCESSED_DIR / "epc_london_validated.csv"
+    output_file = DATA_PROCESSED_DIR / "epc_validated.csv"
     df_validated.to_csv(output_file, index=False)
 
     # Try to save parquet (optional for performance)
@@ -417,7 +499,7 @@ def apply_methodological_adjustments(df, analysis_logger: AnalysisLogger = None)
 
     # Generate summary
     summary = adjuster.generate_adjustment_summary(df_adjusted)
-    output_file = DATA_PROCESSED_DIR / "epc_london_adjusted.csv"
+    output_file = DATA_PROCESSED_DIR / "epc_adjusted.csv"
     df_adjusted.to_csv(output_file, index=False)
     parquet_file = None
     try:
@@ -471,7 +553,7 @@ def analyze_archetype(df, analysis_logger: AnalysisLogger = None):
     if analysis_logger:
         analysis_logger.start_phase(
             "Archetype Analysis",
-            "Characterize Edwardian housing stock by EPC bands, insulation, heating systems, etc."
+            "Characterize housing stock by EPC bands, insulation, heating systems, etc."
         )
 
     console.print("[cyan]Analyzing property characteristics...[/cyan]")
@@ -763,6 +845,15 @@ def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None):
     if not check_spatial_dependencies():
         return None, None
 
+    if not ask_gis_download():
+        console.print("[yellow]⚠ Spatial analysis skipped: DESNZ heat network data unavailable.[/yellow]")
+        if analysis_logger:
+            analysis_logger.skip_phase(
+                "Spatial Analysis",
+                "DESNZ heat network data unavailable or download declined",
+            )
+        return None, None
+
     try:
         from src.spatial.heat_network_analysis import HeatNetworkAnalyzer
 
@@ -776,7 +867,7 @@ def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None):
 
         console.print("[cyan]Running spatial analysis...[/cyan]")
         console.print("  • Geocoding properties from lat/lon coordinates")
-        console.print("  • Loading London heat network GIS data")
+        console.print("  • Loading DESNZ heat network planning data")
         console.print("  • Calculating heat density (GWh/km²)")
         console.print("  • Classifying into 5 heat network tiers")
         console.print()
@@ -987,7 +1078,7 @@ def generate_additional_reports(df_raw, df_validated, validation_report, archety
     if analysis_logger:
         analysis_logger.start_phase(
             "Additional Reports",
-            "Generate specialized reports (case streets, borough breakdown, data quality, subsidy analysis)"
+            "Generate specialized reports (case streets, constituency breakdown, data quality, subsidy analysis)"
         )
 
     from src.analysis.additional_reports import AdditionalReports
@@ -1016,18 +1107,18 @@ def generate_additional_reports(df_raw, df_validated, validation_report, archety
         console.print(f"[yellow]⚠ Could not generate case street extract: {e}[/yellow]")
         case_street_df, case_street_summary = None, None
 
-    # 2. Borough-level Breakdown
+    # 2. Constituency-level Breakdown
     try:
-        console.print("[cyan]Generating borough-level breakdown...[/cyan]")
-        borough_path = output_dir / "borough_breakdown.csv"
-        borough_df = reporter.generate_borough_breakdown(
+        console.print("[cyan]Generating constituency-level breakdown...[/cyan]")
+        constituency_path = output_dir / "constituency_breakdown.csv"
+        constituency_df = reporter.generate_constituency_breakdown(
             df_validated,
-            output_path=borough_path
+            output_path=constituency_path
         )
-        reports_created.append(f"✓ Borough breakdown ({len(borough_df)} boroughs)")
+        reports_created.append(f"✓ Constituency breakdown ({len(constituency_df)} areas)")
     except Exception as e:
-        console.print(f"[yellow]⚠ Could not generate borough breakdown: {e}[/yellow]")
-        borough_df = None
+        console.print(f"[yellow]⚠ Could not generate constituency breakdown: {e}[/yellow]")
+        constituency_df = None
 
     # 3. Data Quality Report
     try:
@@ -1086,7 +1177,7 @@ def generate_additional_reports(df_raw, df_validated, validation_report, archety
 
     if analysis_logger:
         analysis_logger.add_metric("additional_reports", len(reports_created), f"{len(reports_created)} specialized reports")
-        analysis_logger.add_output("data/outputs/borough_breakdown.csv", "csv", "Borough-level breakdown")
+        analysis_logger.add_output("data/outputs/constituency_breakdown.csv", "csv", "Constituency-level breakdown")
         analysis_logger.add_output("data/outputs/subsidy_sensitivity_analysis.csv", "csv", "Subsidy sensitivity analysis")
         analysis_logger.add_output("data/outputs/data_quality_report.txt", "report", "Data quality assessment")
         analysis_logger.complete_phase(success=True, message=f"{len(reports_created)} additional specialized reports generated")
@@ -1094,7 +1185,7 @@ def generate_additional_reports(df_raw, df_validated, validation_report, archety
     return {
         "case_street_df": case_street_df,
         "case_street_summary": case_street_summary,
-        "borough_breakdown": borough_df,
+        "constituency_breakdown": constituency_df,
     }
 
 
@@ -1141,7 +1232,7 @@ def package_dashboard_assets(
 
         builder = DashboardDataBuilder()
         case_summary = (additional_reports or {}).get("case_street_summary") if additional_reports else None
-        borough_breakdown = (additional_reports or {}).get("borough_breakdown") if additional_reports else None
+        constituency_breakdown = (additional_reports or {}).get("constituency_breakdown") if additional_reports else None
 
         # Load additional data files if they exist
         load_profile_summary = None
@@ -1182,7 +1273,7 @@ def package_dashboard_assets(
             scenario_results,
             readiness_summary,
             pathway_summary,
-            borough_breakdown,
+            constituency_breakdown,
             case_summary,
             subsidy_results,
             df_validated,
@@ -1325,8 +1416,8 @@ def load_json_if_exists(file_path: Path):
 
 def check_existing_data():
     """Check if previously downloaded data exists."""
-    raw_csv = DATA_RAW_DIR / "epc_london_raw.csv"
-    filtered_csv = DATA_RAW_DIR / "epc_london_filtered.csv"
+    raw_csv = DATA_RAW_DIR / "epc_raw.csv"
+    filtered_csv = DATA_RAW_DIR / "epc_filtered.csv"
 
     if raw_csv.exists() or filtered_csv.exists():
         # Get file info
@@ -1346,7 +1437,7 @@ def check_existing_data():
                 console.print()
                 console.print(Panel(
                     f"[bold cyan]Existing Data Found[/bold cyan]\n\n"
-                    f"File: epc_london_filtered.csv\n"
+                    f"File: epc_filtered.csv\n"
                     f"Size: {file_size:.1f} MB\n"
                     f"Records: ~{line_count:,}\n"
                     f"Last modified: {mod_date}",
@@ -1369,7 +1460,7 @@ def check_existing_data():
             console.print()
             console.print(Panel(
                 f"[bold cyan]Existing Data Found[/bold cyan]\n\n"
-                f"File: epc_london_raw.csv\n"
+                f"File: epc_raw.csv\n"
                 f"Size: {file_size:.1f} MB\n"
                 f"Last modified: {mod_date}",
                 border_style="green"
@@ -1413,7 +1504,8 @@ def main():
     print_header()
 
     # Check credentials
-    if not check_credentials():
+    email, api_key = check_credentials()
+    if not email or not api_key:
         console.print("[red]Cannot proceed without API credentials[/red]")
         return
 
@@ -1427,9 +1519,6 @@ def main():
     analysis_logger = AnalysisLogger()
     console.print("[green]✓[/green] Analysis logger initialized")
     console.print()
-
-    # Ask about GIS data download
-    ask_gis_download()
 
     # Check for existing data
     has_existing, existing_file, record_count = check_existing_data()
@@ -1460,7 +1549,7 @@ def main():
             f"[bold]Analysis Configuration[/bold]\n\n"
             f"Mode: {scope['mode']}\n"
             f"From year: {scope['from_year']}\n"
-            f"Boroughs: {len(scope['boroughs']) if scope['boroughs'] else 'All (33)'}",
+            f"Local authorities: {len(scope['boroughs']) if scope['boroughs'] else 'All configured'}",
             border_style="cyan"
         ))
         console.print()
@@ -1478,7 +1567,7 @@ def main():
         start_time = time.time()
 
         # Phase 1: Download
-        df = download_data(scope, analysis_logger)
+        df = download_data(scope, email, api_key, analysis_logger)
         if df is None or df.empty:
             console.print("[red]✗ Analysis stopped - no data available[/red]")
             return
@@ -1491,7 +1580,7 @@ def main():
     df_raw = df.copy()
 
     # Phase 2: Check for existing validated data before running validation
-    validated_path = DATA_PROCESSED_DIR / "epc_london_validated.csv"
+    validated_path = DATA_PROCESSED_DIR / "epc_validated.csv"
     df_validated = prompt_use_existing_dataframe(
         "Data Validation",
         "validated EPC dataset",
@@ -1518,7 +1607,7 @@ def main():
         return
 
     # Phase 2.5: Methodological Adjustments (check for existing adjusted data)
-    adjusted_path = DATA_PROCESSED_DIR / "epc_london_adjusted.csv"
+    adjusted_path = DATA_PROCESSED_DIR / "epc_adjusted.csv"
     df_adjusted = prompt_use_existing_dataframe(
         "Methodological Adjustments",
         "methodologically adjusted dataset",

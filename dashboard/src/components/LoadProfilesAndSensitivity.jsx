@@ -171,7 +171,7 @@ export default function LoadProfilesAndSensitivity() {
       <div className="card">
         <h2 className="card-header">Uncertainty & Representativeness</h2>
         <p className="card-description">
-          EPC data validation showing Shakespeare Crescent sample representativeness vs London and national pre-1930 terraced homes.
+          EPC data validation showing Shakespeare Crescent sample representativeness vs benchmark and national pre-1930 terraced homes.
         </p>
       </div>
 
@@ -185,15 +185,15 @@ export default function LoadProfilesAndSensitivity() {
             <Tooltip />
             <Legend />
             <Bar dataKey="shakespeareCrescent" fill="#667eea" name="Shakespeare Crescent" />
-            <Bar dataKey="londonPre1930" fill="#82ca9d" name="London Pre-1930 Terraced" />
+            <Bar dataKey="londonPre1930" fill="#82ca9d" name="Benchmark pre-1930 terraced" />
             <Bar dataKey="national" fill="#ffc658" name="National Pre-1930 Terraced" />
           </BarChart>
         </ResponsiveContainer>
 
         <div style={{ marginTop: '16px', padding: '12px', background: '#d4edda', borderRadius: '6px' }}>
           <p style={{ margin: 0 }}>
-            <strong>Sample Representativeness:</strong> Shakespeare Crescent shows higher proportion of Band C properties (57.1% vs 42.3% London average),
-            indicating a slightly better-performing sample. However, the C/D band distribution (57.1% / 42.9%) aligns reasonably well with London
+            <strong>Sample Representativeness:</strong> Shakespeare Crescent shows higher proportion of Band C properties (57.1% vs 42.3% benchmark average),
+            indicating a slightly better-performing sample. However, the C/D band distribution (57.1% / 42.9%) aligns reasonably well with the benchmark
             pre-1930 terraced stock (42.3% / 47.9%), supporting the use of this sample as a representative case study for Edwardian terraced properties.
           </p>
         </div>

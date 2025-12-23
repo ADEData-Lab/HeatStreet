@@ -268,7 +268,7 @@ def get_package_definitions() -> Dict[str, RetrofitPackage]:
             package_id='wall_only',
             name='Wall Insulation Only',
             description='Wall insulation (cavity fill or EWI for solid)',
-            measures=['solid_wall_insulation_ewi']  # Default to solid for Edwardian
+            measures=['solid_wall_insulation_ewi']  # Default to solid walls
         ),
 
         'glazing_only': RetrofitPackage(
@@ -788,10 +788,10 @@ def main():
     logger.info("Starting retrofit package analysis...")
 
     # Load validated data
-    input_file = DATA_PROCESSED_DIR / "epc_london_validated.parquet"
+    input_file = DATA_PROCESSED_DIR / "epc_validated.parquet"
 
     if not input_file.exists():
-        input_file = DATA_PROCESSED_DIR / "epc_london_validated.csv"
+        input_file = DATA_PROCESSED_DIR / "epc_validated.csv"
         if not input_file.exists():
             logger.error(f"Input file not found")
             return

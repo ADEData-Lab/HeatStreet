@@ -2,7 +2,7 @@
 EPC API Data Acquisition Module
 
 Downloads EPC data directly from the UK EPC Register API.
-Handles data for London boroughs with filters for Edwardian terraced housing.
+Handles data for configured local authorities with optional property filters.
 """
 
 import os
@@ -13,19 +13,20 @@ import pandas as pd
 import io
 from pathlib import Path
 from typing import List, Optional, Dict
-from datetime import datetime
+from datetime import datetime, timedelta
 from tqdm import tqdm
 from loguru import logger
 from dotenv import load_dotenv
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
+import getpass
 
 import sys
 sys.path.append(str(Path(__file__).parent.parent.parent))
 from config.config import (
     load_config,
     DATA_RAW_DIR,
-    get_london_boroughs,
+    get_local_authorities,
     get_property_filters
 )
 
@@ -42,8 +43,8 @@ class EPCAPIDownloader:
 
     BASE_URL = "https://epc.opendatacommunities.org/api/v1/domestic/search"
 
-    # London borough local authority codes
-    LONDON_LA_CODES = {
+    # Default local authority codes (London boroughs) for backward compatibility
+    DEFAULT_LA_CODES = {
         'Barking and Dagenham': 'E09000002',
         'Barnet': 'E09000003',
         'Bexley': 'E09000004',
@@ -79,7 +80,13 @@ class EPCAPIDownloader:
         'Westminster': 'E09000033'
     }
 
-    def __init__(self, email: Optional[str] = None, api_key: Optional[str] = None):
+    def __init__(
+        self,
+        email: Optional[str] = None,
+        api_key: Optional[str] = None,
+        local_authority_codes: Optional[Dict[str, str]] = None,
+        prompt_for_credentials: bool = True,
+    ):
         """
         Initialize EPC API downloader.
 
@@ -89,10 +96,32 @@ class EPCAPIDownloader:
         """
         self.config = load_config()
         self.property_filters = get_property_filters()
+        self.local_authorities = get_local_authorities()
+        self.local_authority_codes = local_authority_codes or (
+            self.config.get('geography', {}).get('local_authority_codes') or {}
+        )
+
+        if not self.local_authority_codes and self.local_authorities:
+            self.local_authority_codes = {name: name for name in self.local_authorities}
+
+        if not self.local_authority_codes:
+            self.local_authority_codes = self.DEFAULT_LA_CODES
+            logger.warning(
+                "No local authority codes configured; defaulting to London boroughs. "
+                "Update config.geography.local_authority_codes for England and Wales coverage."
+            )
+
+        load_dotenv(override=True)
 
         # Get credentials from environment or parameters
         self.email = email or os.getenv('EPC_API_EMAIL')
         self.api_key = api_key or os.getenv('EPC_API_KEY')
+
+        if prompt_for_credentials:
+            if not self.email:
+                self.email = input("Enter EPC API email: ").strip() or None
+            if not self.api_key:
+                self.api_key = getpass.getpass("Enter EPC API key: ").strip() or None
 
         if not self.email or not self.api_key:
             raise ValueError(
@@ -106,7 +135,7 @@ class EPCAPIDownloader:
         # Ensure output directory exists
         DATA_RAW_DIR.mkdir(parents=True, exist_ok=True)
 
-        logger.info(f"Initialized EPC API Downloader for {len(self.LONDON_LA_CODES)} London boroughs")
+        logger.info(f"Initialized EPC API Downloader for {len(self.local_authority_codes)} local authorities")
         logger.info(f"Authenticated as: {self.email}")
 
     def _generate_auth_token(self) -> str:
@@ -127,16 +156,16 @@ class EPCAPIDownloader:
     def download_borough_data(
         self,
         borough_name: str,
-        property_type: str = 'house',
+        property_type: Optional[str] = None,
         from_year: int = 2015,
         max_results: Optional[int] = None
     ) -> pd.DataFrame:
         """
-        Download EPC data for a specific London borough.
+        Download EPC data for a specific local authority.
 
         Args:
-            borough_name: Name of the London borough
-            property_type: Property type filter (default: 'house')
+            borough_name: Name of the local authority
+            property_type: Property type filter (optional)
             from_year: Earliest year for certificates (default: 2015)
             max_results: Maximum number of results to download (None = all)
 
@@ -144,20 +173,24 @@ class EPCAPIDownloader:
             DataFrame containing EPC data
         """
         # Get local authority code
-        la_code = self.LONDON_LA_CODES.get(borough_name)
+        la_code = self.local_authority_codes.get(borough_name)
         if not la_code:
-            logger.error(f"Unknown borough: {borough_name}")
-            return pd.DataFrame()
+            logger.warning(
+                "Local authority code not configured for %s; using the name directly.",
+                borough_name,
+            )
+            la_code = borough_name
 
         logger.info(f"Downloading EPC data for {borough_name} (LA: {la_code})...")
 
         # Build query parameters
         query_params = {
             'local-authority': la_code,
-            'property-type': property_type,
             'from-year': from_year,
             'size': 5000  # Max page size
         }
+        if property_type:
+            query_params['property-type'] = property_type
 
         all_data = []
         search_after = None
@@ -257,7 +290,7 @@ class EPCAPIDownloader:
             logger.error(f"Unexpected error: {e}")
             return None, None
 
-    def download_all_london_boroughs(
+    def download_all_local_authorities(
         self,
         property_types: Optional[List[str]] = None,
         from_year: int = 2015,
@@ -265,30 +298,33 @@ class EPCAPIDownloader:
         max_workers: int = 4
     ) -> pd.DataFrame:
         """
-        Download EPC data for all London boroughs with parallel processing.
+        Download EPC data for all configured local authorities with parallel processing.
 
         Args:
-            property_types: List of property types to download (default: ['house'])
+            property_types: List of property types to download (optional)
             from_year: Earliest year for certificates (default: 2015)
-            max_results_per_borough: Max results per borough (None = all)
+            max_results_per_borough: Max results per local authority (None = all)
             max_workers: Number of parallel download threads (default: 4)
 
         Returns:
-            Combined DataFrame for all boroughs
+            Combined DataFrame for all local authorities
         """
         if property_types is None:
-            property_types = ['house']
+            property_types = [None]
 
-        logger.info(f"Downloading EPC data for all {len(self.LONDON_LA_CODES)} London boroughs...")
-        logger.info(f"Property types: {property_types}")
+        logger.info(f"Downloading EPC data for all {len(self.local_authority_codes)} local authorities...")
+        if any(property_types):
+            logger.info(f"Property types: {property_types}")
+        else:
+            logger.info("Property types: all")
         logger.info(f"From year: {from_year}")
         logger.info(f"Using {max_workers} parallel download threads")
 
         all_borough_data = []
         download_lock = threading.Lock()
 
-        def download_borough_wrapper(borough_name: str, property_type: str):
-            """Wrapper function for parallel borough downloads."""
+        def download_borough_wrapper(borough_name: str, property_type: Optional[str]):
+            """Wrapper function for parallel local authority downloads."""
             try:
                 df = self.download_borough_data(
                     borough_name=borough_name,
@@ -304,13 +340,14 @@ class EPCAPIDownloader:
                     return len(df)
                 return 0
             except Exception as e:
-                logger.error(f"Error downloading {borough_name} ({property_type}): {e}")
+                property_label = property_type or "all types"
+                logger.error(f"Error downloading {borough_name} ({property_label}): {e}")
                 return 0
 
         # Create list of download tasks
         download_tasks = [
             (borough_name, property_type)
-            for borough_name in self.LONDON_LA_CODES.keys()
+            for borough_name in self.local_authority_codes.keys()
             for property_type in property_types
         ]
 
@@ -330,9 +367,11 @@ class EPCAPIDownloader:
                 borough, prop_type = futures[future]
                 try:
                     records = future.result()
-                    logger.info(f"[{completed}/{total_tasks}] Completed {borough} ({prop_type}): {records:,} records")
+                    property_label = prop_type or "all types"
+                    logger.info(f"[{completed}/{total_tasks}] Completed {borough} ({property_label}): {records:,} records")
                 except Exception as e:
-                    logger.error(f"[{completed}/{total_tasks}] Failed {borough} ({prop_type}): {e}")
+                    property_label = prop_type or "all types"
+                    logger.error(f"[{completed}/{total_tasks}] Failed {borough} ({property_label}): {e}")
 
         if all_borough_data:
             combined_df = pd.concat(all_borough_data, ignore_index=True)
@@ -342,9 +381,9 @@ class EPCAPIDownloader:
             logger.warning("No data downloaded")
             return pd.DataFrame()
 
-    def apply_edwardian_filters(self, df: pd.DataFrame) -> pd.DataFrame:
+    def apply_property_filters(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Apply filters for Edwardian terraced housing.
+        Apply filters based on configured property filters.
 
         Args:
             df: Raw EPC DataFrame
@@ -352,35 +391,40 @@ class EPCAPIDownloader:
         Returns:
             Filtered DataFrame
         """
-        logger.info("Applying Edwardian terraced housing filters...")
+        logger.info("Applying property filters...")
         initial_count = len(df)
 
         if df.empty:
             return df
 
-        # Filter by construction period (pre-1930)
-        if 'CONSTRUCTION_AGE_BAND' in df.columns:
-            pre_1930_bands = [
-                'before 1900',
-                'England and Wales: before 1900',
-                '1900-1929',
-                'England and Wales: 1900-1929',
-                '1900-1920',
-                '1920-1929'
-            ]
-            df = df[df['CONSTRUCTION_AGE_BAND'].isin(pre_1930_bands)]
-            logger.info(f"After construction period filter: {len(df):,} records")
+        construction_age_bands = self.property_filters.get('construction_age_bands') or []
+        if construction_age_bands and 'CONSTRUCTION_AGE_BAND' in df.columns:
+            df = df[df['CONSTRUCTION_AGE_BAND'].isin(construction_age_bands)]
+            logger.info(f"After construction age band filter: {len(df):,} records")
 
-        # Filter by built form (terraced)
-        if 'BUILT_FORM' in df.columns:
-            terrace_forms = ['Mid-Terrace', 'End-Terrace', 'Enclosed Mid-Terrace', 'Enclosed End-Terrace']
-            df = df[df['BUILT_FORM'].isin(terrace_forms)]
+        built_forms = self.property_filters.get('built_forms') or []
+        if built_forms and 'BUILT_FORM' in df.columns:
+            built_forms_lower = {form.lower() for form in built_forms}
+            df = df[df['BUILT_FORM'].str.lower().isin(built_forms_lower)]
             logger.info(f"After built form filter: {len(df):,} records")
 
-        # Exclude flats
-        if 'PROPERTY_TYPE' in df.columns:
-            df = df[df['PROPERTY_TYPE'] != 'Flat']
+        property_types = self.property_filters.get('property_types') or []
+        if property_types and 'PROPERTY_TYPE' in df.columns:
+            property_types_lower = {ptype.lower() for ptype in property_types}
+            df = df[df['PROPERTY_TYPE'].str.lower().isin(property_types_lower)]
             logger.info(f"After property type filter: {len(df):,} records")
+
+        if self.property_filters.get('exclude_conversions') and 'BUILT_FORM' in df.columns:
+            df = df[~df['BUILT_FORM'].str.contains('Flat', case=False, na=False)]
+            logger.info(f"After conversion exclusion filter: {len(df):,} records")
+
+        if 'LODGEMENT_DATE' in df.columns:
+            recency_years = self.property_filters.get('certificate_recency_years')
+            if recency_years:
+                cutoff_date = datetime.now() - timedelta(days=recency_years * 365)
+                df['LODGEMENT_DATE'] = pd.to_datetime(df['LODGEMENT_DATE'], errors='coerce')
+                df = df[df['LODGEMENT_DATE'] >= cutoff_date]
+                logger.info(f"After recency filter: {len(df):,} records")
 
         logger.info(f"Filtering complete: {len(df):,} / {initial_count:,} records retained ({len(df)/initial_count*100:.1f}%)")
 
@@ -424,23 +468,21 @@ def main():
         # Initialize downloader
         downloader = EPCAPIDownloader()
 
-        # Download data for all London boroughs
-        # Start with last 10 years of house data
-        df = downloader.download_all_london_boroughs(
-            property_types=['house'],
+        # Download data for all configured local authorities
+        df = downloader.download_all_local_authorities(
             from_year=2015,
             max_results_per_borough=None  # Download all
         )
 
         if not df.empty:
             # Save raw data
-            downloader.save_data(df, "epc_london_raw.csv")
+            downloader.save_data(df, "epc_england_wales_raw.csv")
 
-            # Apply Edwardian filters
-            df_filtered = downloader.apply_edwardian_filters(df)
+            # Apply configured property filters
+            df_filtered = downloader.apply_property_filters(df)
 
             # Save filtered data
-            downloader.save_data(df_filtered, "epc_london_edwardian_filtered.csv")
+            downloader.save_data(df_filtered, "epc_england_wales_filtered.csv")
 
             logger.info("Data acquisition complete!")
             logger.info(f"Raw dataset: {len(df):,} properties")
