@@ -224,7 +224,7 @@ class DESNZHeatNetworkDownloader:
         csv_path = self.get_csv_network_path()
         if not GIS_DIR.exists() or not any(GIS_DIR.iterdir()):
             return {
-                "available": False,
+                "available": csv_path is not None,
                 "csv_available": csv_path is not None,
                 "csv_path": str(csv_path) if csv_path else None,
                 "message": "DESNZ data not downloaded yet",

@@ -108,10 +108,13 @@ class HeatNetworkAnalyzer:
             # Check if GIS data is available
             summary = self.gis_downloader.get_data_summary()
 
-            if not summary['available'] and auto_download:
+            csv_path = self.gis_downloader.get_csv_network_path(heat_networks_csv)
+
+            if not summary['available'] and not csv_path and auto_download:
                 logger.info("GIS data not found. Downloading from DESNZ source...")
                 if self.download_desnz_heat_network_data():
                     summary = self.gis_downloader.get_data_summary()
+                    csv_path = self.gis_downloader.get_csv_network_path(heat_networks_csv)
 
             if summary['available']:
                 # Get existing networks file
@@ -133,7 +136,6 @@ class HeatNetworkAnalyzer:
             except Exception as e:
                 logger.error(f"Error loading heat networks: {e}")
         else:
-            csv_path = self.gis_downloader.get_csv_network_path(heat_networks_csv)
             if csv_path:
                 heat_networks = self._load_csv_heat_networks(csv_path)
             else:
