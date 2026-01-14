@@ -849,17 +849,34 @@ def summarize_series(series: pd.Series) -> Dict[str, float]:
 
 def calculate_cost_effectiveness_summary(
     property_df: pd.DataFrame,
-    payback_threshold: float = 20.0
+    payback_threshold: float = 15.0,
+    marginal_threshold: float = 25.0
 ) -> Dict[str, Any]:
     """
     Calculate cost-effectiveness summary for a set of property upgrades.
 
+    AUDIT FIX: Implements tiered cost-effectiveness classification to address
+    the audit finding that 99.93% being deemed "cost-effective" was too optimistic.
+
+    Three-tier classification:
+    - COST_EFFECTIVE: Payback ≤ payback_threshold (default 15 years)
+      These are genuinely attractive investments that pay back within
+      a typical ownership period.
+
+    - MARGINALLY_COST_EFFECTIVE: Payback between threshold and marginal_threshold
+      (default 15-25 years). Positive lifecycle economics but requires long
+      ownership horizon or policy support to be attractive.
+
+    - NOT_COST_EFFECTIVE: Payback > marginal_threshold or infinite
+      Costs exceed practical lifetime benefits without substantial subsidy.
+
     Args:
         property_df: DataFrame with payback_years column
-        payback_threshold: Maximum payback for cost-effective classification
+        payback_threshold: Maximum payback for "cost-effective" (default 15 years)
+        marginal_threshold: Maximum payback for "marginally cost-effective" (default 25 years)
 
     Returns:
-        Dictionary with cost-effectiveness metrics
+        Dictionary with tiered cost-effectiveness metrics
     """
     total = len(property_df)
     if total == 0:
@@ -867,21 +884,47 @@ def calculate_cost_effectiveness_summary(
 
     numeric_df = property_df.replace({np.inf: np.nan, -np.inf: np.nan})
 
-    # Count by cost-effectiveness
+    # Count by cost-effectiveness tiers
     finite_paybacks = numeric_df['payback_years'].dropna()
+
+    # Tier 1: Cost-effective (payback ≤ threshold)
     cost_effective = finite_paybacks[finite_paybacks <= payback_threshold]
-    not_cost_effective_finite = finite_paybacks[finite_paybacks > payback_threshold]
+
+    # Tier 2: Marginally cost-effective (threshold < payback ≤ marginal_threshold)
+    marginal = finite_paybacks[
+        (finite_paybacks > payback_threshold) & (finite_paybacks <= marginal_threshold)
+    ]
+
+    # Tier 3: Not cost-effective (payback > marginal_threshold or infinite)
+    not_cost_effective_finite = finite_paybacks[finite_paybacks > marginal_threshold]
     infinite_payback = total - len(finite_paybacks)
+    not_cost_effective_total = len(not_cost_effective_finite) + infinite_payback
 
     return {
         'total_properties': total,
+        # Tier 1: Cost-effective
         'cost_effective_count': len(cost_effective),
         'cost_effective_pct': len(cost_effective) / total * 100,
-        'marginal_count': len(not_cost_effective_finite),
-        'marginal_pct': len(not_cost_effective_finite) / total * 100,
-        'not_cost_effective_count': infinite_payback,
-        'not_cost_effective_pct': infinite_payback / total * 100,
+        # Tier 2: Marginally cost-effective
+        'marginal_count': len(marginal),
+        'marginal_pct': len(marginal) / total * 100,
+        # Tier 3: Not cost-effective
+        'not_cost_effective_count': not_cost_effective_total,
+        'not_cost_effective_pct': not_cost_effective_total / total * 100,
+        # Breakdown of not cost-effective
+        'long_payback_count': len(not_cost_effective_finite),
+        'infinite_payback_count': infinite_payback,
+        # Summary statistics
         'avg_payback_cost_effective': cost_effective.mean() if len(cost_effective) > 0 else np.nan,
         'median_payback_cost_effective': cost_effective.median() if len(cost_effective) > 0 else np.nan,
+        'avg_payback_marginal': marginal.mean() if len(marginal) > 0 else np.nan,
+        # Thresholds used
         'payback_threshold_years': payback_threshold,
+        'marginal_threshold_years': marginal_threshold,
+        # Classification descriptions
+        'tier_descriptions': {
+            'cost_effective': f'Payback ≤{payback_threshold} years (attractive investment)',
+            'marginal': f'Payback {payback_threshold}-{marginal_threshold} years (needs long horizon)',
+            'not_cost_effective': f'Payback >{marginal_threshold} years or no savings (needs subsidy)',
+        },
     }

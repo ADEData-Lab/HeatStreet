@@ -23,6 +23,75 @@ class RetrofitReadinessAnalyzer:
     Analyzes property readiness for heat pump installation.
 
     Classifies properties into readiness tiers and calculates pre-requisite costs.
+
+    AUDIT FIX: Added clear tier definitions to address audit finding that
+    tier criteria and overlap were not explicitly documented.
+
+    TIER DEFINITIONS:
+    =================
+
+    Tier 1 - Heat Pump Ready Now (deficiency score 0-0.5)
+    -----------------------------------------------------
+    Properties meeting all these criteria:
+    - Well-insulated walls (cavity filled or solid with insulation)
+    - Good loft insulation (200mm+ or energy rating 'Good'/'Very Good')
+    - Double or triple glazed throughout
+    - SAP score 65+ (EPC Band C or better)
+    - Estimated flow temperature 55°C or below
+    Typical fabric cost: £0-2,000
+    These properties can install a standard ASHP with minimal preparation.
+    May still need emitter assessment but unlikely to need radiator upsizing.
+
+    Tier 2 - Minor Work Required (deficiency score 0.5-1.5)
+    -------------------------------------------------------
+    Properties with ONE of these issues:
+    - Loft insulation needs topping up (100-200mm currently)
+    - OR floor insulation poor/missing
+    - OR minor glazing issues (some single-glazed elements)
+    - SAP score 55-65 (EPC Band D, upper range)
+    Typical fabric cost: £1,200-3,500
+    Quick wins: Usually loft top-up alone is sufficient.
+
+    Tier 3 - Moderate Work Required (deficiency score 1.5-2.5)
+    ----------------------------------------------------------
+    Properties with TWO of these issues:
+    - Loft needs significant upgrade
+    - AND/OR wall insulation possible but not done (e.g., cavity walls)
+    - AND/OR glazing upgrade needed
+    - SAP score 45-55 (EPC Band D, lower range)
+    Typical fabric cost: £4,000-8,000
+    These properties need a coordinated fabric package before heat pump.
+
+    Tier 4 - Significant Work Required (deficiency score 2.5-4.0)
+    -------------------------------------------------------------
+    Properties with MULTIPLE major issues:
+    - Solid walls uninsulated (needs EWI or IWI)
+    - Poor loft insulation
+    - Single glazed windows
+    - SAP score 35-45 (EPC Band E)
+    Typical fabric cost: £10,000-18,000
+    NOTE: May use hybrid heat pump (£8k) instead of pure ASHP (£12k)
+    as a pragmatic solution, which can offset higher fabric costs.
+
+    Tier 5 - Major Intervention Needed (deficiency score 4.0+)
+    ----------------------------------------------------------
+    Properties with severe deficiencies:
+    - Multiple uninsulated elements (solid walls + poor loft + single glazing)
+    - Very poor SAP score (<35, EPC Band F/G)
+    - High estimated flow temperature requirement (>65°C)
+    Typical fabric cost: £15,000-25,000
+    These properties may need hybrid/alternative solutions or staged retrofit.
+    Standard ASHP may not be suitable without extensive fabric intervention.
+
+    IMPORTANT NOTES:
+    ================
+    - "Fabric-ready" (Tier 1) does NOT mean "install-ready":
+      Most Tier 1 properties still need:
+      * Hot water cylinder (200L+) if not present
+      * Electrical capacity check (may need upgrade to 100A)
+      * Radiator assessment (flow temp capability)
+    - The ~96% needing radiator assessment includes Tier 1 properties.
+    - Tier 4 may have lower TOTAL cost than Tier 3 due to hybrid HP strategy.
     """
 
     # Heat pump readiness thresholds
@@ -32,6 +101,16 @@ class RetrofitReadinessAnalyzer:
         'major_work': 200,      # kWh/m²/year - needs major fabric improvements
         'challenging': 250,     # kWh/m²/year - very challenging, may need hybrid
         # > 250 = not suitable for standard heat pump
+    }
+
+    # Deficiency score thresholds for tier classification
+    # AUDIT FIX: Explicitly documented for clarity
+    TIER_THRESHOLDS = {
+        1: (0.0, 0.5),    # Ready now: minimal/no deficiencies
+        2: (0.5, 1.5),    # Minor work: one small deficiency
+        3: (1.5, 2.5),    # Moderate work: two deficiencies
+        4: (2.5, 4.0),    # Significant work: multiple major issues
+        5: (4.0, float('inf')),  # Major intervention: severe deficiencies
     }
 
     # Intervention costs (£)
@@ -395,14 +474,14 @@ class RetrofitReadinessAnalyzer:
             deficiency_scores += poor_sap.astype(float) * 0.5
 
         # Classify into tiers based on deficiency score
-        # Score thresholds designed to give expected distribution
-        tier = pd.Series(3, index=df.index)  # Default
+        # Using explicitly defined TIER_THRESHOLDS for transparency
+        tier = pd.Series(3, index=df.index)  # Default to moderate work
 
-        tier[deficiency_scores <= 0.5] = 1   # Ready (score 0-0.5)
-        tier[(deficiency_scores > 0.5) & (deficiency_scores <= 1.5)] = 2   # Minor work
-        tier[(deficiency_scores > 1.5) & (deficiency_scores <= 2.5)] = 3   # Moderate work
-        tier[(deficiency_scores > 2.5) & (deficiency_scores <= 4.0)] = 4   # Significant work
-        tier[deficiency_scores > 4.0] = 5   # Major intervention
+        for tier_num, (low, high) in self.TIER_THRESHOLDS.items():
+            if tier_num == 1:
+                tier[deficiency_scores <= high] = tier_num
+            else:
+                tier[(deficiency_scores > low) & (deficiency_scores <= high)] = tier_num
 
         # Store deficiency score for debugging/analysis
         df['deficiency_score'] = deficiency_scores
@@ -435,12 +514,35 @@ class RetrofitReadinessAnalyzer:
         return costs
 
     def _calculate_total_retrofit_cost(self, df: pd.DataFrame) -> pd.Series:
-        """Calculate total cost including fabric + heat pump + ancillaries."""
+        """
+        Calculate total cost including fabric + heat pump + ancillaries.
+
+        AUDIT FIX: Added documentation for Tier 3/4 cost anomaly.
+
+        The audit noted that Tier 4 sometimes has lower total cost than Tier 3.
+        This is intentional and occurs because:
+
+        1. Tier 4 properties use hybrid heat pumps (£8k) instead of
+           pure ASHPs (£12k), saving £4k on the heat pump itself.
+
+        2. The hybrid HP strategy is more pragmatic for Tier 4 properties
+           with very poor fabric - it allows the gas backup to handle
+           peak demand, reducing the need for maximum fabric intervention.
+
+        3. While Tier 4 has higher fabric costs than Tier 3, the £4k
+           HP cost difference can offset this for some properties.
+
+        This cost structure reflects real-world decision-making where
+        a hybrid approach may be more cost-effective than pursuing
+        maximum fabric efficiency for a pure ASHP in challenging homes.
+        """
         total_cost = df['fabric_prerequisite_cost'].astype(float).copy()
 
         total_cost += self._cost_series(df, 'emitter_upgrades', df['needs_radiator_upsizing'])
         total_cost += self._cost_series(df, 'hot_water_cylinder')
 
+        # Tier 4 properties get hybrid heat pumps (pragmatic approach for
+        # homes where full ASHP readiness would be cost-prohibitive)
         hp_cost = df.apply(
             lambda row: self.cost_calculator.measure_cost(
                 'hybrid_heat_pump' if row.get('hp_readiness_tier') == 4 else 'ashp_installation',

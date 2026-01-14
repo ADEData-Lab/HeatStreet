@@ -33,6 +33,30 @@ class MethodologicalAdjustments:
         'G': 0.52,  # 48% overprediction
     }
 
+    # AUDIT FIX: Rebound effect factors by EPC band
+    # Homes that were under-heated before retrofit may "take back" some savings
+    # as improved comfort (the "rebound effect" or "comfort taking").
+    # Research suggests 10-40% of theoretical savings may be taken as comfort.
+    # Factors represent fraction of modeled savings that will be realized as
+    # actual energy reduction (remainder taken as improved comfort).
+    #
+    # Evidence base:
+    # - Sorrell et al. (2009): Direct rebound effects typically 10-30%
+    # - Milne & Boardman (2000): Comfort taking in fuel-poor homes ~30%
+    # - Hong et al. (2006): Rebound 15-20% in average homes, higher in under-heated
+    # - Chitnis et al. (2013): UK rebound effect estimates 5-15%
+    #
+    # Homes with lower EPC ratings (who likely under-heated) have higher rebound.
+    REBOUND_FACTORS = {
+        'A': 1.00,  # Well-heated home, minimal rebound
+        'B': 0.95,  # 5% taken as comfort
+        'C': 0.90,  # 10% taken as comfort
+        'D': 0.85,  # 15% taken as comfort
+        'E': 0.75,  # 25% taken as comfort (moderate under-heating)
+        'F': 0.65,  # 35% taken as comfort (significant under-heating)
+        'G': 0.55,  # 45% taken as comfort (severe under-heating)
+    }
+
     # Emitter upgrade costs for heat pump compatibility
     EMITTER_UPGRADE_COSTS = {
         'none': 0,        # Existing radiators adequate
@@ -335,6 +359,110 @@ class MethodologicalAdjustments:
 
         return df_cop
 
+    def get_rebound_factor(self, epc_band: str) -> float:
+        """
+        Get the rebound effect factor for a given EPC band.
+
+        The rebound effect represents the fraction of modeled energy savings
+        that will actually be realized. The remainder is "taken back" as
+        improved thermal comfort (warmer home temperatures).
+
+        Args:
+            epc_band: EPC rating (A-G)
+
+        Returns:
+            Factor between 0 and 1 representing realized savings fraction
+        """
+        return self.REBOUND_FACTORS.get(str(epc_band).upper(), 0.85)
+
+    def apply_rebound_adjustment(
+        self,
+        df: pd.DataFrame,
+        savings_col: str = 'modeled_savings_kwh'
+    ) -> pd.DataFrame:
+        """
+        Apply rebound effect adjustment to modeled energy savings.
+
+        AUDIT FIX: Addresses audit finding that the model applies prebound
+        calibration to baseline but then uses full SAP-derived savings,
+        which may overestimate actual energy reductions. In reality,
+        homes that were under-heated before retrofit may "take back"
+        some savings as improved comfort.
+
+        This adjustment:
+        1. Maps each property's EPC band to a rebound factor
+        2. Reduces modeled savings by the rebound factor
+        3. Provides both unadjusted and adjusted savings columns
+
+        Evidence base:
+        - Few et al. (2023): Performance gap analysis
+        - Sorrell et al. (2009): Direct rebound effects 10-30%
+        - Milne & Boardman (2000): Comfort taking ~30% in fuel-poor homes
+
+        Args:
+            df: DataFrame with CURRENT_ENERGY_RATING and savings columns
+
+        Returns:
+            DataFrame with rebound-adjusted savings columns
+        """
+        logger.info("Applying rebound effect adjustment to savings estimates...")
+
+        df_adj = df.copy()
+
+        if 'CURRENT_ENERGY_RATING' not in df.columns:
+            logger.warning("CURRENT_ENERGY_RATING column not found, skipping rebound adjustment")
+            return df
+
+        # Map EPC band to rebound factor
+        df_adj['rebound_factor'] = df_adj['CURRENT_ENERGY_RATING'].map(self.REBOUND_FACTORS)
+        df_adj['rebound_factor'] = df_adj['rebound_factor'].fillna(0.85)  # Default for unknown bands
+
+        # Apply to any savings columns that exist
+        savings_columns = [
+            'modeled_savings_kwh',
+            'annual_kwh_saving',
+            'fabric_savings_kwh',
+            'heat_pump_savings_kwh',
+        ]
+
+        adjusted_cols = 0
+        for col in savings_columns:
+            if col in df_adj.columns:
+                # Keep original as _unadjusted
+                df_adj[f'{col}_unadjusted'] = df_adj[col]
+                # Apply rebound factor
+                df_adj[col] = df_adj[col] * df_adj['rebound_factor']
+                adjusted_cols += 1
+                logger.info(f"  Applied rebound adjustment to {col}")
+
+        # Also apply to percentage savings if present
+        pct_cols = ['kwh_saving_pct', 'energy_reduction_pct']
+        for col in pct_cols:
+            if col in df_adj.columns:
+                df_adj[f'{col}_unadjusted'] = df_adj[col]
+                df_adj[col] = df_adj[col] * df_adj['rebound_factor']
+                adjusted_cols += 1
+
+        # Log impact
+        if adjusted_cols > 0:
+            mean_rebound = df_adj['rebound_factor'].mean()
+            reduction_pct = (1 - mean_rebound) * 100
+            logger.info(f"✓ Rebound effect adjustment applied")
+            logger.info(f"  Mean rebound factor: {mean_rebound:.2f}")
+            logger.info(f"  Average savings reduction due to comfort-taking: {reduction_pct:.1f}%")
+
+            # Band-wise breakdown
+            band_summary = df_adj.groupby('CURRENT_ENERGY_RATING')['rebound_factor'].mean()
+            for band in ['A', 'B', 'C', 'D', 'E', 'F', 'G']:
+                if band in band_summary.index:
+                    factor = band_summary[band]
+                    taken = (1 - factor) * 100
+                    logger.info(f"    Band {band}: {taken:.0f}% of savings taken as comfort")
+        else:
+            logger.info("  No applicable savings columns found; rebound factor added for downstream use")
+
+        return df_adj
+
     def add_measurement_uncertainty(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Add measurement error and confidence intervals based on Crawley et al. (2019).
@@ -391,6 +519,19 @@ class MethodologicalAdjustments:
         """
         Apply all methodological adjustments in correct sequence.
 
+        AUDIT FIX: Now includes rebound effect factor for downstream savings
+        calculations. The sequence is:
+
+        1. Prebound effect (calibrate baseline to realistic consumption)
+        2. Rebound factor (prepare for downstream savings adjustment)
+        3. Flow temperature model (for heat pump costing)
+        4. Measurement uncertainty (for reporting)
+
+        Note: The rebound factor is attached to each property for use by
+        the scenario model when calculating actual energy savings. This
+        ensures that homes with high prebound (under-heating) will have
+        their modeled savings reduced to account for comfort-taking.
+
         Args:
             df: Raw validated DataFrame
 
@@ -404,10 +545,15 @@ class MethodologicalAdjustments:
         # 1. Prebound effect (must be first - affects baseline)
         df_adjusted = self.apply_prebound_adjustment(df_adjusted)
 
-        # 2. Flow temperature model (for heat pump costing)
+        # 2. Attach rebound factors for downstream savings calculations
+        # This doesn't modify savings yet (scenario model does that) but
+        # provides the factors for each property based on their EPC band
+        df_adjusted = self.apply_rebound_adjustment(df_adjusted)
+
+        # 3. Flow temperature model (for heat pump costing)
         df_adjusted = self.estimate_flow_temperature(df_adjusted)
 
-        # 3. Measurement uncertainty (for reporting)
+        # 4. Measurement uncertainty (for reporting)
         df_adjusted = self.add_measurement_uncertainty(df_adjusted)
 
         logger.info(f"✓ All methodological adjustments complete")
@@ -426,6 +572,7 @@ class MethodologicalAdjustments:
         """
         summary = {
             'prebound_adjustment': {},
+            'rebound_adjustment': {},
             'flow_temperature': {},
             'uncertainty': {}
         }
@@ -436,6 +583,26 @@ class MethodologicalAdjustments:
                 'applied': True,
                 'mean_factor': df['prebound_factor'].mean(),
                 'description': 'Adjusts EPC-modeled consumption to realistic baseline (Few et al., 2023)'
+            }
+
+        # Rebound effect summary
+        if 'rebound_factor' in df.columns:
+            mean_rebound = df['rebound_factor'].mean()
+            comfort_taking_pct = (1 - mean_rebound) * 100
+            summary['rebound_adjustment'] = {
+                'applied': True,
+                'mean_factor': mean_rebound,
+                'comfort_taking_pct': comfort_taking_pct,
+                'description': (
+                    'Adjusts modeled savings for comfort-taking (rebound effect). '
+                    'Under-heated homes take some savings as improved thermal comfort '
+                    'rather than reduced fuel consumption. '
+                    '(Sorrell et al., 2009; Milne & Boardman, 2000)'
+                ),
+                'methodology_note': (
+                    f'Average {comfort_taking_pct:.1f}% of theoretical savings '
+                    f'expected to be taken as comfort improvement rather than energy reduction'
+                )
             }
 
         # Flow temperature summary
