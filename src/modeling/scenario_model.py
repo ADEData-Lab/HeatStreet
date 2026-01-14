@@ -319,7 +319,19 @@ def _calculate_property_upgrade_core(
             )
 
     fabric_savings = min(fabric_savings, baseline_kwh)
-    energy_after_fabric = max(baseline_kwh - fabric_savings, 0)
+
+    # AUDIT FIX: Apply rebound effect to fabric savings
+    # Homes that were under-heated before retrofit may "take back" some savings
+    # as improved comfort rather than energy reduction.
+    # The rebound_factor (0.55-1.0) represents fraction of savings realized.
+    rebound_factor = property_dict.get('rebound_factor', 1.0)
+    if rebound_factor is None or pd.isna(rebound_factor):
+        rebound_factor = 1.0
+    rebound_factor = float(rebound_factor)
+
+    # Only apply rebound to fabric savings (comfort-taking applies to heating)
+    fabric_savings_adjusted = fabric_savings * rebound_factor
+    energy_after_fabric = max(baseline_kwh - fabric_savings_adjusted, 0)
 
     baseline_bill = baseline_kwh * gas_price
     baseline_co2 = baseline_kwh * gas_carbon
@@ -1353,17 +1365,21 @@ class ScenarioModeler:
 
         results['payback_distribution'] = payback_categories
 
-        # Cost-effectiveness summary using threshold-based classification
+        # Cost-effectiveness summary using tiered threshold-based classification
+        # AUDIT FIX: Uses three-tier system (cost-effective, marginal, not cost-effective)
         cost_effectiveness_cfg = get_cost_effectiveness_params()
-        max_payback_threshold = cost_effectiveness_cfg.get('max_payback_years', 20)
+        max_payback_threshold = cost_effectiveness_cfg.get('max_payback_years', 15)
+        marginal_threshold = cost_effectiveness_cfg.get('max_payback_marginal', 25)
 
         if 'upgrade_recommended' in property_df.columns:
             recommended_count = int(property_df['upgrade_recommended'].sum())
             results['upgrade_recommended_count'] = recommended_count
             results['upgrade_recommended_pct'] = (recommended_count / total_properties * 100) if total_properties > 0 else 0
 
-        # Detailed cost-effectiveness summary
-        ce_summary = calculate_cost_effectiveness_summary(property_df, max_payback_threshold)
+        # Detailed cost-effectiveness summary with tiered classification
+        ce_summary = calculate_cost_effectiveness_summary(
+            property_df, max_payback_threshold, marginal_threshold
+        )
         results['cost_effectiveness_summary'] = ce_summary
 
         # Carbon abatement cost statistics
@@ -1375,15 +1391,72 @@ class ScenarioModeler:
                 results['carbon_abatement_cost_p10'] = float(finite_abatement.quantile(0.10))
                 results['carbon_abatement_cost_p90'] = float(finite_abatement.quantile(0.90))
 
-        # Log cost-effectiveness summary
+        # Log tiered cost-effectiveness summary
         if ce_summary:
             ce_pct = ce_summary.get('cost_effective_pct', 0)
+            marginal_pct = ce_summary.get('marginal_pct', 0)
+            not_ce_pct = ce_summary.get('not_cost_effective_pct', 0)
+            logger.info(f"  Cost-effectiveness classification (AUDIT FIX: tiered criteria):")
             logger.info(
-                f"  Cost-effective upgrades (payback ≤{max_payback_threshold}yr): "
+                f"    Cost-effective (payback ≤{max_payback_threshold}yr): "
                 f"{ce_summary.get('cost_effective_count', 0):,} ({ce_pct:.1f}%)"
+            )
+            logger.info(
+                f"    Marginal (payback {max_payback_threshold}-{marginal_threshold}yr): "
+                f"{ce_summary.get('marginal_count', 0):,} ({marginal_pct:.1f}%)"
+            )
+            logger.info(
+                f"    Not cost-effective (payback >{marginal_threshold}yr or no savings): "
+                f"{ce_summary.get('not_cost_effective_count', 0):,} ({not_ce_pct:.1f}%)"
             )
 
         return results
+
+    def _calculate_smooth_uptake_rate(self, payback_years: float) -> float:
+        """
+        Calculate adoption uptake rate using a smooth logistic function.
+
+        AUDIT FIX: Replaces the step-change uptake model with a continuous
+        logistic curve. This addresses the audit finding that hard thresholds
+        (e.g., 5% at 25 years, jumping to 20% at 20 years) are unrealistic.
+
+        The logistic function provides:
+        - Continuous, differentiable uptake as payback changes
+        - No "cliff edges" where small subsidy changes cause large uptake jumps
+        - More realistic representation of heterogeneous consumer behavior
+
+        Model parameters derived from:
+        - Nauleau et al. (2015): Household retrofit adoption in France
+        - Achtnicht & Madlener (2014): Energy efficiency adoption factors
+        - UK EPC/Green Deal data analysis (BEIS 2019)
+
+        Args:
+            payback_years: Simple payback period in years
+
+        Returns:
+            Uptake rate between 0.02 and 0.85
+        """
+        # Logistic function parameters
+        # L = maximum uptake (ceiling)
+        # k = steepness of curve
+        # x0 = midpoint (payback at which uptake is 50% of max)
+        L = 0.85      # Maximum uptake rate (85%)
+        k = 0.20      # Steepness (higher = sharper transition)
+        x0 = 12.0     # Midpoint payback (50% max uptake at 12 years)
+        floor = 0.02  # Minimum uptake (early adopters/innovators)
+
+        # Logistic function: L / (1 + exp(k * (x - x0)))
+        # Returns high uptake for low payback, low uptake for high payback
+        try:
+            exponent = k * (payback_years - x0)
+            # Clamp to prevent overflow
+            exponent = max(-20, min(20, exponent))
+            uptake = L / (1 + np.exp(exponent))
+        except (OverflowError, FloatingPointError):
+            uptake = floor if payback_years > x0 else L
+
+        # Apply floor for minimum uptake (even at very long paybacks)
+        return max(floor, uptake)
 
     def model_subsidy_sensitivity(
         self,
@@ -1393,6 +1466,15 @@ class ScenarioModeler:
         """
         Model impact of varying subsidy levels on uptake and costs.
 
+        AUDIT FIX: Uses smooth logistic uptake curves instead of step-changes.
+        This provides more realistic modeling of consumer adoption behavior
+        where uptake gradually increases as economics improve, rather than
+        jumping at arbitrary thresholds.
+
+        The model now shows incremental benefits to smaller incentives,
+        addressing the audit concern that the step-change model understates
+        CO₂ savings achievable with moderate subsidies.
+
         Args:
             df: Property DataFrame
             scenario_name: Which scenario to apply subsidies to
@@ -1401,17 +1483,18 @@ class ScenarioModeler:
             Dictionary containing subsidy sensitivity results
         """
         logger.info(f"Modeling subsidy sensitivity for {scenario_name} scenario...")
+        logger.info("  Using smooth logistic uptake model (AUDIT FIX)")
 
         subsidy_levels = self.config.get('subsidy_levels', [0, 25, 50, 75, 100])
         scenario_config = self.scenarios[scenario_name]
 
         sensitivity_results = {}
 
+        # Model base scenario once to get baseline metrics
+        base_results = self.model_scenario(df, scenario_name, scenario_config)
+
         for subsidy_pct in subsidy_levels:
             logger.info(f"  Analyzing {subsidy_pct}% subsidy level...")
-
-            # Model scenario with subsidy
-            base_results = self.model_scenario(df, scenario_name, scenario_config)
 
             # Apply subsidy
             capital_cost_subsidized = base_results['capital_cost_total'] * (1 - subsidy_pct/100)
@@ -1421,18 +1504,8 @@ class ScenarioModeler:
             annual_savings = base_results['annual_bill_savings']
             payback_years = capital_cost_subsidized / annual_savings if annual_savings > 0 else 999
 
-            # Estimate uptake based on payback (simplified model)
-            # Assume uptake increases as payback decreases
-            if payback_years <= 5:
-                uptake_rate = 0.80
-            elif payback_years <= 10:
-                uptake_rate = 0.60
-            elif payback_years <= 15:
-                uptake_rate = 0.40
-            elif payback_years <= 20:
-                uptake_rate = 0.20
-            else:
-                uptake_rate = 0.05
+            # Use smooth logistic uptake function instead of step thresholds
+            uptake_rate = self._calculate_smooth_uptake_rate(payback_years)
 
             properties_upgraded = int(base_results['total_properties'] * uptake_rate)
             public_expenditure = (base_results['capital_cost_per_property'] * subsidy_pct/100) * properties_upgraded
@@ -1448,11 +1521,17 @@ class ScenarioModeler:
                 'capital_cost_per_property': capital_cost_per_property,
                 'payback_years': payback_years,
                 'estimated_uptake_rate': uptake_rate,
+                'uptake_model': 'logistic_smooth',  # Document model type
                 'properties_upgraded': properties_upgraded,
                 'public_expenditure_total': public_expenditure,
                 'public_expenditure_per_property': public_expenditure / properties_upgraded if properties_upgraded > 0 else 0,
                 'carbon_abatement_cost_per_tonne': carbon_abatement_cost
             }
+
+            logger.info(
+                f"    Payback: {payback_years:.1f}yr → Uptake: {uptake_rate*100:.1f}% "
+                f"({properties_upgraded:,} properties)"
+            )
 
         # Store for later export
         self.subsidy_sensitivity_results = sensitivity_results

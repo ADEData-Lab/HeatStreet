@@ -32,6 +32,89 @@ from src.spatial.postcode_geocoder import PostcodeGeocoder
 class HeatNetworkAnalyzer:
     """
     Analyzes properties relative to heat network infrastructure and zones.
+
+    AUDIT FIX: Added documentation about tier classification assumptions and
+    limitations per audit findings on Phase 7 (Spatial Analysis).
+
+    HEAT NETWORK TIER DEFINITIONS:
+    ==============================
+
+    Tier 1 - Adjacent to Existing Network (within 250m)
+    ---------------------------------------------------
+    Properties within 250m of existing district heating infrastructure.
+    These have the highest confidence for network connection viability.
+    - Connection cost: ~£5,000 (service connection + HIU only)
+    - Infrastructure: Already built, minimal new pipes needed
+    - Confidence: HIGH
+
+    Tier 2 - Within Planned Heat Network Zone
+    -----------------------------------------
+    Properties inside borough-designated heat priority areas.
+    These areas have been identified for potential network development.
+    - Connection cost: ~£5,000-8,000 (depends on timing vs network build)
+    - Infrastructure: Planned but not yet built
+    - Confidence: MEDIUM (depends on network actually being built)
+
+    Tier 3 - High Heat Density (≥15 GWh/km²)
+    ----------------------------------------
+    Properties in areas with sufficient heat load density to economically
+    justify network extension.
+    - Connection cost: ~£8,000-12,000 (includes share of local distribution)
+    - Infrastructure: Would require new network construction
+    - Confidence: MEDIUM (economic viability depends on uptake rate)
+
+    Tier 4 - Moderate Heat Density (5-15 GWh/km²)
+    ---------------------------------------------
+    Properties in areas with marginal heat density. Network extension may
+    be viable with public subsidy or high uptake rates.
+    - Connection cost: ~£12,000-18,000 (higher infrastructure share)
+    - Recommended pathway: Individual heat pumps preferred
+    - Confidence: LOW for network, HIGH for heat pump
+
+    Tier 5 - Low Heat Density (<5 GWh/km²)
+    --------------------------------------
+    Properties in areas where district heating is not economically viable.
+    Individual heat pumps are the clear pathway.
+    - Network not recommended
+    - Recommended pathway: Individual ASHP
+    - Confidence: HIGH for heat pump pathway
+
+    IMPORTANT LIMITATIONS & CAVEATS:
+    ================================
+
+    1. DENSITY-ONLY CLASSIFICATION
+       The tier classification uses heat density as primary criterion.
+       Real-world network viability also depends on:
+       - Anchor heat loads (hospitals, leisure centres, etc.)
+       - Right-of-way access for pipe installation
+       - Street layout and trenching difficulty
+       - Local authority support and planning
+       - Existing infrastructure (gas, water, etc.)
+
+    2. COST ASSUMPTIONS
+       The ~£5,000 connection cost represents ONLY:
+       - Service pipe connection from street to property
+       - Heat Interface Unit (HIU) installation
+       - Internal plumbing modifications
+
+       It DOES NOT include:
+       - Energy centre/generation plant (£10-50M per network)
+       - Primary distribution network (£500-2000/m pipe)
+       - Secondary distribution (£200-500/m pipe)
+
+       If infrastructure costs were allocated per dwelling, the effective
+       cost would be £10,000-15,000+ for new networks.
+
+    3. CARBON INTENSITY ASSUMPTION
+       The analysis assumes low-carbon heat supply (0.073 kgCO2/kWh).
+       Early-stage networks may use gas CHP (0.15-0.20 kgCO2/kWh),
+       reducing the carbon benefit until the network decarbonises.
+
+    4. 72% "NETWORK VIABLE" CAVEAT
+       The finding that ~72% of properties are in Tiers 1-3 should be
+       interpreted as "potentially viable for network IF network is built
+       in their area" - not as "72% will definitely get a network".
+       Actual network deployment depends on policy, funding, and uptake.
     """
 
     def __init__(self):

@@ -98,31 +98,103 @@ eligibility:
     target_flow_temperature_c: 45      # Low-temp radiator sizing target for emitters
 
   # Heat Network Zone Tiers
+  # AUDIT FIX: Added explicit tier criteria, viability ratings, and
+  # recommended pathways. Thresholds adjusted to be more conservative
+  # per audit finding that ~72% in Tier 1-3 was over-optimistic.
+  #
+  # The min_heat_density_gwh_km2 thresholds are based on:
+  # - DECC Heat Networks Delivery Unit guidance (2015)
+  # - BEIS Heat Network Zoning methodology (2022)
+  # - Aalborg University district heating studies
+  #
+  # NOTE: Tier classification shows POTENTIAL viability only.
+  # Actual network deployment depends on policy, funding, and uptake.
   heat_network_tiers:
     tier_1:
       name: "Adjacent to existing network"
       distance_meters: 250
+      viability: "HIGH"
+      connection_cost_estimate_gbp: 5000
+      recommended_pathway: "district_heating"
+      notes: "Properties within 250m of existing network infrastructure"
     tier_2:
       name: "Within planned HNZ"
       criteria: "inside_hnz_boundary"
+      viability: "MEDIUM"
+      connection_cost_estimate_gbp: 7500
+      recommended_pathway: "district_heating"
+      notes: "Inside borough heat priority areas; network may be built"
     tier_3:
       name: "High heat density"
+      # AUDIT FIX: Raised from 15 to 20 GWh/km² for more conservative estimate
+      # This better reflects minimum viable density for new network construction
+      min_heat_density_gwh_km2: 20
+      viability: "MEDIUM"
+      connection_cost_estimate_gbp: 10000
+      recommended_pathway: "district_heating"
+      notes: "Sufficient density for network extension if anchor loads present"
+    tier_3a:
+      name: "Moderate-high heat density"
+      # New intermediate tier for marginal cases
       min_heat_density_gwh_km2: 15
+      max_heat_density_gwh_km2: 20
+      viability: "MEDIUM-LOW"
+      connection_cost_estimate_gbp: 12000
+      recommended_pathway: "either"
+      notes: "Borderline - network may be viable with subsidy or high uptake"
     tier_4:
       name: "Moderate heat density"
       min_heat_density_gwh_km2: 5
+      viability: "LOW"
+      connection_cost_estimate_gbp: 15000
+      recommended_pathway: "heat_pump"
+      notes: "Network rarely viable; individual heat pumps recommended"
     tier_5:
       name: "Low heat density"
       min_heat_density_gwh_km2: 0
+      viability: "NOT_VIABLE"
+      connection_cost_estimate_gbp: null
+      recommended_pathway: "heat_pump"
+      notes: "Network not economically viable; heat pumps only pathway"
 
 # Scenario Modeling
+#
+# AUDIT FIX: Added explicit documentation about scenario assumptions,
+# uptake, and what "full deployment" means for each scenario.
+#
+# IMPORTANT: SCENARIO INTERPRETATION GUIDE
+# ========================================
+#
+# All scenarios assume FULL DEPLOYMENT to the entire housing stock unless
+# explicitly noted. This means:
+# - Every property receives the specified measures
+# - Costs and savings are calculated for 100% uptake
+# - Properties not suitable for a measure (e.g., HP without fabric) will
+#   have additional fabric measures auto-inserted or the measure removed
+#
+# For PARTIAL UPTAKE scenarios (e.g., "what if 40% adopt?"), see the
+# subsidy_sensitivity analysis which models varying uptake rates.
+#
+# SCENARIO COMPARISON NOTES:
+# - All scenarios are comparable on a like-for-like basis (full uptake)
+# - Costs include ALL enabling works (fabric for HP, etc.)
+# - The heat_pump scenario includes fabric upgrades for non-HP-ready homes
+# - The hybrid scenario allocates HP or HN based on heat network viability
+#
 scenarios:
   baseline:
     name: "No intervention"
+    description: "Counterfactual baseline - no retrofit measures applied"
+    uptake_assumption: "N/A"
     measures: []
 
   fabric_only:
     name: "Fabric improvements only"
+    description: >
+      Full fabric retrofit (loft, walls, glazing) without heat technology
+      change. Properties remain on gas boilers but with reduced demand.
+      This scenario isolates the impact of demand reduction alone.
+    uptake_assumption: "100% - all properties receive fabric upgrades"
     measures:
       - "loft_insulation_topup"
       - "wall_insulation"
@@ -130,18 +202,39 @@ scenarios:
 
   fabric_to_tipping_point:
     name: "Fabric bundle to tipping point"
+    description: >
+      Fabric measures applied up to the point of diminishing returns,
+      based on marginal cost/benefit analysis. Stops before expensive
+      measures that add minimal additional savings.
+    uptake_assumption: "100% - optimised fabric package per property"
     measures:
       - "fabric_bundle_tipping_point"
 
   minimum_fabric_hp_ready:
     name: "Minimum fabric + ASHP"
+    description: >
+      Minimum fabric interventions required to achieve HP-readiness
+      (sub-100 kWh/m²/year), plus heat pump installation. This is the
+      lowest-cost pathway to heat pump deployment.
+    uptake_assumption: "100% - all properties converted to HP after minimum fabric"
+    includes_enabling_fabric: true
     measures:
       - "fabric_bundle_minimum_ashp"
       - "ashp_installation"
       - "emitter_upgrades"
 
   heat_pump:
-    name: "Heat pump pathway"
+    name: "Heat pump pathway (full deployment)"
+    description: >
+      FULL heat pump deployment across entire stock. Properties not
+      initially HP-ready receive fabric upgrades first to achieve
+      readiness. Total cost includes both fabric AND heat pump costs.
+      This is the "100% heat pump" future scenario.
+    uptake_assumption: "100% - all properties converted to heat pump"
+    includes_enabling_fabric: true
+    cost_note: >
+      Capital cost per property includes fabric prerequisites for
+      non-HP-ready homes. Compare total costs, not per-property averages.
     measures:
       - "loft_insulation_topup"
       - "wall_insulation"
@@ -150,13 +243,36 @@ scenarios:
       - "emitter_upgrades"
 
   heat_network:
-    name: "Heat network pathway"
+    name: "Heat network pathway (full deployment)"
+    description: >
+      FULL heat network deployment to all properties regardless of
+      actual network availability. This is a theoretical maximum
+      showing potential if networks were universally available.
+      Modest fabric improvements included.
+    uptake_assumption: "100% - all properties connected to district heating"
+    cost_note: >
+      Connection cost (£5k) covers service pipe and HIU only.
+      Does not include generation/distribution infrastructure costs
+      which would add £5-10k per dwelling for new networks.
     measures:
       - "modest_fabric_improvements"
       - "district_heating_connection"
 
   hybrid:
-    name: "Hybrid pathway"
+    name: "Optimal pathway mix (HP + HN)"
+    description: >
+      OPTIMAL allocation: properties in heat-network-viable areas
+      (Tiers 1-3) receive district heating; others receive heat pumps.
+      This models a realistic mixed deployment based on spatial analysis.
+      NOT "hybrid heat pump" systems - this is HP OR HN per property.
+    uptake_assumption: "100% - all properties get either HP or HN based on viability"
+    allocation_note: >
+      Allocation is deterministic based on heat network tier:
+      - Tiers 1-3: District heating connection
+      - Tiers 4-5: Individual heat pump
+    cost_note: >
+      Average cost will vary based on tier distribution.
+      More HN-viable areas = lower average (HN cheaper than HP+fabric).
     measures:
       - "fabric_improvements"
       - "heat_network_where_available"
@@ -431,9 +547,47 @@ financial:
   analysis_horizon_years: 20  # Project lifetime for NPV calculations
 
   # Cost-effectiveness thresholds for flagging recommended upgrades
+  #
+  # AUDIT FIX: Added tiered cost-effectiveness criteria to address the audit
+  # finding that 99.93% being deemed "cost-effective" was too optimistic.
+  #
+  # The previous approach classified any measure with net positive savings
+  # as "cost-effective", regardless of payback period. This led to measures
+  # with 30-40 year paybacks being labelled as cost-effective.
+  #
+  # NEW APPROACH: Three-tier classification based on payback and NPV:
+  # - COST_EFFECTIVE: Payback ≤15 years AND NPV > 0 (investor attractive)
+  # - MARGINALLY_COST_EFFECTIVE: Payback 15-25 years AND NPV > 0 (lifecycle positive)
+  # - NOT_COST_EFFECTIVE: Payback >25 years OR NPV ≤ 0 (economically challenging)
+  #
+  # This provides more nuanced classification that:
+  # 1. Identifies genuinely attractive investments
+  # 2. Highlights measures needing policy support
+  # 3. Flags properties where costs exceed lifetime benefits
+  #
   cost_effectiveness:
-    max_payback_years: 20               # Maximum payback for cost-effective classification
-    max_carbon_abatement_cost: 300      # Maximum £/tCO2 to recommend (optional threshold)
+    # Primary threshold for "cost-effective" classification
+    max_payback_years: 15  # Reduced from 20 for stricter classification
+    # Secondary threshold for "marginally cost-effective"
+    max_payback_marginal: 25  # Lifetime of major measures (insulation, HP)
+    # Maximum carbon abatement cost for policy recommendations
+    max_carbon_abatement_cost: 300  # £/tCO2 (aligned with UK carbon values)
+    # Require positive NPV for cost-effective classification
+    require_positive_npv: true
+    # Classification thresholds
+    tiers:
+      cost_effective:
+        max_payback_years: 15
+        min_npv: 0
+        description: "Attractive investment - pays back within typical ownership period"
+      marginally_cost_effective:
+        max_payback_years: 25
+        min_npv: 0
+        description: "Positive lifecycle economics but needs long ownership horizon"
+      not_cost_effective:
+        max_payback_years: 999  # Effectively no limit
+        min_npv: -999999
+        description: "Costs exceed lifetime benefits - requires subsidy/policy support"
 
   price_scenarios:
     baseline:

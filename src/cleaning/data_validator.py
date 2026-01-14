@@ -101,44 +101,107 @@ class EPCDataValidator:
         """
         Remove or clamp negative energy consumption and CO₂ emission values.
 
+        AUDIT FIX: Addresses audit finding that ~0.07% of records with impossible
+        negative consumption passed into analysis. These values likely arose from:
+        - Properties with on-site generation (solar PV, etc.)
+        - Data entry errors in EPC assessments
+        - Edge cases in SAP calculation methodology
+
+        Strategy:
+        1. Remove records with significantly negative values (< -10 kWh/m²/year)
+           as these are likely data errors
+        2. Clamp slightly negative values to zero (between -10 and 0) as these
+           may be edge cases from on-site generation
+        3. Log detailed statistics for audit trail
+
+        This prevents distorted payback calculations and mathematically unsound
+        percentage savings that would occur with negative baselines.
+
         Args:
             df: EPC DataFrame
 
         Returns:
-            DataFrame with negative energy/CO₂ values removed
+            DataFrame with negative energy/CO₂ values handled
         """
-        logger.info("Validating energy and CO₂ metrics for negative values...")
+        logger.info("Validating energy and CO₂ metrics for negative/implausible values...")
 
+        df_validated = df.copy()
         energy_negatives = 0
         co2_negatives = 0
+        energy_clamped = 0
+        co2_clamped = 0
 
-        if 'ENERGY_CONSUMPTION_CURRENT' in df.columns:
-            energy_series = pd.to_numeric(df['ENERGY_CONSUMPTION_CURRENT'], errors='coerce')
+        # Define thresholds for removal vs clamping
+        # Slightly negative values (possibly from on-site generation) are clamped
+        # Significantly negative values are removed as likely data errors
+        ENERGY_CLAMP_THRESHOLD = -10  # kWh/m²/year
+        CO2_CLAMP_THRESHOLD = -5  # tonnes/year
+
+        if 'ENERGY_CONSUMPTION_CURRENT' in df_validated.columns:
+            energy_series = pd.to_numeric(df_validated['ENERGY_CONSUMPTION_CURRENT'], errors='coerce')
+
+            # Count all negative values
             energy_negatives = (energy_series < 0).sum()
 
-        if 'CO2_EMISSIONS_CURRENT' in df.columns:
-            co2_series = pd.to_numeric(df['CO2_EMISSIONS_CURRENT'], errors='coerce')
+            # Identify records to remove (significantly negative)
+            severe_negative_mask = energy_series < ENERGY_CLAMP_THRESHOLD
+
+            # Identify records to clamp (slightly negative)
+            clamp_mask = (energy_series >= ENERGY_CLAMP_THRESHOLD) & (energy_series < 0)
+            energy_clamped = clamp_mask.sum()
+
+            # Clamp slightly negative values to zero
+            if energy_clamped > 0:
+                df_validated.loc[clamp_mask, 'ENERGY_CONSUMPTION_CURRENT'] = 0
+                logger.info(f"Clamped {energy_clamped:,} slightly negative energy values to zero")
+
+        if 'CO2_EMISSIONS_CURRENT' in df_validated.columns:
+            co2_series = pd.to_numeric(df_validated['CO2_EMISSIONS_CURRENT'], errors='coerce')
+
+            # Count all negative values
             co2_negatives = (co2_series < 0).sum()
 
-        removal_mask = pd.Series(False, index=df.index)
+            # Identify records to remove (significantly negative)
+            severe_negative_mask_co2 = co2_series < CO2_CLAMP_THRESHOLD
 
-        if energy_negatives > 0:
-            logger.warning(f"Found {energy_negatives:,} records with negative ENERGY_CONSUMPTION_CURRENT")
-            removal_mask |= pd.to_numeric(df['ENERGY_CONSUMPTION_CURRENT'], errors='coerce') < 0
+            # Identify records to clamp (slightly negative)
+            clamp_mask_co2 = (co2_series >= CO2_CLAMP_THRESHOLD) & (co2_series < 0)
+            co2_clamped = clamp_mask_co2.sum()
 
-        if co2_negatives > 0:
-            logger.warning(f"Found {co2_negatives:,} records with negative CO2_EMISSIONS_CURRENT")
-            removal_mask |= pd.to_numeric(df['CO2_EMISSIONS_CURRENT'], errors='coerce') < 0
+            # Clamp slightly negative values to zero
+            if co2_clamped > 0:
+                df_validated.loc[clamp_mask_co2, 'CO2_EMISSIONS_CURRENT'] = 0
+                logger.info(f"Clamped {co2_clamped:,} slightly negative CO₂ values to zero")
+
+        # Build removal mask for severely negative values
+        removal_mask = pd.Series(False, index=df_validated.index)
+
+        if 'ENERGY_CONSUMPTION_CURRENT' in df_validated.columns:
+            energy_series = pd.to_numeric(df_validated['ENERGY_CONSUMPTION_CURRENT'], errors='coerce')
+            removal_mask |= energy_series < ENERGY_CLAMP_THRESHOLD
+
+        if 'CO2_EMISSIONS_CURRENT' in df_validated.columns:
+            co2_series = pd.to_numeric(df_validated['CO2_EMISSIONS_CURRENT'], errors='coerce')
+            removal_mask |= co2_series < CO2_CLAMP_THRESHOLD
 
         removed_count = removal_mask.sum()
         if removed_count > 0:
-            df = df[~removal_mask].copy()
-            logger.info(f"Removed {removed_count:,} records with negative energy or CO₂ metrics")
+            df_validated = df_validated[~removal_mask].copy()
+            logger.warning(f"Removed {removed_count:,} records with severely negative values (data errors)")
+
+        # Log summary statistics for audit trail
+        if energy_negatives > 0 or co2_negatives > 0:
+            logger.info(f"Negative value summary:")
+            logger.info(f"  Energy: {energy_negatives:,} total negative ({energy_clamped:,} clamped, {removed_count:,} removed)")
+            logger.info(f"  CO₂: {co2_negatives:,} total negative ({co2_clamped:,} clamped)")
+            logger.info(f"  Impact: ~{energy_negatives/len(df)*100:.2f}% of records had negative values")
 
         self.validation_report['negative_energy_values'] = int(energy_negatives)
         self.validation_report['negative_co2_values'] = int(co2_negatives)
+        self.validation_report['energy_values_clamped'] = int(energy_clamped)
+        self.validation_report['co2_values_clamped'] = int(co2_clamped)
 
-        return df
+        return df_validated
 
     def remove_duplicates(self, df: pd.DataFrame) -> pd.DataFrame:
         """
