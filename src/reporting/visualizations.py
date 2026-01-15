@@ -4,12 +4,14 @@ Reporting and Visualization Module
 Creates charts, figures, and summary reports for the project.
 """
 
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+import seaborn as sns
 from loguru import logger
 
 import sys
@@ -557,6 +559,8 @@ class ReportGenerator:
             f.write("END OF REPORT\n")
             f.write("="*80 + "\n")
 
+        self._export_report_datapoints(archetype_results, scenario_results, tier_summary)
+
         logger.info(f"Summary report saved to: {output_path}")
 
     def generate_markdown_summary(
@@ -667,7 +671,132 @@ class ReportGenerator:
         with open(output_path, "w", encoding="utf-8") as f:
             f.write("\n".join(lines))
 
+        self._export_report_datapoints(archetype_results, scenario_results, tier_summary)
+
         logger.info(f"Markdown summary report saved to: {output_path}")
+
+    def _export_report_datapoints(
+        self,
+        archetype_results: Dict,
+        scenario_results: Dict,
+        tier_summary: pd.DataFrame,
+    ) -> Path:
+        """Export all datapoints used in the summary report to Excel."""
+        output_path = DATA_OUTPUTS_DIR / "reports" / "executive_summary_datapoints.xlsx"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        dashboard_tabs = [
+            ("Overview", "Key KPIs across the whole dataset including stock size and carbon impacts."),
+            ("Housing Stock", "EPC band mix, wall/roof construction, glazing, and heating system breakdowns."),
+            ("Scenarios", "Capital costs, CO₂ reductions, bill savings, and payback timing for the main pathways."),
+            ("Retrofit Readiness", "Insulation readiness, fabric-first findings, and emitter suitability insights."),
+            ("Cost-Benefit", "Cost curves, sensitivity bands, and tier-by-tier cost-benefit summaries."),
+            ("Boroughs", "Borough-level comparisons, including EPC band and readiness differences."),
+            ("Case Street", "Worked example street with micro-segmentation of homes and measures."),
+            ("Uncertainty", "Confidence bands and key modelling uncertainties to monitor."),
+            ("Grid & Climate", "Grid peak impacts, climate considerations, and load profiles."),
+            ("Policy", "Policy levers, data limitations, and recommended next steps."),
+        ]
+
+        with pd.ExcelWriter(output_path, engine="xlsxwriter") as writer:
+            pd.DataFrame([{
+                "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "report_title": "Heat Street Project: Executive Summary",
+            }]).to_excel(writer, sheet_name="Report Metadata", index=False)
+
+            if "epc_bands" in archetype_results:
+                epc_rows = []
+                for band, count in archetype_results["epc_bands"]["frequency"].items():
+                    pct = archetype_results["epc_bands"]["percentage"][band]
+                    epc_rows.append({
+                        "epc_band": band,
+                        "properties": count,
+                        "percentage": pct,
+                    })
+                pd.DataFrame(epc_rows).to_excel(writer, sheet_name="EPC Bands", index=False)
+
+            if "sap_scores" in archetype_results:
+                sap_scores = archetype_results["sap_scores"]
+                pd.DataFrame([{
+                    "mean": sap_scores.get("mean"),
+                    "median": sap_scores.get("median"),
+                    "min": sap_scores.get("min"),
+                    "max": sap_scores.get("max"),
+                }]).to_excel(writer, sheet_name="SAP Scores", index=False)
+
+            if "wall_construction" in archetype_results:
+                pd.DataFrame([{
+                    "insulation_rate_pct": archetype_results["wall_construction"].get("insulation_rate"),
+                }]).to_excel(writer, sheet_name="Wall Insulation", index=False)
+
+            scenario_rows = []
+            band_shift_rows = []
+            cost_effectiveness_rows = []
+            carbon_abatement_rows = []
+            for scenario, results in scenario_results.items():
+                scenario_rows.append({
+                    "scenario": scenario,
+                    "capital_cost_total": results.get("capital_cost_total"),
+                    "capital_cost_per_property": results.get("capital_cost_per_property"),
+                    "annual_co2_reduction_tonnes": results.get("annual_co2_reduction_kg", 0) / 1000,
+                    "annual_bill_savings": results.get("annual_bill_savings"),
+                    "average_payback_years": results.get("average_payback_years"),
+                })
+
+                band_summary = results.get("epc_band_shift_summary", {})
+                if band_summary:
+                    before_pct = band_summary.get("band_c_or_better_before_pct", 0)
+                    after_pct = band_summary.get("band_c_or_better_after_pct", 0)
+                    band_shift_rows.append({
+                        "scenario": scenario,
+                        "band_c_or_better_before_pct": before_pct,
+                        "band_c_or_better_after_pct": after_pct,
+                        "band_c_or_better_change_pp": after_pct - before_pct,
+                    })
+
+                ce_summary = results.get("cost_effectiveness_summary", {})
+                if ce_summary:
+                    cost_effectiveness_rows.append({
+                        "scenario": scenario,
+                        "cost_effective_pct": ce_summary.get("cost_effective_pct"),
+                    })
+
+                if "carbon_abatement_cost_median" in results:
+                    carbon_abatement_rows.append({
+                        "scenario": scenario,
+                        "carbon_abatement_cost_median": results.get("carbon_abatement_cost_median"),
+                    })
+
+            if scenario_rows:
+                pd.DataFrame(scenario_rows).to_excel(writer, sheet_name="Scenario Summary", index=False)
+            if band_shift_rows:
+                pd.DataFrame(band_shift_rows).to_excel(writer, sheet_name="EPC Band Shifts", index=False)
+            if cost_effectiveness_rows:
+                pd.DataFrame(cost_effectiveness_rows).to_excel(
+                    writer, sheet_name="Cost Effectiveness", index=False
+                )
+            if carbon_abatement_rows:
+                pd.DataFrame(carbon_abatement_rows).to_excel(
+                    writer, sheet_name="Carbon Abatement", index=False
+                )
+
+            if not tier_summary.empty:
+                tier_rows = []
+                for _, row in tier_summary.iterrows():
+                    tier_rows.append({
+                        "tier": row["Tier"],
+                        "property_count": row["Property Count"],
+                        "percentage": row["Percentage"],
+                        "recommended_pathway": row["Recommended Pathway"],
+                    })
+                pd.DataFrame(tier_rows).to_excel(writer, sheet_name="Heat Network Tiers", index=False)
+
+            pd.DataFrame(dashboard_tabs, columns=["tab", "description"]).to_excel(
+                writer, sheet_name="Dashboard Coverage", index=False
+            )
+
+        logger.info(f"Summary report datapoints saved to: {output_path}")
+        return output_path
 
     def export_to_excel(
         self,

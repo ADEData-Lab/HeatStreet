@@ -394,6 +394,7 @@ scenarios:
 - `data/outputs/scenario_modeling_results.txt` - Scenario cost-benefit analysis
 - `data/outputs/validation_report.txt` - Data quality report
 - `data/outputs/reports/executive_summary.txt` - Executive summary
+- `data/outputs/reports/executive_summary_datapoints.xlsx` - Excel workbook of datapoints used in the executive summary report
 - `data/outputs/comparisons/hn_vs_hp_comparison.csv` - Per-home HP vs HN comparison stats (mean/median/p10/p90/min/max)
 - `data/outputs/comparisons/hn_vs_hp_report_snippet.md` - Markdown summary including sign conventions and tariff/COP/HN connection notes
 - `data/outputs/comparisons/hn_cost_sensitivity.csv` - Optional HN connection-cost sensitivity table (created when `--run-hn-sensitivity` is used)
