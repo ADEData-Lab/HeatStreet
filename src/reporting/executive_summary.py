@@ -63,6 +63,9 @@ class ExecutiveSummaryGenerator:
         txt_content = self._strip_markdown(content)
         txt_path.write_text(txt_content, encoding="utf-8")
 
+        # Write an Excel workbook with the report datapoints
+        self._export_report_datapoints(metadata, scenario_results, tier_results)
+
         logger.info(f"Executive summary written to: {output_path}")
         return output_path
 
@@ -373,6 +376,141 @@ class ExecutiveSummaryGenerator:
             lines.append("")
 
         return lines
+
+    def _export_report_datapoints(
+        self,
+        metadata: Dict[str, Any],
+        scenario_results: Optional[pd.DataFrame],
+        tier_results: Optional[pd.DataFrame],
+    ) -> Path:
+        """Export all datapoints used in the executive summary report to Excel."""
+        output_path = self.reports_dir / "executive_summary_datapoints.xlsx"
+
+        raw_count = self._get_stage_count(metadata, "raw_loaded_count")
+        validation_count = self._get_stage_count(metadata, "after_validation_count")
+        scenario_count = self._get_stage_count(metadata, "scenario_input_count")
+        final_count = self._get_stage_count(metadata, "final_modeled_count")
+        headline_count = final_count or scenario_count or validation_count or raw_count
+
+        with pd.ExcelWriter(output_path, engine="xlsxwriter") as writer:
+            pd.DataFrame([{
+                "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "total_properties_analyzed": headline_count,
+            }]).to_excel(writer, sheet_name="Analysis Universe", index=False)
+
+            stages = [
+                ("Raw Loaded", "raw_loaded_count", "Initial EPC data load"),
+                ("After Validation", "after_validation_count", "Passed validation rules"),
+                ("After Geocoding", "after_geocoding_count", "Valid coordinates (spatial only)"),
+                ("Scenario Input", "scenario_input_count", "Entered scenario modeling"),
+                ("Final Modeled", "final_modeled_count", "Completed analysis"),
+            ]
+
+            stage_rows = []
+            prev_count = None
+            for label, key, notes in stages:
+                count = self._get_stage_count(metadata, key)
+                if count > 0:
+                    drop = None
+                    drop_pct = None
+                    if prev_count is not None and prev_count > 0:
+                        drop = prev_count - count
+                        drop_pct = (drop / prev_count * 100) if prev_count else None
+                    stage_rows.append({
+                        "stage": label,
+                        "count": count,
+                        "drop_from_previous": drop,
+                        "drop_pct": drop_pct,
+                        "notes": notes,
+                    })
+                    prev_count = count
+
+            pd.DataFrame(stage_rows).to_excel(
+                writer, sheet_name="Stage Counts", index=False
+            )
+
+            warnings = metadata.get("warnings", [])
+            warning_rows = [
+                {"warning": warning.get("message", str(warning))}
+                for warning in warnings
+            ]
+            if warning_rows:
+                pd.DataFrame(warning_rows).to_excel(
+                    writer, sheet_name="Warnings", index=False
+                )
+
+            notes = metadata.get("notes", [])
+            note_rows = [
+                {"note": note.get("note", str(note)) if isinstance(note, dict) else str(note)}
+                for note in notes
+            ]
+            if note_rows:
+                pd.DataFrame(note_rows).to_excel(
+                    writer, sheet_name="Analysis Notes", index=False
+                )
+
+            if scenario_results is not None and not scenario_results.empty:
+                scenario_rows = []
+                assignment_rows = []
+                for _, row in scenario_results.iterrows():
+                    scenario_name = row.get("scenario", row.get("scenario_name", "Unknown"))
+                    capital_total = row.get("capital_cost_total", 0)
+                    capital_per_prop = row.get("capital_cost_per_property", 0)
+                    bill_savings = row.get("annual_bill_savings_total", row.get("annual_bill_savings", 0))
+                    payback = row.get("average_payback_years", row.get("median_payback_years", None))
+                    co2_reduction = row.get("annual_co2_reduction_total_kg", row.get("annual_co2_reduction_kg", 0))
+
+                    scenario_rows.append({
+                        "scenario": scenario_name,
+                        "capital_cost_total": capital_total,
+                        "capital_cost_per_property": capital_per_prop,
+                        "annual_bill_savings_total": bill_savings,
+                        "payback_years": payback,
+                        "annual_co2_reduction_total_kg": co2_reduction,
+                    })
+
+                    hn_assigned = row.get("hn_assigned_properties", 0)
+                    ashp_assigned = row.get("ashp_assigned_properties", 0)
+                    if hn_assigned or ashp_assigned:
+                        if hn_assigned > 0 and ashp_assigned > 0:
+                            notes = "Hybrid scenario"
+                        elif hn_assigned > 0:
+                            notes = "Heat network only"
+                        elif ashp_assigned > 0:
+                            notes = "Heat pump only"
+                        else:
+                            notes = "Fabric-only or baseline"
+                        assignment_rows.append({
+                            "scenario": scenario_name,
+                            "heat_network_assigned_properties": hn_assigned,
+                            "heat_pump_assigned_properties": ashp_assigned,
+                            "notes": notes,
+                        })
+
+                pd.DataFrame(scenario_rows).to_excel(
+                    writer, sheet_name="Scenario Results", index=False
+                )
+
+                if assignment_rows:
+                    pd.DataFrame(assignment_rows).to_excel(
+                        writer, sheet_name="Scenario Assignments", index=False
+                    )
+
+            if tier_results is not None and not tier_results.empty:
+                tier_rows = []
+                for _, row in tier_results.iterrows():
+                    tier_rows.append({
+                        "tier": row.get("Tier", row.get("tier", "Unknown")),
+                        "property_count": row.get("Property Count", row.get("properties", 0)),
+                        "percentage": row.get("Percentage", row.get("percentage", 0)),
+                        "recommended_pathway": row.get("Recommended Pathway", row.get("recommendation", "-")),
+                    })
+                pd.DataFrame(tier_rows).to_excel(
+                    writer, sheet_name="Heat Network Tiers", index=False
+                )
+
+        logger.info(f"Executive summary datapoints saved to: {output_path}")
+        return output_path
 
     def _strip_markdown(self, content: str) -> str:
         """Convert markdown to plain text."""
