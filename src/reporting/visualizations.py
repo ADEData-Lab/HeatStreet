@@ -17,6 +17,7 @@ from loguru import logger
 import sys
 sys.path.append(str(Path(__file__).parent.parent.parent))
 from config.config import load_config, DATA_OUTPUTS_DIR
+from src.reporting.report_headline_data import build_report_headline_dataframe
 
 
 class ReportGenerator:
@@ -804,7 +805,9 @@ class ReportGenerator:
         scenario_results: Dict,
         subsidy_results: Optional[Dict] = None,
         df_properties: Optional[pd.DataFrame] = None,
-        output_path: Optional[Path] = None
+        output_path: Optional[Path] = None,
+        borough_breakdown: Optional[pd.DataFrame] = None,
+        case_street_summary: Optional[Dict] = None,
     ):
         """
         Export all results to a formatted Excel workbook.
@@ -815,6 +818,8 @@ class ReportGenerator:
             subsidy_results: Results from subsidy sensitivity analysis
             df_properties: Property-level DataFrame
             output_path: Path to save Excel file
+            borough_breakdown: Borough-level breakdown DataFrame
+            case_street_summary: Case street summary dictionary
         """
         logger.info("Exporting results to Excel...")
 
@@ -831,8 +836,15 @@ class ReportGenerator:
             logger.warning("openpyxl not installed. Using basic Excel export...")
             # Fallback to basic pandas export
             with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
-                self._export_basic_excel(writer, archetype_results, scenario_results,
-                                        subsidy_results, df_properties)
+                self._export_basic_excel(
+                    writer,
+                    archetype_results,
+                    scenario_results,
+                    subsidy_results,
+                    df_properties,
+                    borough_breakdown,
+                    case_street_summary,
+                )
             logger.info(f"Basic Excel export saved to: {output_path}")
             return
 
@@ -854,7 +866,17 @@ class ReportGenerator:
             if subsidy_results:
                 self._write_subsidy_sheet(writer, subsidy_results)
 
-            # Sheet 5: Property Details (sample)
+            # Sheet 5: Report Headline Data
+            headline_df = build_report_headline_dataframe(
+                archetype_results=archetype_results,
+                scenario_results=scenario_results,
+                subsidy_results=subsidy_results,
+                borough_breakdown=borough_breakdown,
+                case_street_summary=case_street_summary,
+            )
+            headline_df.to_excel(writer, sheet_name="report_headline_data", index=False)
+
+            # Sheet 6: Property Details (sample)
             if df_properties is not None and not df_properties.empty:
                 # Export first 1000 properties to avoid huge files
                 sample_df = df_properties.head(1000).copy()
@@ -985,8 +1007,16 @@ class ReportGenerator:
         df_subsidy = pd.DataFrame(subsidy_data)
         df_subsidy.to_excel(writer, sheet_name='Subsidy Sensitivity', index=False)
 
-    def _export_basic_excel(self, writer, archetype_results, scenario_results,
-                           subsidy_results, df_properties):
+    def _export_basic_excel(
+        self,
+        writer,
+        archetype_results,
+        scenario_results,
+        subsidy_results,
+        df_properties,
+        borough_breakdown,
+        case_street_summary,
+    ):
         """Basic Excel export without openpyxl formatting."""
         # Summary
         pd.DataFrame([{'Analysis': 'Heat Street Project', 'Status': 'Complete'}]).to_excel(
@@ -1003,6 +1033,15 @@ class ReportGenerator:
                     'CO2 Reduction': results['annual_co2_reduction_kg']
                 })
             pd.DataFrame(scenarios).to_excel(writer, sheet_name='Scenarios', index=False)
+
+        headline_df = build_report_headline_dataframe(
+            archetype_results=archetype_results,
+            scenario_results=scenario_results,
+            subsidy_results=subsidy_results,
+            borough_breakdown=borough_breakdown,
+            case_street_summary=case_street_summary,
+        )
+        headline_df.to_excel(writer, sheet_name="report_headline_data", index=False)
 
     def plot_retrofit_readiness_dashboard(
         self,
