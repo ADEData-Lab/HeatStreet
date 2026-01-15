@@ -1,19 +1,25 @@
 // Mock data for the dashboard - will be replaced with actual data loading
 // This file provides sample data matching the structure from the analysis outputs
 
+// EPC band counts define the authoritative property count
+const epcBandCounts = {
+  A: { count: 2393, percentage: 0.3 },
+  B: { count: 23691, percentage: 3.4 },
+  C: { count: 200312, percentage: 28.4 },
+  D: { count: 370061, percentage: 52.5 },
+  E: { count: 95136, percentage: 13.5 },
+  F: { count: 9836, percentage: 1.4 },
+  G: { count: 3054, percentage: 0.4 }
+};
+
+// AUDIT FIX: totalProperties is derived from EPC band counts, not hard-coded
+const derivedTotalProperties = Object.values(epcBandCounts).reduce((sum, band) => sum + band.count, 0);
+
 export const executiveSummary = {
-  totalProperties: 704292,
+  totalProperties: derivedTotalProperties,  // Derived from EPC bands
   avgSAPScore: 63.4,
   medianSAPScore: 64.0,
-  epcBands: {
-    A: { count: 2393, percentage: 0.3 },
-    B: { count: 23691, percentage: 3.4 },
-    C: { count: 200312, percentage: 28.4 },
-    D: { count: 370061, percentage: 52.5 },
-    E: { count: 95136, percentage: 13.5 },
-    F: { count: 9836, percentage: 1.4 },
-    G: { count: 3054, percentage: 0.4 }
-  },
+  epcBands: epcBandCounts,
   wallInsulationRate: 33.7
 };
 
@@ -238,12 +244,20 @@ export const tippingPointData = [
   { step: 7, measure: 'Triple Glazing', cumulativeCapex: 29700, cumulativeKWh: 14550, marginalCost: 6.00, beyondTippingPoint: true }
 ];
 
+// AUDIT FIX: Ensure all 5 tiers are present, including Tier 2 (even if 0 properties)
 export const heatNetworkTiers = [
   {
     tier: 'Tier 1: Adjacent to existing network',
     properties: 1270,
     percentage: 0.2,
     recommendation: 'District Heating (existing network connection)'
+  },
+  {
+    tier: 'Tier 2: Within planned HNZ',
+    properties: 0,  // May be 0 if no planned heat network zones in dataset
+    percentage: 0.0,
+    recommendation: 'District Heating (planned network)',
+    note: 'Zero properties indicates no planned heat network zone data available'
   },
   {
     tier: 'Tier 3: High heat density',

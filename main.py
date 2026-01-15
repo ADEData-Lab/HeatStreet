@@ -19,6 +19,18 @@ from src.analysis.archetype_analysis import ArchetypeAnalyzer
 from src.modeling.scenario_model import ScenarioModeler
 from src.spatial.heat_network_analysis import HeatNetworkAnalyzer
 from src.reporting.visualizations import ReportGenerator
+from src.utils.run_metadata import RunMetadataManager
+
+# Global metadata manager for stage count tracking
+_metadata_manager: RunMetadataManager = None
+
+
+def get_metadata_manager() -> RunMetadataManager:
+    """Get or create the global metadata manager."""
+    global _metadata_manager
+    if _metadata_manager is None:
+        _metadata_manager = RunMetadataManager()
+    return _metadata_manager
 
 
 def setup_logging(log_file: Path = None):
@@ -53,6 +65,7 @@ def run_acquisition_phase(args):
     logger.info("PHASE 1: DATA ACQUISITION")
     logger.info("="*70)
 
+    metadata = get_metadata_manager()
     downloader = EPCDownloader()
 
     if args.download:
@@ -65,6 +78,14 @@ def run_acquisition_phase(args):
         if not df.empty:
             # Apply initial filters
             df_filtered = downloader.apply_initial_filters(df)
+
+            # AUDIT FIX: Record raw loaded count in metadata
+            metadata.record_stage_count(
+                "raw_loaded_count",
+                len(df_filtered),
+                description="Properties after initial filtering from raw EPC data",
+                dataframe_source="epc_london_filtered.csv"
+            )
 
             # Extract case street data
             case_df = downloader.extract_shakespeare_crescent(df_filtered)
@@ -86,6 +107,7 @@ def run_cleaning_phase(args):
     logger.info("="*70)
 
     from config.config import DATA_RAW_DIR, DATA_PROCESSED_DIR
+    metadata = get_metadata_manager()
     input_file = DATA_RAW_DIR / "epc_london_filtered.csv"
 
     if not input_file.exists():
@@ -96,8 +118,27 @@ def run_cleaning_phase(args):
     import pandas as pd
     df = pd.read_csv(input_file, low_memory=False)
 
+    # Record raw count if not already done (e.g., if running cleaning phase alone)
+    if metadata.get_stage_count("raw_loaded_count") is None:
+        metadata.record_stage_count(
+            "raw_loaded_count",
+            len(df),
+            description="Properties loaded from raw EPC data",
+            dataframe_source="epc_london_filtered.csv"
+        )
+
     validator = EPCDataValidator()
     df_validated, report = validator.validate_dataset(df)
+
+    # AUDIT FIX: Record validated count with drop tracking
+    metadata.record_stage_count(
+        "after_validation_count",
+        len(df_validated),
+        description="Properties passing validation rules (floor area, required fields, etc.)",
+        dataframe_source="epc_london_validated.csv",
+        drop_threshold_pct=0.05,  # Warn if >5% dropped
+        allow_drop=True  # Validation drops are expected
+    )
 
     # Save validated data
     output_file = DATA_PROCESSED_DIR / "epc_london_validated.csv"
@@ -153,6 +194,7 @@ def run_modeling_phase(args):
     from src.analysis.fabric_tipping_point import FabricTippingPointAnalyzer
     from src.reporting.comparisons import ComparisonReporter
 
+    metadata = get_metadata_manager()
     input_file = DATA_PROCESSED_DIR / "epc_london_validated.csv"
     if not input_file.exists():
         # Try parquet
@@ -168,6 +210,16 @@ def run_modeling_phase(args):
         df = pd.read_csv(input_file, low_memory=False)
 
     logger.info(f"Loaded {len(df):,} properties")
+
+    # AUDIT FIX: Record scenario input count
+    metadata.record_stage_count(
+        "scenario_input_count",
+        len(df),
+        description="Properties entering scenario modeling (should match after_validation_count)",
+        dataframe_source=str(input_file.name),
+        drop_threshold_pct=0.001,  # Should be nearly identical to validation
+        allow_drop=False  # Unexpected drops should fail
+    )
 
     results = {}
 
@@ -243,6 +295,23 @@ def run_modeling_phase(args):
     results['scenarios'] = {'results': scenario_results, 'subsidy': subsidy_results}
     logger.info("✓ Scenario modeling complete")
 
+    # AUDIT FIX: Record final modeled count (should match scenario_input_count)
+    # Get the count from scenario modeler to track any drops during modeling
+    final_count = len(df)  # Default to input count
+    if modeler.property_results:
+        # Use the first scenario's result count as representative
+        first_scenario_df = list(modeler.property_results.values())[0]
+        final_count = len(first_scenario_df)
+
+    metadata.record_stage_count(
+        "final_modeled_count",
+        final_count,
+        description="Properties with completed scenario results",
+        dataframe_source="scenario_modeling_results",
+        drop_threshold_pct=0.001,  # Should be nearly identical to input
+        allow_drop=True  # Small drops may occur due to edge cases
+    )
+
     logger.info("\n" + "="*70)
     logger.info("✓ COMPREHENSIVE MODELING & ANALYSIS COMPLETE")
     logger.info("="*70)
@@ -259,6 +328,7 @@ def run_spatial_phase(args):
     from config.config import DATA_PROCESSED_DIR, DATA_SUPPLEMENTARY_DIR
     import pandas as pd
 
+    metadata = get_metadata_manager()
     input_file = DATA_PROCESSED_DIR / "epc_london_validated.csv"
     if not input_file.exists():
         logger.error("Validated data not found. Run cleaning phase first.")
@@ -271,7 +341,16 @@ def run_spatial_phase(args):
     # Geocode properties
     properties_gdf = analyzer.geocode_properties(df)
 
-    if len(properties_gdf) > 0:
+    if properties_gdf is not None and len(properties_gdf) > 0:
+        # AUDIT FIX: Record geocoded count
+        metadata.record_stage_count(
+            "after_geocoding_count",
+            len(properties_gdf),
+            description="Properties with valid coordinates after geocoding",
+            dataframe_source="geocoded_properties",
+            drop_threshold_pct=5.0,  # May drop more due to missing coords
+            allow_drop=True  # Geocoding drops are expected
+        )
         # Load heat network data (if available)
         heat_networks_file = DATA_SUPPLEMENTARY_DIR / "london_heat_networks.geojson"
         heat_zones_file = DATA_SUPPLEMENTARY_DIR / "london_heat_zones.geojson"
@@ -315,6 +394,8 @@ def run_reporting_phase(args, archetype_results, scenario_results, tier_summary)
     logger.info("PHASE 6: REPORTING & VISUALIZATION")
     logger.info("="*70)
 
+    from src.reporting.executive_summary import ExecutiveSummaryGenerator
+
     generator = ReportGenerator()
 
     # Generate visualizations
@@ -334,6 +415,15 @@ def run_reporting_phase(args, archetype_results, scenario_results, tier_summary)
             scenario_results[0],
             tier_summary if tier_summary is not None else None
         )
+
+    # AUDIT FIX: Generate executive summary from actual output files
+    logger.info("\n📝 Generating executive summary...")
+    try:
+        summary_generator = ExecutiveSummaryGenerator()
+        summary_path = summary_generator.generate_summary()
+        logger.info(f"✓ Executive summary generated: {summary_path}")
+    except Exception as e:
+        logger.warning(f"Could not generate executive summary: {e}")
 
     logger.info("✓ Reporting complete")
 
@@ -424,6 +514,26 @@ def main():
 
     if args.phase in ['all', 'report']:
         run_reporting_phase(args, archetype_results, scenario_results, tier_summary)
+
+    # AUDIT FIX: Save run metadata with stage counts and generate reconciliation
+    metadata = get_metadata_manager()
+
+    # Add explanatory notes for any count differences
+    if metadata.get_stage_count("after_validation_count") and metadata.get_stage_count("scenario_input_count"):
+        val_count = metadata.get_stage_count("after_validation_count")
+        scenario_count = metadata.get_stage_count("scenario_input_count")
+        if val_count != scenario_count:
+            metadata.add_note(
+                f"Validation count ({val_count:,}) differs from scenario input count ({scenario_count:,}). "
+                f"Difference of {val_count - scenario_count:,} records may be due to reloading data from disk."
+            )
+
+    # Save metadata
+    metadata_path = metadata.save()
+    logger.info(f"Run metadata saved to: {metadata_path}")
+
+    # Generate and log reconciliation table
+    logger.info("\n" + metadata.generate_reconciliation_table())
 
     logger.info("\n" + "="*70)
     logger.info("PIPELINE COMPLETE")

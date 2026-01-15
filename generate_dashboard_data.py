@@ -292,8 +292,18 @@ def generate_sample_dashboard_data() -> Dict:
             {"lever": "Street-by-street delivery", "impact": 200, "difficulty": "Medium"},
         ],
         # Summary Statistics
+        # NOTE: totalProperties is now derived from EPC band counts (sum of all bands)
+        # This ensures consistency with the data being displayed
         "summaryStats": {
-            "totalProperties": 704483,
+            "totalProperties": sum(band["count"] for band in [
+                {"band": "A", "count": 2393},
+                {"band": "B", "count": 23691},
+                {"band": "C", "count": 200312},
+                {"band": "D", "count": 370061},
+                {"band": "E", "count": 95136},
+                {"band": "F", "count": 9836},
+                {"band": "G", "count": 3054},
+            ]),  # Derived from epcBandData above
             "avgSAPScore": 63.4,
             "meanSAPScore": 63.4,
             "wallInsulationRate": 33.7,

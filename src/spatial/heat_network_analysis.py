@@ -695,6 +695,10 @@ class HeatNetworkAnalyzer:
         """
         Analyze which decarbonization pathway is most suitable for each tier.
 
+        AUDIT FIX: Ensures all 5 tiers are always present in output, even if
+        a tier has 0 properties. This addresses the finding that Tier 2 was
+        being skipped when no properties fell into that category.
+
         Args:
             properties: GeoDataFrame with tier classifications
 
@@ -703,30 +707,70 @@ class HeatNetworkAnalyzer:
         """
         logger.info("Analyzing decarbonization pathway suitability by tier...")
 
-        pathway_suitability = {
-            'Tier 1': 'District Heating (existing network connection)',
-            'Tier 2': 'District Heating (planned network)',
-            'Tier 3': 'District Heating (high density justifies extension)',
-            'Tier 4': 'Heat Pump (moderate density, network extension marginal)',
-            'Tier 5': 'Heat Pump (low density, network not viable)'
+        # AUDIT FIX: Define all tiers with their full labels and recommendations
+        # This ensures all tiers appear in output even if count is 0
+        tier_definitions = {
+            'Tier 1: Adjacent to existing network': {
+                'tier_number': 1,
+                'recommendation': 'District Heating (existing network connection)',
+                'note': 'Within 250m of existing network infrastructure'
+            },
+            'Tier 2: Within planned HNZ': {
+                'tier_number': 2,
+                'recommendation': 'District Heating (planned network)',
+                'note': 'Inside borough-designated heat priority areas'
+            },
+            'Tier 3: High heat density': {
+                'tier_number': 3,
+                'recommendation': 'District Heating (high density justifies extension)',
+                'note': 'Heat density ≥15 GWh/km²'
+            },
+            'Tier 4: Medium heat density': {
+                'tier_number': 4,
+                'recommendation': 'Heat Pump (moderate density, network extension marginal)',
+                'note': 'Heat density 5-15 GWh/km²'
+            },
+            'Tier 5: Low heat density': {
+                'tier_number': 5,
+                'recommendation': 'Heat Pump (low density, network not viable)',
+                'note': 'Heat density <5 GWh/km²'
+            }
         }
 
         # Count properties by tier
         tier_counts = properties['heat_network_tier'].value_counts()
+        total_properties = len(properties)
 
-        # Create summary DataFrame
-        summary = pd.DataFrame({
-            'Tier': tier_counts.index,
-            'Property Count': tier_counts.values,
-            'Percentage': (tier_counts.values / len(properties) * 100).round(1),
-            'Recommended Pathway': [pathway_suitability.get(tier.split(':')[0], 'Unknown') for tier in tier_counts.index]
-        })
+        # Create summary with ALL tiers present
+        summary_rows = []
+        for tier_label, tier_info in tier_definitions.items():
+            count = tier_counts.get(tier_label, 0)
+            percentage = (count / total_properties * 100) if total_properties > 0 else 0.0
 
-        summary = summary.sort_values('Tier')
+            summary_rows.append({
+                'Tier': tier_label,
+                'Tier Number': tier_info['tier_number'],
+                'Property Count': int(count),
+                'Percentage': round(percentage, 1),
+                'Recommended Pathway': tier_info['recommendation'],
+                'Note': tier_info['note']
+            })
 
-        logger.info("\nPathway Suitability Summary:")
+        summary = pd.DataFrame(summary_rows)
+        summary = summary.sort_values('Tier Number')
+
+        logger.info("\nPathway Suitability Summary (all tiers):")
         for _, row in summary.iterrows():
-            logger.info(f"  {row['Tier']}: {row['Property Count']:,} properties → {row['Recommended Pathway']}")
+            count_str = f"{row['Property Count']:,}" if row['Property Count'] > 0 else "0"
+            logger.info(f"  {row['Tier']}: {count_str} properties ({row['Percentage']:.1f}%) → {row['Recommended Pathway']}")
+
+        # Add total row for validation
+        total_in_tiers = summary['Property Count'].sum()
+        if total_in_tiers != total_properties:
+            logger.warning(
+                f"Tier count mismatch: sum of tiers ({total_in_tiers:,}) != "
+                f"total properties ({total_properties:,}). Difference: {total_properties - total_in_tiers:,}"
+            )
 
         return summary
 

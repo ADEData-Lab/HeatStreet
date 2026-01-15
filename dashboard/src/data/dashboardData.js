@@ -325,9 +325,12 @@ export const glazingData = [
   { type: 'Unknown', share: 14.8, uValue: 2.8 }
 ];
 
-// Summary Statistics (Derived)
+// Summary Statistics (Derived from actual data arrays above)
+// AUDIT FIX: totalProperties is now computed from EPC band data, not hard-coded
+const computedTotalProperties = epcBandData.reduce((sum, band) => sum + band.count, 0);
+
 export const summaryStats = {
-  totalProperties: 704483,
+  totalProperties: computedTotalProperties,  // Derived from epcBandData
   meanSAPScore: 63.4,
   wallInsulationRate: 33.7,
   dhViableProperties: 235989,
