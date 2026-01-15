@@ -62,6 +62,7 @@ from loguru import logger
 
 from config.config import DATA_OUTPUTS_DIR
 from src.utils.analysis_logger import convert_to_json_serializable
+from src.utils.run_metadata import get_total_properties_from_metadata
 
 
 class DashboardDataBuilder:
@@ -506,10 +507,17 @@ class DashboardDataBuilder:
     ) -> Dict:
         summary = {}
 
+        # AUDIT FIX: Try to get totalProperties from run_metadata first (authoritative source)
+        metadata_total = get_total_properties_from_metadata()
+        if metadata_total > 0:
+            summary["totalProperties"] = metadata_total
+
         if readiness_summary:
             summary.update(
                 {
-                    "totalProperties": int(readiness_summary.get("total_properties", 0)),
+                    # Only set totalProperties from readiness if not already set from metadata
+                    **({"totalProperties": int(readiness_summary.get("total_properties", 0))}
+                       if "totalProperties" not in summary else {}),
                     "meanFabricCost": float(readiness_summary.get("mean_fabric_cost", 0)),
                     "meanTotalRetrofitCost": float(readiness_summary.get("mean_total_retrofit_cost", 0)),
                     "heatDemandReduction": float(readiness_summary.get("heat_demand_reduction_percent", 0)),

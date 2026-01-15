@@ -1188,6 +1188,29 @@ class ScenarioModeler:
         n_not_cost_effective = total_properties - len(finite_paybacks)
         pct_not_cost_effective = (n_not_cost_effective / total_properties * 100) if total_properties > 0 else 0
 
+        # AUDIT FIX: Document and track "not cost-effective" edge cases
+        # These are properties with infinite payback (zero or negative bill savings)
+        # Common causes:
+        # - Very low baseline energy consumption (already efficient)
+        # - Data anomalies (negative baseline bills, implausible values)
+        # - Properties where measures don't reduce bills (e.g., tariff changes offset savings)
+        if n_not_cost_effective > 0:
+            not_ce_mask = ~property_df['payback_years'].apply(lambda x: x < 100 if pd.notna(x) else False)
+            not_ce_df = property_df[not_ce_mask]
+
+            # Log details about these properties for investigation
+            if len(not_ce_df) > 0 and len(not_ce_df) <= 100:
+                logger.debug(
+                    f"  EDGE CASE: {len(not_ce_df)} properties not cost-effective. "
+                    f"Reasons may include: zero/negative baseline bills, already efficient, "
+                    f"or tariff changes offsetting savings."
+                )
+                # Log average baseline bill for these properties
+                if 'baseline_bill' in not_ce_df.columns:
+                    avg_baseline = not_ce_df['baseline_bill'].mean()
+                    if avg_baseline <= 0:
+                        logger.debug(f"    Average baseline bill for these: £{avg_baseline:.2f} (negative/zero)")
+
         results = {
             'total_properties': total_properties,
             'capital_cost_total': float(numeric_df['capital_cost'].sum()),
@@ -1277,9 +1300,44 @@ class ScenarioModeler:
         if 'hn_ready' in property_df.columns:
             results['hn_ready_properties'] = int(property_df['hn_ready'].sum())
 
+        # AUDIT FIX: Populate hn_assigned_properties and ashp_assigned_properties for ALL scenarios
+        # Previously these were only set for hybrid scenarios
         if 'hybrid_pathway' in property_df.columns:
+            # Hybrid scenario - use hybrid_pathway column
             results['hn_assigned_properties'] = int((property_df['hybrid_pathway'] == 'heat_network').sum())
             results['ashp_assigned_properties'] = int((property_df['hybrid_pathway'] == 'ashp').sum())
+        else:
+            # Non-hybrid scenario - determine from measures applied
+            measures_col = 'measures_applied' if 'measures_applied' in property_df.columns else None
+
+            # Check if this is a heat pump scenario
+            is_hp_scenario = measures_col and property_df[measures_col].apply(
+                lambda x: 'ashp_installation' in x if isinstance(x, list) else False
+            ).any()
+
+            # Check if this is a heat network scenario
+            is_hn_scenario = measures_col and property_df[measures_col].apply(
+                lambda x: 'district_heating_connection' in x if isinstance(x, list) else False
+            ).any()
+
+            if is_hp_scenario and not is_hn_scenario:
+                # Pure HP scenario - count properties that got HP
+                hp_count = property_df[measures_col].apply(
+                    lambda x: 'ashp_installation' in x if isinstance(x, list) else False
+                ).sum() if measures_col else 0
+                results['ashp_assigned_properties'] = int(hp_count)
+                results['hn_assigned_properties'] = 0
+            elif is_hn_scenario and not is_hp_scenario:
+                # Pure HN scenario - count properties that got HN
+                hn_count = property_df[measures_col].apply(
+                    lambda x: 'district_heating_connection' in x if isinstance(x, list) else False
+                ).sum() if measures_col else 0
+                results['hn_assigned_properties'] = int(hn_count)
+                results['ashp_assigned_properties'] = 0
+            else:
+                # Fabric-only or baseline scenario - no HP or HN assignments
+                results['hn_assigned_properties'] = 0
+                results['ashp_assigned_properties'] = 0
 
         if 'costing_cap_applied' in property_df.columns:
             results['costing_caps_applied_properties'] = int(property_df['costing_cap_applied'].sum())
