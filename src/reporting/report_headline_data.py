@@ -6,15 +6,10 @@ from typing import Dict, Iterable, Optional, Tuple
 
 import pandas as pd
 
-
-REPORT_HEADLINE_COLUMNS = [
-    "metric_key",
-    "metric_label",
-    "scenario",
-    "value",
-    "unit",
-    "source",
-]
+from src.reporting.report_headline_schema import (
+    REPORT_HEADLINE_COLUMNS,
+    validate_report_headline_dataframe,
+)
 
 
 def build_report_headline_dataframe(
@@ -93,6 +88,25 @@ def build_report_headline_dataframe(
         wall_construction.get("insulation_rate"),
         "Wall insulation rate",
         unit="percent",
+        source="archetype_results",
+    )
+    insulated_count = wall_construction.get("insulated_count")
+    uninsulated_count = wall_construction.get("uninsulated_count")
+    wall_total_properties = None
+    if insulated_count is not None and uninsulated_count is not None:
+        wall_total_properties = insulated_count + uninsulated_count
+    add_row(
+        "wall_insulated_count",
+        insulated_count,
+        "Insulated wall count",
+        unit="count",
+        source="archetype_results",
+    )
+    add_row(
+        "wall_total_properties",
+        wall_total_properties,
+        "Total properties with wall data",
+        unit="count",
         source="archetype_results",
     )
 
@@ -190,6 +204,28 @@ def build_report_headline_dataframe(
             source="subsidy_results",
         )
         add_row(
+            "subsidy_max_uptake_properties_upgraded",
+            max_uptake.get("properties_upgraded"),
+            "Properties upgraded at max uptake",
+            scenario="subsidy_sensitivity",
+            unit="count",
+            source="subsidy_results",
+        )
+        subsidy_uptake_rate = max_uptake.get("estimated_uptake_rate", 0)
+        subsidy_total_properties = None
+        if subsidy_uptake_rate:
+            subsidy_total_properties = round(
+                max_uptake.get("properties_upgraded", 0) / subsidy_uptake_rate
+            )
+        add_row(
+            "subsidy_max_uptake_total_properties",
+            subsidy_total_properties,
+            "Total properties for max uptake calculation",
+            scenario="subsidy_sensitivity",
+            unit="count",
+            source="subsidy_results",
+        )
+        add_row(
             "subsidy_level_for_max_uptake_pct",
             max_uptake.get("subsidy_percentage"),
             "Subsidy level for max uptake rate",
@@ -224,12 +260,15 @@ def build_report_headline_dataframe(
 
     for scenario_name, results in _iter_scenario_items(scenario_results):
         cost_effective_pct = None
+        cost_effective_count = None
         if isinstance(results.get("cost_effectiveness_summary"), dict):
-            cost_effective_pct = results["cost_effectiveness_summary"].get(
-                "cost_effective_pct"
-            )
+            cost_effective_summary = results["cost_effectiveness_summary"]
+            cost_effective_pct = cost_effective_summary.get("cost_effective_pct")
+            cost_effective_count = cost_effective_summary.get("cost_effective_count")
         if cost_effective_pct is None:
             cost_effective_pct = results.get("cost_effective_pct")
+        if cost_effective_count is None:
+            cost_effective_count = results.get("cost_effective_count")
 
         scenario_metrics = [
             (
@@ -275,6 +314,12 @@ def build_report_headline_dataframe(
                 "percent",
             ),
             (
+                "scenario_cost_effective_count",
+                cost_effective_count,
+                "Scenario cost-effective count",
+                "count",
+            ),
+            (
                 "scenario_carbon_abatement_cost_median",
                 results.get("carbon_abatement_cost_median"),
                 "Scenario median carbon abatement cost",
@@ -293,6 +338,18 @@ def build_report_headline_dataframe(
             )
 
     dataframe = pd.DataFrame(rows, columns=REPORT_HEADLINE_COLUMNS)
+    scenario_names = [
+        scenario for scenario, _ in _iter_scenario_items(scenario_results)
+    ]
+    validate_report_headline_dataframe(
+        dataframe,
+        scenario_names=scenario_names,
+        include_boroughs=borough_breakdown is not None and not borough_breakdown.empty,
+        include_case_street=bool(
+            case_street_summary and case_street_summary.get("case_street")
+        ),
+        include_subsidy=bool(subsidy_results),
+    )
     return dataframe
 
 
