@@ -371,6 +371,20 @@ class OneStopReportGenerator:
         "Section 13: Metadata Notes & Caveats",
     ]
 
+    BASELINE_SCENARIO_HINTS = ("baseline", "no_intervention", "no-intervention", "no intervention")
+    BASELINE_OPTIONAL_PREFIXES = (
+        "ashp_",
+        "heat_pump_",
+        "upgrade_recommended_",
+        "cost_effective_",
+        "not_cost_effective_",
+        "carbon_abatement_cost_",
+    )
+    BASELINE_OPTIONAL_FIELDS = {
+        "average_payback_years",
+        "median_payback_years",
+    }
+
     SCENARIO_FIELD_METADATA: Dict[str, Dict[str, str]] = {
         "scenario_id": {
             "definition": "Scenario identifier from config (string).",
@@ -603,6 +617,7 @@ class OneStopReportGenerator:
         self.output_path = self.output_dir / "one_stop_output.md"
         self.archetype_results = archetype_results
         self._collected_datapoints: List[AnnotatedDatapoint] = []
+        self._baseline_scenario_suffixes: set[str] = set()
 
     def generate(self) -> Path:
         logger.info("Generating one-stop report...")
@@ -665,6 +680,7 @@ class OneStopReportGenerator:
             dp.key
             for dp in self._collected_datapoints
             if dp.value is None or (isinstance(dp.value, float) and pd.isna(dp.value))
+            if not self._is_baseline_optional_missing(dp.key)
         ]
         if missing_keys:
             logger.warning(
@@ -704,6 +720,39 @@ class OneStopReportGenerator:
         if scenario_id and "hybrid" in str(scenario_id).lower():
             return True
         return "hybrid" in str(scenario_label).lower()
+
+    @classmethod
+    def _is_baseline_scenario(cls, scenario_id: Optional[str], scenario_label: str) -> bool:
+        scenario_text = f"{scenario_id or ''} {scenario_label}".lower()
+        return any(hint in scenario_text for hint in cls.BASELINE_SCENARIO_HINTS)
+
+    @classmethod
+    def _is_baseline_optional_field(cls, field: str) -> bool:
+        if field.endswith(("_low", "_high")):
+            return True
+        if field in cls.BASELINE_OPTIONAL_FIELDS:
+            return True
+        return any(field.startswith(prefix) for prefix in cls.BASELINE_OPTIONAL_PREFIXES)
+
+    def _is_baseline_optional_missing(self, key: str) -> bool:
+        for suffix in self._baseline_scenario_suffixes:
+            suffix_key = f"_{suffix}"
+            if key.endswith(suffix_key):
+                field = key[: -len(suffix_key)]
+                return self._is_baseline_optional_field(field)
+        return False
+
+    def _baseline_value_or_na(
+        self,
+        field: str,
+        value: Any,
+        is_baseline: bool,
+    ) -> Any:
+        if not is_baseline or value is not None:
+            return value
+        if self._is_baseline_optional_field(field):
+            return "N/A (not applicable to baseline)"
+        return value
 
     def _build_section_1(self, archetype_results: Dict[str, Any]) -> List[str]:
         epc_bands = self._get_archetype_section(archetype_results, "EPC BANDS", "epc_bands")
@@ -1107,12 +1156,21 @@ class OneStopReportGenerator:
         if scenario_df is not None:
             for _, row in scenario_df.iterrows():
                 scenario_label = row.get("scenario") or row.get("scenario_id") or "scenario"
+                scenario_id = row.get("scenario_id")
+                is_baseline = self._is_baseline_scenario(scenario_id, scenario_label)
+                scenario_suffix = _snake_case(str(scenario_label))
+                if is_baseline:
+                    self._baseline_scenario_suffixes.add(scenario_suffix)
                 datapoints.extend(
                     [
                         AnnotatedDatapoint(
                             name=f"Average payback years ({scenario_label})",
-                            key=f"average_payback_years_{_snake_case(str(scenario_label))}",
-                            value=self._clean_value(row.get("average_payback_years")),
+                            key=f"average_payback_years_{scenario_suffix}",
+                            value=self._baseline_value_or_na(
+                                "average_payback_years",
+                                self._clean_value(row.get("average_payback_years")),
+                                is_baseline,
+                            ),
                             definition=self.SCENARIO_FIELD_METADATA["average_payback_years"]["definition"],
                             denominator=self.SCENARIO_FIELD_METADATA["average_payback_years"]["denominator"],
                             source="data/outputs/scenario_results_summary.csv -> average_payback_years",
@@ -1120,8 +1178,12 @@ class OneStopReportGenerator:
                         ),
                         AnnotatedDatapoint(
                             name=f"Median payback years ({scenario_label})",
-                            key=f"median_payback_years_{_snake_case(str(scenario_label))}",
-                            value=self._clean_value(row.get("median_payback_years")),
+                            key=f"median_payback_years_{scenario_suffix}",
+                            value=self._baseline_value_or_na(
+                                "median_payback_years",
+                                self._clean_value(row.get("median_payback_years")),
+                                is_baseline,
+                            ),
                             definition=self.SCENARIO_FIELD_METADATA["median_payback_years"]["definition"],
                             denominator=self.SCENARIO_FIELD_METADATA["median_payback_years"]["denominator"],
                             source="data/outputs/scenario_results_summary.csv -> median_payback_years",
@@ -1138,18 +1200,26 @@ class OneStopReportGenerator:
                 scenario_label = row.get("scenario") or row.get("scenario_id") or "scenario"
                 scenario_id = row.get("scenario_id")
                 is_hybrid = self._is_hybrid_scenario(scenario_id, scenario_label)
+                is_baseline = self._is_baseline_scenario(scenario_id, scenario_label)
+                scenario_suffix = _snake_case(str(scenario_label))
+                if is_baseline:
+                    self._baseline_scenario_suffixes.add(scenario_suffix)
                 for field in scenario_df.columns:
                     metadata = self.SCENARIO_FIELD_METADATA.get(field, {})
                     definition = metadata.get("definition", "Scenario summary metric.")
                     denominator = metadata.get("denominator", "All properties in scenario")
                     usage = metadata.get("usage", "Scenario summary")
-                    value = self._clean_value(row.get(field))
+                    value = self._baseline_value_or_na(
+                        field,
+                        self._clean_value(row.get(field)),
+                        is_baseline,
+                    )
                     if field in {"hn_assigned_properties", "ashp_assigned_properties"} and not is_hybrid:
                         value = "N/A (not hybrid)"
                     datapoints.append(
                         AnnotatedDatapoint(
                             name=f"{field.replace('_', ' ').title()} ({scenario_label})",
-                            key=f"{field}_{_snake_case(str(scenario_label))}",
+                            key=f"{field}_{scenario_suffix}",
                             value=value,
                             definition=definition,
                             denominator=denominator,
@@ -1317,6 +1387,19 @@ class OneStopReportGenerator:
                 definition="Clarifies subsidy cost uplift assumption (text).",
                 denominator="N/A",
                 source="config/config.yaml -> financial.subsidy_sensitivity_cost_uplift_pct",
+                usage="Metadata note",
+            ),
+            AnnotatedDatapoint(
+                name="Baseline metrics not applicable",
+                key="baseline_metrics_not_applicable",
+                value=(
+                    "Baseline/no-intervention scenarios do not report ASHP metrics, heat-pump electricity totals, "
+                    "cost-effectiveness fields (upgrade recommendations, cost-effective shares, carbon abatement costs), "
+                    "payback years, or uncertainty bands (_low/_high) unless explicitly provided."
+                ),
+                definition="Lists scenario summary metrics that are not applicable to baseline outputs (text).",
+                denominator="N/A",
+                source="reporting requirement",
                 usage="Metadata note",
             ),
         ]
