@@ -545,6 +545,7 @@ methodological_adjustments:
 financial:
   discount_rate: 0.035  # 3.5% real discount rate (HM Treasury Green Book)
   analysis_horizon_years: 20  # Project lifetime for NPV calculations
+  subsidy_sensitivity_cost_uplift_pct: 0  # Cost uplift for subsidy sensitivity runs only
 
   # Cost-effectiveness thresholds for flagging recommended upgrades
   #
