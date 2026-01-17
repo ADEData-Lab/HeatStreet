@@ -917,11 +917,11 @@ def generate_reports(archetype_results, scenario_results, subsidy_results=None, 
 
 
 def generate_one_stop_report(analysis_logger: AnalysisLogger = None):
-    """Generate the one-stop markdown report."""
+    """Generate the one-stop JSON report."""
     console.print()
     console.print(Panel("[bold]Phase 5: One-Stop Report[/bold]", border_style="blue"))
     console.print()
-    console.print("[cyan]Generating one-stop markdown report...[/cyan]")
+    console.print("[cyan]Generating one-stop JSON report...[/cyan]")
 
     from src.reporting.one_stop_report import OneStopReportGenerator
 
@@ -931,22 +931,22 @@ def generate_one_stop_report(analysis_logger: AnalysisLogger = None):
     console.print(f"[green]✓[/green] One-stop report generated: {output_path}")
 
     if analysis_logger:
-        analysis_logger.add_output("data/outputs/one_stop_output.md", "md", "One-stop report")
+        analysis_logger.add_output("data/outputs/one_stop_output.json", "json", "One-stop report")
 
     return output_path
 
 
 def cleanup_reporting_outputs():
     """
-    Remove ALL report artifacts except one_stop_output.md and analysis_log.txt.
+    Remove ALL report artifacts except one_stop_output.json and analysis_log.txt.
 
-    This aggressive cleanup ensures only the consolidated markdown report persists,
+    This aggressive cleanup ensures only the consolidated JSON report persists,
     eliminating scattered CSVs, JSONs, TXTs, PNGs, HTMLs, PDFs, and subdirectories.
     """
     outputs_dir = Path("data/outputs")
 
     # Files to preserve
-    preserved_files = {"one_stop_output.md", "analysis_log.txt"}
+    preserved_files = {"one_stop_output.json", "analysis_log.txt"}
 
     # Remove ALL subdirectories in data/outputs/
     for subdir in ["figures", "maps", "comparisons", "reports"]:
@@ -1608,7 +1608,7 @@ def main():
     console.print(f"  • Skipped: {summary_stats['skipped_phases']}")
 
     console.print()
-    outputs_label = "one_stop_output.md (one-stop report)" if one_stop_only else "reports and charts"
+    outputs_label = "one_stop_output.json (one-stop report)" if one_stop_only else "reports and charts"
 
     console.print(Panel.fit(
         f"[bold green]✓ Analysis Complete![/bold green]\n\n"
