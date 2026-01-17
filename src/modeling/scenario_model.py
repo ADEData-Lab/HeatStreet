@@ -1558,18 +1558,29 @@ class ScenarioModeler:
 
         subsidy_levels = self.config.get('subsidy_levels', [0, 25, 50, 75, 100])
         scenario_config = self.scenarios[scenario_name]
+        uplift_pct = float(self.config.get('financial', {}).get('subsidy_sensitivity_cost_uplift_pct', 0))
+        uplift_multiplier = 1 + (uplift_pct / 100)
+        uplift_note = (
+            f"Costs uplifted by {uplift_pct:.1f}% for subsidy sensitivity."
+            if uplift_pct
+            else "No cost uplift applied for subsidy sensitivity."
+        )
 
         sensitivity_results = {}
 
         # Model base scenario once to get baseline metrics
         base_results = self.model_scenario(df, scenario_name, scenario_config)
+        capital_cost_total_base = base_results['capital_cost_total']
+        capital_cost_per_property_base = base_results['capital_cost_per_property']
+        capital_cost_total_uplifted = capital_cost_total_base * uplift_multiplier
+        capital_cost_per_property_uplifted = capital_cost_per_property_base * uplift_multiplier
 
         for subsidy_pct in subsidy_levels:
             logger.info(f"  Analyzing {subsidy_pct}% subsidy level...")
 
             # Apply subsidy
-            capital_cost_subsidized = base_results['capital_cost_total'] * (1 - subsidy_pct/100)
-            capital_cost_per_property = base_results['capital_cost_per_property'] * (1 - subsidy_pct/100)
+            capital_cost_subsidized = capital_cost_total_uplifted * (1 - subsidy_pct/100)
+            capital_cost_per_property = capital_cost_per_property_uplifted * (1 - subsidy_pct/100)
 
             # Recalculate payback with subsidy
             annual_savings = base_results['annual_bill_savings']
@@ -1579,7 +1590,7 @@ class ScenarioModeler:
             uptake_rate = self._calculate_smooth_uptake_rate(payback_years)
 
             properties_upgraded = int(base_results['total_properties'] * uptake_rate)
-            public_expenditure = (base_results['capital_cost_per_property'] * subsidy_pct/100) * properties_upgraded
+            public_expenditure = (capital_cost_per_property_uplifted * subsidy_pct/100) * properties_upgraded
 
             # Carbon abatement cost
             total_co2_saved = (
@@ -1590,13 +1601,19 @@ class ScenarioModeler:
             sensitivity_results[f'{subsidy_pct}%'] = {
                 'subsidy_percentage': subsidy_pct,
                 'capital_cost_per_property': capital_cost_per_property,
+                'capital_cost_total_uplifted': capital_cost_total_uplifted,
+                'capital_cost_per_property_uplifted': capital_cost_per_property_uplifted,
+                'capital_cost_total_after_subsidy': capital_cost_subsidized,
+                'capital_cost_per_property_after_subsidy': capital_cost_per_property,
                 'payback_years': payback_years,
                 'estimated_uptake_rate': uptake_rate,
                 'uptake_model': 'logistic_smooth',  # Document model type
                 'properties_upgraded': properties_upgraded,
                 'public_expenditure_total': public_expenditure,
                 'public_expenditure_per_property': public_expenditure / properties_upgraded if properties_upgraded > 0 else 0,
-                'carbon_abatement_cost_per_tonne': carbon_abatement_cost
+                'carbon_abatement_cost_per_tonne': carbon_abatement_cost,
+                'cost_uplift_pct': uplift_pct,
+                'cost_uplift_note': uplift_note
             }
 
             logger.info(
