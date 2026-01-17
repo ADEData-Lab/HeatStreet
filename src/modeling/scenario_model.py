@@ -1666,6 +1666,16 @@ class ScenarioModeler:
             ce_summary = results.get('cost_effectiveness_summary', {})
             band_summary = results.get('epc_band_shift_summary', {})
             scenario_label = results.get('scenario_label') or self._get_scenario_label(scenario)
+            capital_cost_total = results.get('capital_cost_total')
+            annual_co2_reduction_kg = results.get('annual_co2_reduction_kg')
+            cost_per_tco2_20yr_gbp = None
+            # Uses total CO2 abatement over the analysis horizon (annual savings × years).
+            if capital_cost_total is not None and annual_co2_reduction_kg:
+                tco2_over_horizon = (
+                    annual_co2_reduction_kg / 1000
+                ) * self.analysis_horizon_years
+                if tco2_over_horizon:
+                    cost_per_tco2_20yr_gbp = capital_cost_total / tco2_over_horizon
 
             rows.append({
                 'scenario_id': scenario,
@@ -1675,6 +1685,7 @@ class ScenarioModeler:
                 'capital_cost_per_property': results.get('capital_cost_per_property'),
                 'annual_energy_reduction_kwh': results.get('annual_energy_reduction_kwh'),
                 'annual_co2_reduction_kg': results.get('annual_co2_reduction_kg'),
+                'cost_per_tco2_20yr_gbp': cost_per_tco2_20yr_gbp,
                 'annual_bill_savings': results.get('annual_bill_savings'),
                 'annual_bill_savings_low': results.get('annual_bill_savings_low'),
                 'annual_bill_savings_high': results.get('annual_bill_savings_high'),

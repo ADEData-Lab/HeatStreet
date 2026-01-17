@@ -16,7 +16,12 @@ from loguru import logger
 
 import sys
 sys.path.append(str(Path(__file__).parent.parent.parent))
-from config.config import load_config, DATA_OUTPUTS_DIR, get_scenario_label_map
+from config.config import (
+    load_config,
+    DATA_OUTPUTS_DIR,
+    get_scenario_label_map,
+    get_analysis_horizon_years,
+)
 from src.reporting.report_headline_data import build_report_headline_dataframe
 
 
@@ -29,6 +34,7 @@ class ReportGenerator:
         """Initialize the report generator."""
         self.config = load_config()
         self.scenario_labels = get_scenario_label_map()
+        self.analysis_horizon_years = get_analysis_horizon_years()
         self.output_dir = DATA_OUTPUTS_DIR / "figures"
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -47,6 +53,17 @@ class ReportGenerator:
             if scenario_label:
                 return scenario_label
         return self.scenario_labels.get(scenario_id, scenario_id)
+
+    def _cost_per_tco2_20yr_gbp(self, results: Dict) -> Optional[float]:
+        """Calculate cost per tCO2 using total abatement over the analysis horizon."""
+        annual_co2_reduction_kg = results.get("annual_co2_reduction_kg")
+        capital_cost_total = results.get("capital_cost_total")
+        if capital_cost_total is None or not annual_co2_reduction_kg:
+            return None
+        tco2_over_horizon = (annual_co2_reduction_kg / 1000) * self.analysis_horizon_years
+        if not tco2_over_horizon:
+            return None
+        return capital_cost_total / tco2_over_horizon
 
     def plot_epc_band_distribution(
         self,
@@ -754,6 +771,7 @@ class ReportGenerator:
                     "capital_cost_total": results.get("capital_cost_total"),
                     "capital_cost_per_property": results.get("capital_cost_per_property"),
                     "annual_co2_reduction_tonnes": results.get("annual_co2_reduction_kg", 0) / 1000,
+                    "cost_per_tco2_20yr_gbp": self._cost_per_tco2_20yr_gbp(results),
                     "annual_bill_savings": results.get("annual_bill_savings"),
                     "average_payback_years": results.get("average_payback_years"),
                 })
@@ -943,6 +961,9 @@ class ReportGenerator:
             summary_data.append(['Capital Cost (total)', f"£{results['capital_cost_total']:,.0f}"])
             summary_data.append(['Cost per Property', f"£{results['capital_cost_per_property']:,.0f}"])
             summary_data.append(['Annual CO2 Reduction (kg)', f"{results['annual_co2_reduction_kg']:,.0f}"])
+            cost_per_tco2_20yr = self._cost_per_tco2_20yr_gbp(results)
+            if cost_per_tco2_20yr is not None:
+                summary_data.append(['Cost per tCO2 (20yr, £)', f"£{cost_per_tco2_20yr:,.0f}"])
             summary_data.append(['Annual Bill Savings', f"£{results['annual_bill_savings']:,.0f}"])
             if 'average_payback_years' in results:
                 summary_data.append(['Average Payback (years)', f"{results['average_payback_years']:.1f}"])
@@ -981,6 +1002,7 @@ class ReportGenerator:
                 'Cost per Property': results['capital_cost_per_property'],
                 'Annual Energy Reduction (kWh)': results['annual_energy_reduction_kwh'],
                 'Annual CO2 Reduction (kg)': results['annual_co2_reduction_kg'],
+                'Cost per tCO2 (20yr, £)': self._cost_per_tco2_20yr_gbp(results),
                 'Annual Bill Savings (£)': results['annual_bill_savings'],
                 'Baseline Bill (£)': results.get('baseline_bill_total', 0),
                 'Post-Measure Bill (£)': results.get('post_measure_bill_total', 0),
@@ -1050,7 +1072,8 @@ class ReportGenerator:
                 scenarios.append({
                     'Scenario': scenario_label,
                     'Cost': results['capital_cost_per_property'],
-                    'CO2 Reduction': results['annual_co2_reduction_kg']
+                    'CO2 Reduction': results['annual_co2_reduction_kg'],
+                    'Cost per tCO2 (20yr, £)': self._cost_per_tco2_20yr_gbp(results),
                 })
             pd.DataFrame(scenarios).to_excel(writer, sheet_name='Scenarios', index=False)
 
