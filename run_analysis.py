@@ -5,6 +5,7 @@ Runs the entire analysis from data download to report generation
 with interactive prompts and progress indicators.
 """
 
+import argparse
 import os
 import json
 import shutil
@@ -22,7 +23,7 @@ import time
 # Add src to path
 sys.path.append(str(Path(__file__).parent))
 
-from config.config import load_config, ensure_directories, DATA_RAW_DIR, DATA_PROCESSED_DIR
+from config.config import load_config, ensure_directories, DATA_RAW_DIR, DATA_PROCESSED_DIR, get_london_boroughs
 from src.acquisition.epc_api_downloader import EPCAPIDownloader
 from src.acquisition.london_gis_downloader import LondonGISDownloader
 from src.cleaning.data_validator import EPCDataValidator
@@ -31,9 +32,166 @@ from src.modeling.scenario_model import ScenarioModeler
 from src.modeling.pathway_model import PathwayModeler
 from src.reporting.comparisons import ComparisonReporter
 from src.utils.analysis_logger import AnalysisLogger
+from src.utils.run_metadata import RunMetadataManager
 
 
 console = Console()
+
+
+def parse_args():
+    """Parse CLI arguments."""
+    parser = argparse.ArgumentParser(description="Heat Street EPC Analysis (interactive pipeline)")
+    parser.add_argument(
+        "--boroughs",
+        help="Comma-separated borough names or menu numbers (e.g., \"Camden,Islington\" or \"1,3,5\").",
+    )
+    parser.add_argument(
+        "--full-dataset",
+        action="store_true",
+        help="Run the full dataset without borough filtering.",
+    )
+    return parser.parse_args()
+
+
+def _normalize_borough(name: str) -> str:
+    return name.strip().lower()
+
+
+def _parse_borough_input(selection: str, boroughs: list) -> list:
+    if not selection:
+        raise ValueError("No boroughs provided.")
+    tokens = [token.strip() for token in selection.split(",") if token.strip()]
+    if not tokens:
+        raise ValueError("No boroughs provided.")
+
+    borough_map = {_normalize_borough(borough): borough for borough in boroughs}
+    selected = []
+    invalid = []
+
+    for token in tokens:
+        if token.isdigit():
+            index = int(token)
+            if 1 <= index <= len(boroughs):
+                selected.append(boroughs[index - 1])
+            else:
+                invalid.append(token)
+        else:
+            key = _normalize_borough(token)
+            if key in borough_map:
+                selected.append(borough_map[key])
+            else:
+                invalid.append(token)
+
+    if invalid:
+        raise ValueError(f"Invalid borough selection(s): {', '.join(invalid)}")
+
+    seen = set()
+    deduped = []
+    for borough in selected:
+        if borough not in seen:
+            deduped.append(borough)
+            seen.add(borough)
+
+    return deduped
+
+
+def _prompt_borough_selection(known_boroughs: list) -> list:
+    console.print("[cyan]Borough Menu:[/cyan]")
+    for idx, borough in enumerate(known_boroughs, start=1):
+        console.print(f"  {idx:>2}. {borough}")
+    console.print()
+
+    while True:
+        selection = questionary.text(
+            "Enter borough names and/or numbers (comma-separated):"
+        ).ask()
+        try:
+            return _parse_borough_input(selection, known_boroughs)
+        except ValueError as exc:
+            console.print(f"[yellow]⚠ {exc}[/yellow]")
+
+
+def determine_borough_filter(args) -> tuple:
+    """Return (selected_boroughs, mode) based on CLI flags or prompt."""
+    known_boroughs = get_london_boroughs()
+
+    if args.full_dataset and args.boroughs:
+        raise ValueError("Use either --full-dataset or --boroughs, not both.")
+
+    if args.full_dataset:
+        return None, "full"
+
+    if args.boroughs:
+        return _parse_borough_input(args.boroughs, known_boroughs), "sample"
+
+    console.print("[cyan]Dataset Scope[/cyan]")
+    choice = questionary.select(
+        "Run full dataset or a borough-filtered sample?",
+        choices=[
+            questionary.Choice("Full dataset", value="full"),
+            questionary.Choice("Sample (filter by boroughs)", value="sample"),
+        ],
+    ).ask()
+
+    if choice == "full":
+        return None, "full"
+
+    selected = _prompt_borough_selection(known_boroughs)
+    return selected, "sample"
+
+
+def apply_borough_filter(
+    df,
+    selected_boroughs: list,
+    metadata_manager: RunMetadataManager,
+):
+    """Filter dataframe by boroughs and log metadata."""
+    if not selected_boroughs:
+        if "LOCAL_AUTHORITY" in df.columns:
+            boroughs_selected = sorted(df["LOCAL_AUTHORITY"].dropna().unique().tolist())
+        else:
+            boroughs_selected = []
+        metadata_manager.set_metadata("borough_filter_mode", "full")
+        metadata_manager.set_metadata("boroughs_selected", boroughs_selected)
+        metadata_manager.set_metadata("borough_filter_record_count", len(df))
+        return df
+
+    if "LOCAL_AUTHORITY" not in df.columns:
+        console.print("[yellow]⚠ Borough column (LOCAL_AUTHORITY) not found; skipping borough filter.[/yellow]")
+        metadata_manager.set_metadata("borough_filter_mode", "sample")
+        metadata_manager.set_metadata("boroughs_selected", selected_boroughs)
+        metadata_manager.set_metadata("borough_filter_record_count", len(df))
+        return df
+
+    available = df["LOCAL_AUTHORITY"].dropna().astype(str).str.strip().unique().tolist()
+    available_map = {_normalize_borough(b): b for b in available}
+
+    matched = []
+    missing = []
+    for borough in selected_boroughs:
+        key = _normalize_borough(borough)
+        if key in available_map:
+            matched.append(available_map[key])
+        else:
+            missing.append(borough)
+
+    if missing:
+        console.print(f"[yellow]⚠ Boroughs not found in dataset: {', '.join(missing)}[/yellow]")
+
+    if not matched:
+        console.print("[red]✗ No matching boroughs found in dataset after validation.[/red]")
+        metadata_manager.set_metadata("borough_filter_mode", "sample")
+        metadata_manager.set_metadata("boroughs_selected", selected_boroughs)
+        metadata_manager.set_metadata("borough_filter_record_count", 0)
+        return df.iloc[0:0]
+
+    normalized_selection = {_normalize_borough(b) for b in matched}
+    df_filtered = df[df["LOCAL_AUTHORITY"].astype(str).str.strip().str.lower().isin(normalized_selection)]
+
+    metadata_manager.set_metadata("borough_filter_mode", "sample")
+    metadata_manager.set_metadata("boroughs_selected", matched)
+    metadata_manager.set_metadata("borough_filter_record_count", len(df_filtered))
+    return df_filtered
 
 
 def is_one_stop_only(config=None) -> bool:
@@ -1484,6 +1642,7 @@ def load_existing_data(file_path, analysis_logger: AnalysisLogger = None):
 
 def main():
     """Main execution function."""
+    args = parse_args()
     print_header()
 
     # Check credentials
@@ -1503,6 +1662,21 @@ def main():
     # Initialize analysis logger
     analysis_logger = AnalysisLogger()
     console.print("[green]✓[/green] Analysis logger initialized")
+    console.print()
+
+    # Initialize run metadata manager
+    run_metadata = RunMetadataManager()
+
+    try:
+        selected_boroughs, borough_filter_mode = determine_borough_filter(args)
+    except ValueError as exc:
+        console.print(f"[red]✗ {exc}[/red]")
+        return
+
+    if borough_filter_mode == "sample":
+        console.print(f"[cyan]Borough sample selected:[/cyan] {', '.join(selected_boroughs)}")
+    else:
+        console.print("[cyan]Full dataset selected (no borough filter).[/cyan]")
     console.print()
 
     # Ask about GIS data download
@@ -1564,6 +1738,15 @@ def main():
         console.print()
         console.print("[cyan]Proceeding with existing data...[/cyan]")
         console.print()
+
+    df = apply_borough_filter(df, selected_boroughs, run_metadata)
+    console.print(f"[cyan]Boroughs in scope:[/cyan] {', '.join(run_metadata.get_metadata('boroughs_selected', [])) or 'None'}")
+    console.print(f"[cyan]Records after borough filter:[/cyan] {len(df):,}")
+    run_metadata.save()
+
+    if df.empty:
+        console.print("[red]✗ Analysis stopped - no data available after borough filtering[/red]")
+        return
 
     df_raw = df.copy()
 
