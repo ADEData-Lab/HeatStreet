@@ -670,6 +670,7 @@ class RetrofitReadinessAnalyzer:
                 pct = summary['tier_percentages'].get(tier, 0)
                 f.write(f"Tier {tier}: {count:,} properties ({pct:.1f}%)\n")
             f.write("\n")
+            f.write("Tier 1 = fabric-ready / thermal-demand-ready threshold.\n\n")
 
             f.write("INTERVENTION REQUIREMENTS:\n")
             f.write("-" * 80 + "\n")
@@ -679,6 +680,7 @@ class RetrofitReadinessAnalyzer:
             f.write(f"  - Cavity wall: {summary['needs_cavity_wall_insulation']:,}\n")
             f.write(f"Need glazing upgrade: {summary['needs_glazing_upgrade']:,} ({summary['needs_glazing_upgrade']/summary['total_properties']*100:.1f}%)\n")
             f.write(f"Need radiator upsizing: {summary['needs_radiator_upsizing']:,} ({summary['needs_radiator_upsizing']/summary['total_properties']*100:.1f}%)\n\n")
+            f.write("Radiator/emitter upgrades are assessed separately; many fabric-ready homes still require emitter upgrades for low-temperature operation.\n\n")
 
             f.write("COST ANALYSIS:\n")
             f.write("-" * 80 + "\n")
