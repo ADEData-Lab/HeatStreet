@@ -168,7 +168,8 @@ def download_data(analysis_logger: AnalysisLogger = None, from_year: int = 2015)
         df = downloader.download_all_london_boroughs(
             property_types=['house'],
             from_year=from_year,
-            max_results_per_borough=None
+            max_results_per_borough=None,
+            log_boroughs=False,
         )
 
         if df.empty:
