@@ -1,7 +1,7 @@
 """
 One-Stop Report Generator
 
-Compiles all required sections (1-13) into a single markdown file by
+Compiles all required sections (1-13) into a single JSON file by
 extracting data from existing analysis outputs. This report is the
 single definitive output artifact containing all analysis results.
 
@@ -40,6 +40,32 @@ class AnnotatedDatapoint:
     value: Any = None
     usage: Optional[str] = None
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            "name": self.name,
+            "key": self.key,
+            "value": self._serialize_value(self.value),
+            "definition": self.definition,
+            "denominator": self.denominator,
+            "source": self.source,
+            "usage": self.usage or "General analysis",
+        }
+
+    def _serialize_value(self, value: Any) -> Any:
+        """Serialize value for JSON output."""
+        if value is None:
+            return None
+        if isinstance(value, float) and pd.isna(value):
+            return None
+        if isinstance(value, (pd.Timestamp, datetime)):
+            return value.isoformat()
+        if isinstance(value, pd.Series):
+            return value.to_dict()
+        if isinstance(value, pd.DataFrame):
+            return value.to_dict(orient="records")
+        return value
+
 
 def _snake_case(value: str) -> str:
     """Convert string to snake_case."""
@@ -47,48 +73,16 @@ def _snake_case(value: str) -> str:
     return cleaned.lower()
 
 
-def _format_value(value: Any) -> str:
-    """Format value for display in markdown."""
-    if value is None:
-        return "Not available"
-    if isinstance(value, float) and pd.isna(value):
-        return "Not available"
-    if isinstance(value, float):
-        return f"{value:,.2f}"
-    if isinstance(value, dict):
-        # Format dict as readable text
-        return json.dumps(value, indent=2)
-    if isinstance(value, list):
-        return f"[{', '.join(str(v) for v in value)}]"
-    return str(value)
+def _serialize_dataframe(df: pd.DataFrame, caption: str = "") -> Dict[str, Any]:
+    """Serialize DataFrame to JSON-compatible dict."""
+    if df is None or df.empty:
+        return {"caption": caption, "data": []}
 
-
-def _render_datapoint(datapoint: AnnotatedDatapoint) -> List[str]:
-    """Render a single datapoint with all metadata."""
-    lines = [f"- **{datapoint.name}** (`{datapoint.key}`)"]
-    lines.append(f"  - Value: {_format_value(datapoint.value)}")
-    lines.append(f"  - Definition + unit: {datapoint.definition}")
-    lines.append(f"  - Denominator: {datapoint.denominator}")
-    lines.append(f"  - Source: {datapoint.source}")
-    lines.append(f"  - Report usage: {datapoint.usage or 'General analysis'}")
-    return lines
-
-
-def _render_table(data: pd.DataFrame, caption: str = "") -> List[str]:
-    """Render a DataFrame as a markdown table."""
-    lines = []
-    if caption:
-        lines.append(f"**{caption}**")
-        lines.append("")
-
-    if data.empty:
-        lines.append("_No data available_")
-        return lines
-
-    # Convert to markdown table
-    lines.append(data.to_markdown(index=False))
-    lines.append("")
-    return lines
+    return {
+        "caption": caption,
+        "columns": df.columns.tolist(),
+        "data": df.to_dict(orient="records")
+    }
 
 
 def _read_json(path: Path) -> Dict[str, Any]:
@@ -117,7 +111,7 @@ def _read_csv(path: Path) -> Optional[pd.DataFrame]:
 
 class OneStopReportGenerator:
     """
-    Generate a comprehensive one-stop markdown report from analysis outputs.
+    Generate a comprehensive one-stop JSON report from analysis outputs.
 
     This report contains 13 sections with complete data extraction:
     1. Run metadata and provenance
@@ -160,30 +154,12 @@ class OneStopReportGenerator:
         self.output_dir = Path(output_dir) if output_dir else DATA_OUTPUTS_DIR
         self.processed_dir = Path(processed_dir) if processed_dir else DATA_PROCESSED_DIR
         self.config = config or load_config()
-        self.header_text = self.config.get("reporting", {}).get("one_stop_header_text", "")
-        if not self.header_text:
-            self.header_text = "# Heat Street — One-Stop Report\n## Low-Carbon Heating Potential for London's Edwardian Terraced Housing"
-        self.output_path = self.output_dir / "one_stop_output.md"
-        self._collected_datapoints: List[AnnotatedDatapoint] = []
+        self.output_path = self.output_dir / "one_stop_output.json"
+        self._sections: Dict[str, Any] = {}
 
     def generate(self) -> Path:
-        """Generate the complete one-stop report."""
-        logger.info("Generating comprehensive one-stop report...")
-
-        lines: List[str] = []
-
-        # Header
-        if self.header_text:
-            lines.append(self.header_text)
-            lines.append("")
-
-        lines.append(f"*Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}*")
-        lines.append("")
-        lines.append("---")
-        lines.append("")
-
-        # Table of contents
-        lines.extend(self._build_table_of_contents())
+        """Generate the complete one-stop JSON report."""
+        logger.info("Generating comprehensive one-stop JSON report...")
 
         # Load all data sources
         run_metadata = _read_json(self.output_dir / "run_metadata.json")
@@ -199,74 +175,63 @@ class OneStopReportGenerator:
         borough_df = _read_csv(self.output_dir / "borough_breakdown.csv")
         case_street_df = _read_csv(self.output_dir / "shakespeare_crescent_extract.csv")
 
-        # Generate all 13 sections
-        lines.extend(self._build_section_1(run_metadata))
-        lines.extend(self._build_section_2(validation_report, adjustment_summary))
-        lines.extend(self._build_section_3(archetype_json))
-        lines.extend(self._build_section_4(readiness_df))
-        lines.extend(self._build_section_5(spatial_tier_df))
-        lines.extend(self._build_section_6(scenario_df))
-        lines.extend(self._build_section_7(hn_vs_hp_df))
-        lines.extend(self._build_section_8(tipping_point_df))
-        lines.extend(self._build_section_9(subsidy_df))
-        lines.extend(self._build_section_10(borough_df))
-        lines.extend(self._build_section_11(case_street_df))
-        lines.extend(self._build_section_12(adjustment_summary))
-        lines.extend(self._build_section_13())
+        # Build all 13 sections
+        self._sections["section_1"] = self._build_section_1(run_metadata)
+        self._sections["section_2"] = self._build_section_2(validation_report, adjustment_summary)
+        self._sections["section_3"] = self._build_section_3(archetype_json)
+        self._sections["section_4"] = self._build_section_4(readiness_df)
+        self._sections["section_5"] = self._build_section_5(spatial_tier_df)
+        self._sections["section_6"] = self._build_section_6(scenario_df)
+        self._sections["section_7"] = self._build_section_7(hn_vs_hp_df)
+        self._sections["section_8"] = self._build_section_8(tipping_point_df)
+        self._sections["section_9"] = self._build_section_9(subsidy_df)
+        self._sections["section_10"] = self._build_section_10(borough_df)
+        self._sections["section_11"] = self._build_section_11(case_street_df)
+        self._sections["section_12"] = self._build_section_12(adjustment_summary)
+        self._sections["section_13"] = self._build_section_13()
+
+        # Build final JSON structure
+        output = {
+            "metadata": {
+                "title": "Heat Street — One-Stop Report",
+                "subtitle": "Low-Carbon Heating Potential for London's Edwardian Terraced Housing",
+                "generated": datetime.now().isoformat(),
+                "version": "2.0"
+            },
+            "sections": self._sections
+        }
 
         # Write output
         self.output_dir.mkdir(parents=True, exist_ok=True)
-        self.output_path.write_text("\n".join(lines).rstrip() + "\n", encoding="utf-8")
-        logger.info(f"One-stop report written to {self.output_path}")
-        logger.info(f"Total datapoints: {len(self._collected_datapoints)}")
+        self.output_path.write_text(json.dumps(output, indent=2, ensure_ascii=False), encoding="utf-8")
+
+        total_datapoints = sum(len(s.get("datapoints", [])) for s in self._sections.values())
+        logger.info(f"One-stop JSON report written to {self.output_path}")
+        logger.info(f"Total datapoints: {total_datapoints}")
         return self.output_path
 
-    def _build_table_of_contents(self) -> List[str]:
-        """Build table of contents."""
-        lines = ["## Report Structure", ""]
-        lines.append("This report consolidates ALL analysis outputs into 13 comprehensive sections:")
-        lines.append("")
-        for i, title in enumerate(self.SECTION_TITLES, 1):
-            lines.append(f"{i}. {title.replace(f'Section {i}: ', '')}")
-        lines.append("")
-        lines.append("Each datapoint includes:")
-        lines.append("- **Name**: Human-readable description")
-        lines.append("- **Key**: Machine-readable identifier (snake_case)")
-        lines.append("- **Value**: Computed value with appropriate precision")
-        lines.append("- **Definition + unit**: What this measures and in what units")
-        lines.append("- **Denominator**: The baseline for percentage/rate calculations")
-        lines.append("- **Source**: Origin output file and field")
-        lines.append("- **Report usage**: Which analysis sections reference this")
-        lines.append("")
-        lines.append("---")
-        lines.append("")
-        return lines
-
-    def _render_section(self, title: str, datapoints: Iterable[AnnotatedDatapoint], tables: Optional[List[Tuple[pd.DataFrame, str]]] = None) -> List[str]:
-        """Render a section with datapoints and optional tables."""
-        lines = [f"## {title}", ""]
+    def _render_section(
+        self,
+        title: str,
+        datapoints: Iterable[AnnotatedDatapoint],
+        tables: Optional[List[Tuple[pd.DataFrame, str]]] = None
+    ) -> Dict[str, Any]:
+        """Render a section as a JSON-compatible dictionary."""
         datapoints_list = list(datapoints)
-        if datapoints_list:
-            self._collected_datapoints.extend(datapoints_list)
 
-        if not datapoints_list and not tables:
-            lines.append("_No datapoints available from current outputs._")
-            lines.append("")
-            return lines
-
-        for datapoint in datapoints_list:
-            lines.extend(_render_datapoint(datapoint))
-            lines.append("")
+        section = {
+            "title": title,
+            "datapoints": [dp.to_dict() for dp in datapoints_list],
+            "tables": []
+        }
 
         if tables:
             for df, caption in tables:
-                lines.extend(_render_table(df, caption))
+                section["tables"].append(_serialize_dataframe(df, caption))
 
-        lines.append("---")
-        lines.append("")
-        return lines
+        return section
 
-    def _build_section_1(self, run_metadata: Dict[str, Any]) -> List[str]:
+    def _build_section_1(self, run_metadata: Dict[str, Any]) -> Dict[str, Any]:
         """Section 1: Run metadata and provenance."""
         datapoints = [
             AnnotatedDatapoint(
@@ -362,7 +327,7 @@ class OneStopReportGenerator:
         ]
         return self._render_section(self.SECTION_TITLES[0], datapoints)
 
-    def _build_section_2(self, validation_report: Dict[str, Any], adjustment_summary: Dict[str, Any]) -> List[str]:
+    def _build_section_2(self, validation_report: Dict[str, Any], adjustment_summary: Dict[str, Any]) -> Dict[str, Any]:
         """Section 2: Dataset volumes and data quality."""
         total_raw = validation_report.get("total_records", 0)
         duplicates = validation_report.get("duplicates_removed", 0)
@@ -472,7 +437,7 @@ class OneStopReportGenerator:
         ]
         return self._render_section(self.SECTION_TITLES[1], datapoints)
 
-    def _build_section_3(self, archetype_json: Dict[str, Any]) -> List[str]:
+    def _build_section_3(self, archetype_json: Dict[str, Any]) -> Dict[str, Any]:
         """Section 3: Housing stock archetype characteristics."""
         epc_bands = archetype_json.get("epc_bands", {})
         sap_scores = archetype_json.get("sap_scores", {})
@@ -602,7 +567,7 @@ class OneStopReportGenerator:
         ]
         return self._render_section(self.SECTION_TITLES[2], datapoints)
 
-    def _build_section_4(self, readiness_df: Optional[pd.DataFrame]) -> List[str]:
+    def _build_section_4(self, readiness_df: Optional[pd.DataFrame]) -> Dict[str, Any]:
         """Section 4: Retrofit readiness (heat pump readiness and prerequisites)."""
         if readiness_df is None or readiness_df.empty:
             return self._render_section(self.SECTION_TITLES[3], [])
@@ -788,7 +753,7 @@ class OneStopReportGenerator:
 
         return self._render_section(self.SECTION_TITLES[3], datapoints)
 
-    def _build_section_5(self, spatial_tier_df: Optional[pd.DataFrame]) -> List[str]:
+    def _build_section_5(self, spatial_tier_df: Optional[pd.DataFrame]) -> Dict[str, Any]:
         """Section 5: Spatial heat network classification."""
         if spatial_tier_df is None or spatial_tier_df.empty:
             datapoints = [
@@ -869,7 +834,7 @@ class OneStopReportGenerator:
 
         return self._render_section(self.SECTION_TITLES[4], datapoints, tables=tables)
 
-    def _build_section_6(self, scenario_df: Optional[pd.DataFrame]) -> List[str]:
+    def _build_section_6(self, scenario_df: Optional[pd.DataFrame]) -> Dict[str, Any]:
         """Section 6: Scenario modelling outputs."""
         if scenario_df is None or scenario_df.empty:
             return self._render_section(self.SECTION_TITLES[5], [])
@@ -1038,7 +1003,7 @@ class OneStopReportGenerator:
 
         return self._render_section(self.SECTION_TITLES[5], datapoints, tables=tables)
 
-    def _build_section_7(self, hn_vs_hp_df: Optional[pd.DataFrame]) -> List[str]:
+    def _build_section_7(self, hn_vs_hp_df: Optional[pd.DataFrame]) -> Dict[str, Any]:
         """Section 7: Heat network vs heat pump comparison module."""
         if hn_vs_hp_df is None or hn_vs_hp_df.empty:
             datapoints = [
@@ -1087,7 +1052,7 @@ class OneStopReportGenerator:
 
         return self._render_section(self.SECTION_TITLES[6], datapoints, tables=tables)
 
-    def _build_section_8(self, tipping_point_df: Optional[pd.DataFrame]) -> List[str]:
+    def _build_section_8(self, tipping_point_df: Optional[pd.DataFrame]) -> Dict[str, Any]:
         """Section 8: Fabric tipping-point and cost-performance analysis."""
         if tipping_point_df is None or tipping_point_df.empty:
             datapoints = [
@@ -1124,7 +1089,7 @@ class OneStopReportGenerator:
 
         return self._render_section(self.SECTION_TITLES[7], datapoints, tables=tables)
 
-    def _build_section_9(self, subsidy_df: Optional[pd.DataFrame]) -> List[str]:
+    def _build_section_9(self, subsidy_df: Optional[pd.DataFrame]) -> Dict[str, Any]:
         """Section 9: Subsidy sensitivity analysis."""
         if subsidy_df is None or subsidy_df.empty:
             datapoints = [
@@ -1175,7 +1140,7 @@ class OneStopReportGenerator:
 
         return self._render_section(self.SECTION_TITLES[8], datapoints, tables=tables)
 
-    def _build_section_10(self, borough_df: Optional[pd.DataFrame]) -> List[str]:
+    def _build_section_10(self, borough_df: Optional[pd.DataFrame]) -> Dict[str, Any]:
         """Section 10: Borough-level breakdown and prioritisation."""
         if borough_df is None or borough_df.empty:
             datapoints = [
@@ -1208,7 +1173,7 @@ class OneStopReportGenerator:
 
         return self._render_section(self.SECTION_TITLES[9], datapoints, tables=tables)
 
-    def _build_section_11(self, case_street_df: Optional[pd.DataFrame]) -> List[str]:
+    def _build_section_11(self, case_street_df: Optional[pd.DataFrame]) -> Dict[str, Any]:
         """Section 11: Case street / exemplar outputs."""
         if case_street_df is None or case_street_df.empty:
             datapoints = [
@@ -1275,7 +1240,7 @@ class OneStopReportGenerator:
 
         return self._render_section(self.SECTION_TITLES[10], datapoints, tables=tables)
 
-    def _build_section_12(self, adjustment_summary: Dict[str, Any]) -> List[str]:
+    def _build_section_12(self, adjustment_summary: Dict[str, Any]) -> Dict[str, Any]:
         """Section 12: Uncertainty and sensitivity datapoints."""
         # Extract uncertainty parameters from config and adjustment summary
         prebound_data = adjustment_summary.get("prebound_adjustment", {})
@@ -1428,7 +1393,7 @@ class OneStopReportGenerator:
         ]
         return self._render_section(self.SECTION_TITLES[11], datapoints)
 
-    def _build_section_13(self) -> List[str]:
+    def _build_section_13(self) -> Dict[str, Any]:
         """Section 13: Structure of the one-stop output document (glossary)."""
         lines = [f"## {self.SECTION_TITLES[12]}", ""]
         lines.append("This section provides a comprehensive glossary of all metrics used in Sections 1-12.")
