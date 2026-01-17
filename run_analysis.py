@@ -107,91 +107,6 @@ def check_credentials():
     return True
 
 
-def ask_download_scope():
-    """Ask user what scope of data to download."""
-    console.print("[cyan]Data Download Options:[/cyan]")
-    console.print()
-
-    choice = questionary.select(
-        "What would you like to download?",
-        choices=[
-            questionary.Choice("Quick test (single borough, limited data)", value="test"),
-            questionary.Choice("Medium dataset (5 boroughs, last 5 years)", value="medium"),
-            questionary.Choice("Full dataset (all 33 London boroughs)", value="full"),
-            questionary.Choice("Custom selection", value="custom")
-        ]
-    ).ask()
-
-    if choice == "test":
-        borough = questionary.select(
-            "Select a borough for testing:",
-            choices=["Camden", "Islington", "Hackney", "Westminster", "Southwark"]
-        ).ask()
-        return {
-            'mode': 'single',
-            'boroughs': [borough],
-            'from_year': 2020,
-            'max_per_borough': 1000
-        }
-
-    elif choice == "medium":
-        return {
-            'mode': 'multiple',
-            'boroughs': ["Camden", "Islington", "Hackney", "Westminster", "Tower Hamlets"],
-            'from_year': 2020,
-            'max_per_borough': None
-        }
-
-    elif choice == "full":
-        confirm = questionary.confirm(
-            "Full download will take 2-4 hours. Continue?",
-            default=False
-        ).ask()
-
-        if confirm:
-            return {
-                'mode': 'all',
-                'boroughs': None,
-                'from_year': 2015,
-                'max_per_borough': None
-            }
-        else:
-            return ask_download_scope()  # Ask again
-
-    else:  # custom
-        boroughs = questionary.checkbox(
-            "Select boroughs (space to select, enter to confirm):",
-            choices=[
-                "Camden", "Islington", "Hackney", "Westminster", "Southwark",
-                "Tower Hamlets", "Lambeth", "Wandsworth", "Greenwich", "Lewisham"
-            ]
-        ).ask()
-
-        from_year = questionary.select(
-            "Data from year:",
-            choices=["2023", "2020", "2015", "2010"]
-        ).ask()
-
-        limit = questionary.confirm(
-            "Limit results per borough (faster)?",
-            default=False
-        ).ask()
-
-        max_per_borough = None
-        if limit:
-            max_per_borough = int(questionary.text(
-                "Maximum records per borough:",
-                default="5000"
-            ).ask())
-
-        return {
-            'mode': 'multiple',
-            'boroughs': boroughs,
-            'from_year': int(from_year),
-            'max_per_borough': max_per_borough
-        }
-
-
 def ask_gis_download():
     """Ask if user wants to download London GIS data for spatial analysis."""
     console.print()
@@ -233,7 +148,7 @@ def ask_gis_download():
     return False
 
 
-def download_data(scope, analysis_logger: AnalysisLogger = None):
+def download_data(analysis_logger: AnalysisLogger = None, from_year: int = 2015):
     """Download EPC data via API."""
     console.print()
     console.print(Panel("[bold]Phase 1: Data Download[/bold]", border_style="blue"))
@@ -248,42 +163,13 @@ def download_data(scope, analysis_logger: AnalysisLogger = None):
     try:
         downloader = EPCAPIDownloader()
 
-        if scope['mode'] == 'single':
-            borough = scope['boroughs'][0]
-            console.print(f"[cyan]Downloading {borough} data...[/cyan]")
+        console.print("[cyan]Downloading ALL London boroughs (this will take a while)...[/cyan]")
 
-            df = downloader.download_borough_data(
-                borough_name=borough,
-                property_type='house',
-                from_year=scope['from_year'],
-                max_results=scope.get('max_per_borough')
-            )
-
-        elif scope['mode'] == 'all':
-            console.print(f"[cyan]Downloading ALL London boroughs (this will take a while)...[/cyan]")
-
-            df = downloader.download_all_london_boroughs(
-                property_types=['house'],
-                from_year=scope['from_year'],
-                max_results_per_borough=scope.get('max_per_borough')
-            )
-
-        else:  # multiple
-            console.print(f"[cyan]Downloading {len(scope['boroughs'])} boroughs...[/cyan]")
-
-            all_data = []
-            for borough in scope['boroughs']:
-                df_borough = downloader.download_borough_data(
-                    borough_name=borough,
-                    property_type='house',
-                    from_year=scope['from_year'],
-                    max_results=scope.get('max_per_borough')
-                )
-                if not df_borough.empty:
-                    all_data.append(df_borough)
-
-            import pandas as pd
-            df = pd.concat(all_data, ignore_index=True) if all_data else pd.DataFrame()
+        df = downloader.download_all_london_boroughs(
+            property_types=['house'],
+            from_year=from_year,
+            max_results_per_borough=None
+        )
 
         if df.empty:
             console.print("[red]✗[/red] No data downloaded", style="red")
@@ -295,8 +181,7 @@ def download_data(scope, analysis_logger: AnalysisLogger = None):
 
         if analysis_logger:
             analysis_logger.add_metric("raw_records_downloaded", len(df), "Total records from API")
-            analysis_logger.add_metric("boroughs_requested", len(scope['boroughs']) if scope['boroughs'] else 33)
-            analysis_logger.add_metric("from_year", scope['from_year'])
+            analysis_logger.add_metric("from_year", from_year)
 
         # Apply Edwardian filters
         console.print("[cyan]Applying Edwardian terraced housing filters...[/cyan]")
@@ -1528,16 +1413,14 @@ def main():
 
     # If not using existing data, download new
     if df is None or df.empty:
-        # Ask what to download
-        scope = ask_download_scope()
+        from_year = 2015
 
         # Show summary
         console.print()
         console.print(Panel(
             f"[bold]Analysis Configuration[/bold]\n\n"
-            f"Mode: {scope['mode']}\n"
-            f"From year: {scope['from_year']}\n"
-            f"Boroughs: {len(scope['boroughs']) if scope['boroughs'] else 'All (33)'}",
+            f"Mode: full\n"
+            f"From year: {from_year}",
             border_style="cyan"
         ))
         console.print()
@@ -1555,7 +1438,7 @@ def main():
         start_time = time.time()
 
         # Phase 1: Download
-        df = download_data(scope, analysis_logger)
+        df = download_data(analysis_logger, from_year=from_year)
         if df is None or df.empty:
             console.print("[red]✗ Analysis stopped - no data available[/red]")
             return
