@@ -1745,7 +1745,12 @@ class ScenarioModeler:
             f.write("SCENARIO MODELING RESULTS\n")
             f.write("="*70 + "\n\n")
             f.write("Notes:\n")
-            f.write("  All energy figures are annual delivered (final) energy unless stated otherwise; not primary energy.\n\n")
+            f.write("  All energy figures are annual delivered (final) energy unless stated otherwise; not primary energy.\n")
+            f.write(
+                "  Heat networks: connection cost included (district heating within the 3,000–8,000 £ connection-cost "
+                "band seen in UK schemes); major network backbone capex excluded unless explicitly modeled.\n"
+            )
+            f.write("  Heat pumps: electricity grid upgrade costs not included.\n\n")
 
             for scenario, results in self.results.items():
                 scenario_label = results.get('scenario_label') or self._get_scenario_label(scenario)
