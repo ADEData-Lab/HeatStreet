@@ -172,10 +172,11 @@ class RetrofitReadinessAnalyzer:
         df_readiness['needs_wall_insulation'] = self._needs_wall_insulation(df_readiness)
         df_readiness['wall_insulation_type'] = self._wall_insulation_type(df_readiness)
         df_readiness['needs_glazing_upgrade'] = self._needs_glazing_upgrade(df_readiness)
-        df_readiness['needs_radiator_upsizing'] = self._needs_radiator_upsizing(df_readiness)
-
         # Calculate heat demand after fabric improvements
         df_readiness['heat_demand_after_fabric'] = self._calculate_post_fabric_heat_demand(df_readiness)
+
+        # Assess radiator upsizing against post-fabric demand (when fabric measures are assumed)
+        df_readiness['needs_radiator_upsizing'] = self._needs_radiator_upsizing(df_readiness)
 
         # Classify into readiness tiers
         df_readiness['hp_readiness_tier'] = self._classify_readiness_tier(df_readiness)
@@ -371,7 +372,10 @@ class RetrofitReadinessAnalyzer:
         # Heat pumps run at 45-55°C vs 70-80°C for gas boilers
         # Properties with heat demand >100 kWh/m² likely need larger radiators
 
-        heat_demand = self._calculate_heat_demand(df)
+        if 'heat_demand_after_fabric' in df.columns:
+            heat_demand = df['heat_demand_after_fabric']
+        else:
+            heat_demand = self._calculate_heat_demand(df)
         needs_radiators = heat_demand > 100
 
         return needs_radiators
@@ -680,7 +684,10 @@ class RetrofitReadinessAnalyzer:
             f.write(f"  - Cavity wall: {summary['needs_cavity_wall_insulation']:,}\n")
             f.write(f"Need glazing upgrade: {summary['needs_glazing_upgrade']:,} ({summary['needs_glazing_upgrade']/summary['total_properties']*100:.1f}%)\n")
             f.write(f"Need radiator upsizing: {summary['needs_radiator_upsizing']:,} ({summary['needs_radiator_upsizing']/summary['total_properties']*100:.1f}%)\n\n")
-            f.write("Radiator/emitter upgrades are assessed separately; many fabric-ready homes still require emitter upgrades for low-temperature operation.\n\n")
+            f.write(
+                "Radiator/emitter upgrades are assessed separately using post-fabric heat demand; "
+                "many fabric-ready homes still require emitter upgrades for low-temperature operation.\n\n"
+            )
 
             f.write("COST ANALYSIS:\n")
             f.write("-" * 80 + "\n")
