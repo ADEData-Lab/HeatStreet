@@ -273,6 +273,14 @@ class ExecutiveSummaryGenerator:
 
         lines.append("")
 
+        lines.extend([
+            "The “tipping point” fabric package refers to the cost-optimal option identified in the "
+            "scenario outputs based on marginal savings relative to incremental fabric costs. "
+            "Subsidy scenarios shift modeled uptake by reducing payback periods, which affects "
+            "adoption rates for the tipping-point package and other packages shown in the results.",
+            "",
+        ])
+
         # Add assigned properties info if available
         has_assignments = "hn_assigned_properties" in scenario_results.columns or \
                         "ashp_assigned_properties" in scenario_results.columns
