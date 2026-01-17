@@ -253,10 +253,11 @@ class DashboardDataBuilder:
 
         heating = []
         for name, count in counts.items():
+            name_str = str(name)
             heating.append(
                 {
-                    "name": name,
-                    "value": round(float(pct.get(name, 0)), 2),
+                    "name": name_str,
+                    "value": round(float(pct.get(name_str, 0)), 2),
                     "count": int(count),
                 }
             )
