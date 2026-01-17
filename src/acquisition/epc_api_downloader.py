@@ -129,7 +129,9 @@ class EPCAPIDownloader:
         borough_name: str,
         property_type: str = 'house',
         from_year: int = 2015,
-        max_results: Optional[int] = None
+        max_results: Optional[int] = None,
+        log_borough: bool = True,
+        show_progress: bool = True,
     ) -> pd.DataFrame:
         """
         Download EPC data for a specific London borough.
@@ -149,7 +151,8 @@ class EPCAPIDownloader:
             logger.error(f"Unknown borough: {borough_name}")
             return pd.DataFrame()
 
-        logger.info(f"Downloading EPC data for {borough_name} (LA: {la_code})...")
+        if log_borough:
+            logger.info(f"Downloading EPC data for {borough_name} (LA: {la_code})...")
 
         # Build query parameters
         query_params = {
@@ -165,7 +168,7 @@ class EPCAPIDownloader:
         total_records = 0
 
         # Set up progress bar
-        pbar = tqdm(desc=f"{borough_name}", unit=" records")
+        pbar = tqdm(desc=f"{borough_name}", unit=" records", disable=not show_progress)
 
         try:
             while True:
@@ -203,10 +206,12 @@ class EPCAPIDownloader:
 
         if all_data:
             df = pd.concat(all_data, ignore_index=True)
-            logger.info(f"Downloaded {len(df):,} records for {borough_name} in {page_count} pages")
+            if log_borough:
+                logger.info(f"Downloaded {len(df):,} records for {borough_name} in {page_count} pages")
             return df
         else:
-            logger.warning(f"No data downloaded for {borough_name}")
+            if log_borough:
+                logger.warning(f"No data downloaded for {borough_name}")
             return pd.DataFrame()
 
     def _make_api_request(self, query_params: Dict) -> tuple:
@@ -262,7 +267,8 @@ class EPCAPIDownloader:
         property_types: Optional[List[str]] = None,
         from_year: int = 2015,
         max_results_per_borough: Optional[int] = None,
-        max_workers: int = 4
+        max_workers: int = 4,
+        log_boroughs: bool = True,
     ) -> pd.DataFrame:
         """
         Download EPC data for all London boroughs with parallel processing.
@@ -294,7 +300,9 @@ class EPCAPIDownloader:
                     borough_name=borough_name,
                     property_type=property_type,
                     from_year=from_year,
-                    max_results=max_results_per_borough
+                    max_results=max_results_per_borough,
+                    log_borough=log_boroughs,
+                    show_progress=log_boroughs,
                 )
 
                 if not df.empty:
@@ -330,9 +338,15 @@ class EPCAPIDownloader:
                 borough, prop_type = futures[future]
                 try:
                     records = future.result()
-                    logger.info(f"[{completed}/{total_tasks}] Completed {borough} ({prop_type}): {records:,} records")
+                    if log_boroughs:
+                        logger.info(f"[{completed}/{total_tasks}] Completed {borough} ({prop_type}): {records:,} records")
+                    else:
+                        logger.info(f"[{completed}/{total_tasks}] Completed download task: {records:,} records")
                 except Exception as e:
-                    logger.error(f"[{completed}/{total_tasks}] Failed {borough} ({prop_type}): {e}")
+                    if log_boroughs:
+                        logger.error(f"[{completed}/{total_tasks}] Failed {borough} ({prop_type}): {e}")
+                    else:
+                        logger.error(f"[{completed}/{total_tasks}] Failed download task: {e}")
 
         if all_borough_data:
             combined_df = pd.concat(all_borough_data, ignore_index=True)
