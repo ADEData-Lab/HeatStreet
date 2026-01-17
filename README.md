@@ -390,6 +390,7 @@ scenarios:
 
 ### Analysis Reports
 
+- `data/outputs/one_stop_output.md` - One-stop markdown report (definitive reporting output when `reporting.one_stop_only: true`)
 - `data/outputs/archetype_analysis_results.txt` - Property characteristics summary
 - `data/outputs/scenario_modeling_results.txt` - Scenario cost-benefit analysis
 - `data/outputs/validation_report.txt` - Data quality report
@@ -408,6 +409,11 @@ scenarios:
 - `data/outputs/figures/heat_network_tiers.png` - Tier distribution
 - `data/outputs/figures/hn_vs_hp_comparison.png` - Mean capex/bill/CO₂ savings for HP vs HN pathways
 - `data/outputs/maps/heat_network_tiers.html` - Interactive map
+
+When `reporting.one_stop_only: true` is enabled in `config/config.yaml`, the pipeline suppresses the executive summary,
+dashboard assets, maps, figures, and other reporting artefacts in favor of the single `one_stop_output.md`. Core analysis
+inputs (e.g., scenario summaries, readiness summaries, tier/borough CSVs) are still produced so the one-stop report can be
+compiled from them.
 
 ## Generating HP vs HN comparison and sensitivities
 

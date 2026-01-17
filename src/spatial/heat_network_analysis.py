@@ -1032,7 +1032,8 @@ class HeatNetworkAnalyzer:
     def run_complete_analysis(
         self,
         df: pd.DataFrame,
-        auto_download_gis: bool = True
+        auto_download_gis: bool = True,
+        create_maps: bool = True,
     ) -> Tuple[Optional[gpd.GeoDataFrame], Optional[pd.DataFrame]]:
         """
         Run complete spatial analysis workflow.
@@ -1040,6 +1041,7 @@ class HeatNetworkAnalyzer:
         Args:
             df: Validated EPC DataFrame
             auto_download_gis: Automatically download GIS data if not available
+            create_maps: Whether to generate interactive map outputs
 
         Returns:
             Tuple of (classified properties GeoDataFrame, pathway summary DataFrame)
@@ -1108,21 +1110,22 @@ class HeatNetworkAnalyzer:
             pathway_summary.to_csv(pathway_file, index=False)
             logger.info(f"✓ Saved pathway summary: {pathway_file}")
 
-            # Step 6: Create interactive map
-            logger.info("\nStep 6: Creating interactive heat network tier map...")
-            map_output_path = DATA_OUTPUTS_DIR / "maps" / "heat_network_tiers.html"
-            image_output_path = map_output_path.with_suffix('.png')
-            pdf_output_path = map_output_path.with_suffix('.pdf')
+            if create_maps:
+                # Step 6: Create interactive map
+                logger.info("\nStep 6: Creating interactive heat network tier map...")
+                map_output_path = DATA_OUTPUTS_DIR / "maps" / "heat_network_tiers.html"
+                image_output_path = map_output_path.with_suffix('.png')
+                pdf_output_path = map_output_path.with_suffix('.pdf')
 
-            self.create_heat_network_map(
-                properties_classified,
-                output_path=map_output_path,
-                image_output_path=image_output_path,
-                pdf_output_path=pdf_output_path,
-                heat_networks=heat_networks,
-                heat_zones=heat_zones
-            )
-            logger.info("✓ Interactive map created")
+                self.create_heat_network_map(
+                    properties_classified,
+                    output_path=map_output_path,
+                    image_output_path=image_output_path,
+                    pdf_output_path=pdf_output_path,
+                    heat_networks=heat_networks,
+                    heat_zones=heat_zones
+                )
+                logger.info("✓ Interactive map created")
 
             logger.info("\n" + "=" * 80)
             logger.info("SPATIAL ANALYSIS COMPLETE!")
