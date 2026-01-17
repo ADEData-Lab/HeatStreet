@@ -337,6 +337,10 @@ class ExecutiveSummaryGenerator:
         lines = [
             "## Explanatory Notes",
             "",
+            "### Energy Demand and Units",
+            "",
+            "All energy figures are annual delivered (final) energy unless stated otherwise; not primary energy.",
+            "",
             "### Why Some Pathways Have Counterintuitive Results",
             "",
             "**Lower CAPEX but longer payback:**",

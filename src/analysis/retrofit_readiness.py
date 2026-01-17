@@ -691,6 +691,7 @@ class RetrofitReadinessAnalyzer:
 
             f.write("HEAT DEMAND ANALYSIS:\n")
             f.write("-" * 80 + "\n")
+            f.write("All energy figures are annual delivered (final) energy unless stated otherwise; not primary energy.\n")
             f.write(f"Mean current heat demand: {summary['mean_current_heat_demand']:.0f} kWh/m²/year\n")
             f.write(f"Mean post-fabric heat demand: {summary['mean_post_fabric_heat_demand']:.0f} kWh/m²/year\n")
             f.write(f"Heat demand reduction: {summary['heat_demand_reduction_percent']:.1f}%\n\n")
