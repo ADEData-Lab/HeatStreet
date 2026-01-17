@@ -937,26 +937,33 @@ def generate_one_stop_report(analysis_logger: AnalysisLogger = None):
 
 
 def cleanup_reporting_outputs():
-    """Remove report artifacts that should not persist in one-stop-only mode."""
-    outputs_dir = Path("data/outputs")
-    reports_dir = outputs_dir / "reports"
+    """
+    Remove ALL report artifacts except one_stop_output.md and analysis_log.txt.
 
-    for path in [
-        outputs_dir / "figures",
-        outputs_dir / "maps",
-        outputs_dir / "comparisons",
-    ]:
+    This aggressive cleanup ensures only the consolidated markdown report persists,
+    eliminating scattered CSVs, JSONs, TXTs, PNGs, HTMLs, PDFs, and subdirectories.
+    """
+    outputs_dir = Path("data/outputs")
+
+    # Files to preserve
+    preserved_files = {"one_stop_output.md", "analysis_log.txt"}
+
+    # Remove ALL subdirectories in data/outputs/
+    for subdir in ["figures", "maps", "comparisons", "reports"]:
+        path = outputs_dir / subdir
         if path.exists():
             shutil.rmtree(path, ignore_errors=True)
 
-    if reports_dir.exists():
-        for report_path in reports_dir.glob("*"):
-            if report_path.name == "retrofit_readiness_summary.txt":
-                continue
-            if report_path.name == "one_stop_output.md":
-                continue
-            if report_path.is_file():
-                report_path.unlink()
+    # Remove ALL files in data/outputs/ except preserved ones
+    if outputs_dir.exists():
+        for file_path in outputs_dir.glob("*"):
+            if file_path.is_file():
+                if file_path.name not in preserved_files:
+                    try:
+                        file_path.unlink()
+                    except Exception:
+                        # Ignore errors - file may be locked or already deleted
+                        pass
 
 
 def generate_additional_reports(df_raw, df_validated, validation_report, archetype_results, scenario_results, analysis_logger: AnalysisLogger = None):
