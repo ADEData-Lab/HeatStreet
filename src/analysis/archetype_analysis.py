@@ -654,6 +654,16 @@ class ArchetypeAnalyzer:
             for section, data in self.results.items():
                 f.write(f"\n{section.replace('_', ' ').upper()}\n")
                 f.write("-"*70 + "\n")
+                if section == "heating_systems" and isinstance(data, dict):
+                    types = data.get("types", {}) or {}
+                    percentages = data.get("percentages", {}) or {}
+                    district_label = "District/Communal/Heat Network"
+                    district_count = int(types.get(district_label, 0))
+                    district_pct = float(percentages.get(district_label, 0.0))
+                    f.write(
+                        f"District/communal heating: {district_count:,} properties "
+                        f"({district_pct:.1f}%).\n"
+                    )
                 f.write(str(data) + "\n")
 
         logger.info(f"Results saved to: {output_path}")

@@ -488,6 +488,12 @@ class EPCDataValidator:
             df['heating_system_type'] = 'Other'
 
             # Categorize heating systems
+            # Keywords: district, communal, heat network, community heating, scheme, heat main
+            district_mask = df['MAINHEAT_DESCRIPTION'].str.contains(
+                'district|communal|heat network|community heating|scheme|heat main',
+                case=False,
+                na=False
+            )
             boiler_mask = df['MAINHEAT_DESCRIPTION'].str.contains(
                 'boiler', case=False, na=False
             )
@@ -498,9 +504,10 @@ class EPCDataValidator:
                 'heat pump', case=False, na=False
             )
 
-            df.loc[boiler_mask, 'heating_system_type'] = 'Gas Boiler'
-            df.loc[electric_mask, 'heating_system_type'] = 'Electric'
-            df.loc[heat_pump_mask, 'heating_system_type'] = 'Heat Pump'
+            df.loc[district_mask, 'heating_system_type'] = 'District/Communal/Heat Network'
+            df.loc[boiler_mask & ~district_mask, 'heating_system_type'] = 'Gas Boiler'
+            df.loc[electric_mask & ~district_mask, 'heating_system_type'] = 'Electric'
+            df.loc[heat_pump_mask & ~district_mask, 'heating_system_type'] = 'Heat Pump'
 
             logger.info("Heating systems standardized")
 
