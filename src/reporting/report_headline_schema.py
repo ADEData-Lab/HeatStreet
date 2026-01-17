@@ -34,6 +34,7 @@ REQUIRED_SCENARIO_METRIC_KEYS = {
     "scenario_cost_effective_pct",
     "scenario_cost_effective_count",
     "scenario_carbon_abatement_cost_median",
+    "scenario_cost_per_tco2_20yr_gbp",
 }
 
 REQUIRED_SUBSIDY_METRIC_KEYS = {

@@ -6,6 +6,7 @@ from typing import Dict, Iterable, Optional, Tuple
 
 import pandas as pd
 
+from config.config import get_analysis_horizon_years
 from src.reporting.report_headline_schema import (
     REPORT_HEADLINE_COLUMNS,
     validate_report_headline_dataframe,
@@ -21,6 +22,7 @@ def build_report_headline_dataframe(
 ) -> pd.DataFrame:
     """Construct a dataframe of headline metrics for report exports."""
     rows = []
+    analysis_horizon_years = get_analysis_horizon_years()
 
     def add_row(
         metric_key: str,
@@ -269,6 +271,14 @@ def build_report_headline_dataframe(
             cost_effective_pct = results.get("cost_effective_pct")
         if cost_effective_count is None:
             cost_effective_count = results.get("cost_effective_count")
+        annual_co2_reduction_kg = results.get("annual_co2_reduction_kg")
+        capital_cost_total = results.get("capital_cost_total")
+        cost_per_tco2_20yr_gbp = None
+        # Uses total CO2 abatement over the analysis horizon (annual savings × years).
+        if capital_cost_total is not None and annual_co2_reduction_kg:
+            tco2_over_horizon = (annual_co2_reduction_kg / 1000) * analysis_horizon_years
+            if tco2_over_horizon:
+                cost_per_tco2_20yr_gbp = capital_cost_total / tco2_over_horizon
 
         scenario_metrics = [
             (
@@ -323,6 +333,12 @@ def build_report_headline_dataframe(
                 "scenario_carbon_abatement_cost_median",
                 results.get("carbon_abatement_cost_median"),
                 "Scenario median carbon abatement cost",
+                "gbp_per_tco2",
+            ),
+            (
+                "scenario_cost_per_tco2_20yr_gbp",
+                cost_per_tco2_20yr_gbp,
+                "Scenario cost per tCO2 over analysis horizon",
                 "gbp_per_tco2",
             ),
         ]
