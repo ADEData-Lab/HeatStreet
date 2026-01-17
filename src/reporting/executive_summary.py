@@ -19,7 +19,7 @@ from typing import Any, Dict, Optional
 import pandas as pd
 from loguru import logger
 
-from config.config import DATA_OUTPUTS_DIR
+from config.config import DATA_OUTPUTS_DIR, get_scenario_label_map
 from src.utils.run_metadata import get_total_properties_from_metadata, RunMetadataManager
 
 
@@ -90,8 +90,13 @@ class ExecutiveSummaryGenerator:
             with open(json_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 if isinstance(data, dict):
+                    scenario_labels = get_scenario_label_map()
                     return pd.DataFrame([
-                        {"scenario": k, **v}
+                        {
+                            "scenario_id": k,
+                            "scenario": scenario_labels.get(k, k),
+                            **v,
+                        }
                         for k, v in data.items()
                         if isinstance(v, dict)
                     ])

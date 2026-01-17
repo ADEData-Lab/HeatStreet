@@ -196,7 +196,7 @@ def generate_sample_dashboard_data() -> Dict:
             {"scenario": "Fabric Only", "capitalCost": 20012, "costPerProperty": 28407, "co2Reduction": 1762631, "billSavings": 853, "paybackYears": 35.0},
             {"scenario": "Heat Pump", "capitalCost": 29924, "costPerProperty": 42477, "co2Reduction": 3471850, "billSavings": 1681, "paybackYears": 28.1},
             {"scenario": "Heat Network", "capitalCost": 23534, "costPerProperty": 33407, "co2Reduction": 1762631, "billSavings": 853, "paybackYears": 41.5},
-            {"scenario": "Hybrid", "capitalCost": 20012, "costPerProperty": 28407, "co2Reduction": 1281914, "billSavings": 621, "paybackYears": 47.2},
+            {"scenario": "Hybrid (spatial mix: Heat Pumps + Heat Networks)", "capitalCost": 20012, "costPerProperty": 28407, "co2Reduction": 1281914, "billSavings": 621, "paybackYears": 47.2},
         ],
         # Section 6 & 10: Heat Network Tiers
         "tierData": [
