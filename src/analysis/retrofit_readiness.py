@@ -678,12 +678,80 @@ class RetrofitReadinessAnalyzer:
 
             f.write("INTERVENTION REQUIREMENTS:\n")
             f.write("-" * 80 + "\n")
-            f.write(f"Need loft insulation: {summary['needs_loft_insulation']:,} ({summary['needs_loft_insulation']/summary['total_properties']*100:.1f}%)\n")
-            f.write(f"Need wall insulation: {summary['needs_wall_insulation']:,} ({summary['needs_wall_insulation']/summary['total_properties']*100:.1f}%)\n")
+            tier1_count = summary['tier_distribution'].get(1, 0)
+            non_ready_count = summary['total_properties'] - tier1_count
+            loft_pct_all = summary['needs_loft_insulation'] / summary['total_properties'] * 100
+            wall_pct_all = summary['needs_wall_insulation'] / summary['total_properties'] * 100
+            glazing_pct_all = summary['needs_glazing_upgrade'] / summary['total_properties'] * 100
+            radiator_pct_all = summary['needs_radiator_upsizing'] / summary['total_properties'] * 100
+
+            loft_non_ready_pct = (
+                summary['needs_loft_insulation'] / non_ready_count * 100
+                if non_ready_count > 0
+                else 0.0
+            )
+            wall_non_ready_pct = (
+                summary['needs_wall_insulation'] / non_ready_count * 100
+                if non_ready_count > 0
+                else 0.0
+            )
+            glazing_non_ready_pct = (
+                summary['needs_glazing_upgrade'] / non_ready_count * 100
+                if non_ready_count > 0
+                else 0.0
+            )
+            radiator_non_ready_pct = (
+                summary['needs_radiator_upsizing'] / non_ready_count * 100
+                if non_ready_count > 0
+                else 0.0
+            )
+
+            f.write(
+                "Need loft insulation: {:,} ({:.1f}% of all properties)".format(
+                    summary['needs_loft_insulation'], loft_pct_all
+                )
+                + (
+                    " ({:.1f}% of non-ready properties)".format(loft_non_ready_pct)
+                    if non_ready_count > 0
+                    else ""
+                )
+                + "\n"
+            )
+            f.write(
+                "Need wall insulation: {:,} ({:.1f}% of all properties)".format(
+                    summary['needs_wall_insulation'], wall_pct_all
+                )
+                + (
+                    " ({:.1f}% of non-ready properties)".format(wall_non_ready_pct)
+                    if non_ready_count > 0
+                    else ""
+                )
+                + "\n"
+            )
             f.write(f"  - Solid wall: {summary['needs_solid_wall_insulation']:,}\n")
             f.write(f"  - Cavity wall: {summary['needs_cavity_wall_insulation']:,}\n")
-            f.write(f"Need glazing upgrade: {summary['needs_glazing_upgrade']:,} ({summary['needs_glazing_upgrade']/summary['total_properties']*100:.1f}%)\n")
-            f.write(f"Need radiator upsizing: {summary['needs_radiator_upsizing']:,} ({summary['needs_radiator_upsizing']/summary['total_properties']*100:.1f}%)\n\n")
+            f.write(
+                "Need glazing upgrade: {:,} ({:.1f}% of all properties)".format(
+                    summary['needs_glazing_upgrade'], glazing_pct_all
+                )
+                + (
+                    " ({:.1f}% of non-ready properties)".format(glazing_non_ready_pct)
+                    if non_ready_count > 0
+                    else ""
+                )
+                + "\n"
+            )
+            f.write(
+                "Need radiator upsizing: {:,} ({:.1f}% of all properties)".format(
+                    summary['needs_radiator_upsizing'], radiator_pct_all
+                )
+                + (
+                    " ({:.1f}% of non-ready properties)".format(radiator_non_ready_pct)
+                    if non_ready_count > 0
+                    else ""
+                )
+                + "\n\n"
+            )
             f.write(
                 "Radiator/emitter upgrades are assessed separately using post-fabric heat demand; "
                 "many fabric-ready homes still require emitter upgrades for low-temperature operation.\n\n"
