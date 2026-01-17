@@ -154,6 +154,31 @@ def download_data(analysis_logger: AnalysisLogger = None, from_year: int = 2015)
     console.print(Panel("[bold]Phase 1: Data Download[/bold]", border_style="blue"))
     console.print()
 
+    downloader = EPCAPIDownloader()
+
+    download_scope = questionary.select(
+        "Select download scope:",
+        choices=[
+            "All London boroughs (full dataset)",
+            "Single borough (testing)",
+        ],
+    ).ask()
+
+    if not download_scope:
+        console.print("[yellow]⚠[/yellow] Download cancelled by user", style="yellow")
+        return None
+
+    selected_borough = None
+    if download_scope == "Single borough (testing)":
+        selected_borough = questionary.autocomplete(
+            "Select borough:",
+            choices=list(downloader.LONDON_LA_CODES.keys()),
+        ).ask()
+
+        if not selected_borough:
+            console.print("[yellow]⚠[/yellow] Download cancelled by user", style="yellow")
+            return None
+
     if analysis_logger:
         analysis_logger.start_phase(
             "Data Download",
@@ -161,16 +186,24 @@ def download_data(analysis_logger: AnalysisLogger = None, from_year: int = 2015)
         )
 
     try:
-        downloader = EPCAPIDownloader()
-
-        console.print("[cyan]Downloading ALL London boroughs (this will take a while)...[/cyan]")
-
-        df = downloader.download_all_london_boroughs(
-            property_types=['house'],
-            from_year=from_year,
-            max_results_per_borough=None,
-            log_boroughs=False,
-        )
+        if selected_borough:
+            console.print(f"[cyan]Downloading {selected_borough} only...[/cyan]")
+            df = downloader.download_borough_data(
+                selected_borough,
+                property_type='house',
+                from_year=from_year,
+                max_results=None,
+                log_borough=True,
+                show_progress=True,
+            )
+        else:
+            console.print("[cyan]Downloading ALL London boroughs (this will take a while)...[/cyan]")
+            df = downloader.download_all_london_boroughs(
+                property_types=['house'],
+                from_year=from_year,
+                max_results_per_borough=None,
+                log_boroughs=False,
+            )
 
         if df.empty:
             console.print("[red]✗[/red] No data downloaded", style="red")
