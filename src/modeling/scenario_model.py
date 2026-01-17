@@ -607,6 +607,14 @@ class ScenarioModeler:
         self.scenarios = self._validate_scenario_definitions(
             self._inject_fabric_bundles(self.scenarios)
         )
+        self.scenario_labels = {
+            scenario_id: (
+                scenario_cfg.get('name', scenario_id)
+                if isinstance(scenario_cfg, dict)
+                else scenario_id
+            )
+            for scenario_id, scenario_cfg in self.scenarios.items()
+        }
 
         self.results = {}
         self.property_results: Dict[str, pd.DataFrame] = {}
@@ -616,6 +624,10 @@ class ScenarioModeler:
         logger.info("Initialized Scenario Modeler")
         logger.info(self.cost_calculator.summary_notes() or "Costing rules configured.")
         logger.info(f"Loaded {len(self.scenarios)} scenarios")
+
+    def _get_scenario_label(self, scenario_id: str) -> str:
+        """Return the configured label for a scenario ID."""
+        return self.scenario_labels.get(scenario_id, scenario_id)
 
     def _ensure_adjusted_baseline(self, df: pd.DataFrame) -> pd.DataFrame:
         """Guarantee prebound-adjusted baseline columns before modeling."""
@@ -745,6 +757,7 @@ class ScenarioModeler:
         # Aggregate results
         results = self._aggregate_scenario_results(property_df, df_with_flags)
         results['scenario_name'] = scenario_name
+        results['scenario_label'] = self._get_scenario_label(scenario_name)
         results['measures'] = measures
 
         return results
@@ -1652,9 +1665,11 @@ class ScenarioModeler:
             # Extract cost-effectiveness summary values
             ce_summary = results.get('cost_effectiveness_summary', {})
             band_summary = results.get('epc_band_shift_summary', {})
+            scenario_label = results.get('scenario_label') or self._get_scenario_label(scenario)
 
             rows.append({
-                'scenario': scenario,
+                'scenario_id': scenario,
+                'scenario': scenario_label,
                 'total_properties': results.get('total_properties'),
                 'capital_cost_total': results.get('capital_cost_total'),
                 'capital_cost_per_property': results.get('capital_cost_per_property'),
@@ -1722,7 +1737,8 @@ class ScenarioModeler:
             f.write("  All energy figures are annual delivered (final) energy unless stated otherwise; not primary energy.\n\n")
 
             for scenario, results in self.results.items():
-                f.write(f"\nSCENARIO: {scenario.upper()}\n")
+                scenario_label = results.get('scenario_label') or self._get_scenario_label(scenario)
+                f.write(f"\nSCENARIO: {scenario_label}\n")
                 f.write("-"*70 + "\n")
 
                 # Write basic metrics
@@ -1821,6 +1837,7 @@ class ScenarioModeler:
 
         rows = []
         for scenario, results in self.results.items():
+            scenario_label = results.get('scenario_label') or self._get_scenario_label(scenario)
             epc_shifts = results.get('epc_band_shifts', {})
             band_summary = results.get('epc_band_shift_summary', {})
 
@@ -1829,7 +1846,8 @@ class ScenarioModeler:
 
             for band in BAND_ORDER:
                 rows.append({
-                    'scenario': scenario,
+                    'scenario_id': scenario,
+                    'scenario': scenario_label,
                     'band': band,
                     'count_before': before_bands.get(band, 0),
                     'count_after': after_bands.get(band, 0),
@@ -1838,7 +1856,8 @@ class ScenarioModeler:
 
             # Add summary row for Band C or better
             rows.append({
-                'scenario': scenario,
+                'scenario_id': scenario,
+                'scenario': scenario_label,
                 'band': 'C_or_better',
                 'count_before': band_summary.get('band_c_or_better_before', 0),
                 'count_after': band_summary.get('band_c_or_better_after', 0),

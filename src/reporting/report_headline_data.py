@@ -364,4 +364,8 @@ def _iter_scenario_items(
                 scenario_name = row.get("scenario") or "scenario"
                 yield scenario_name, row.to_dict()
         return []
-    return scenario_results.items()
+    for scenario_name, results in scenario_results.items():
+        scenario_label = None
+        if isinstance(results, dict):
+            scenario_label = results.get("scenario_label")
+        yield scenario_label or scenario_name, results

@@ -16,7 +16,7 @@ from loguru import logger
 
 import sys
 sys.path.append(str(Path(__file__).parent.parent.parent))
-from config.config import load_config, DATA_OUTPUTS_DIR
+from config.config import load_config, DATA_OUTPUTS_DIR, get_scenario_label_map
 from src.reporting.report_headline_data import build_report_headline_dataframe
 
 
@@ -28,6 +28,7 @@ class ReportGenerator:
     def __init__(self):
         """Initialize the report generator."""
         self.config = load_config()
+        self.scenario_labels = get_scenario_label_map()
         self.output_dir = DATA_OUTPUTS_DIR / "figures"
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -38,6 +39,14 @@ class ReportGenerator:
         plt.rcParams['font.size'] = 11
 
         logger.info("Initialized Report Generator")
+
+    def _scenario_label(self, scenario_id: str, results: Optional[Dict] = None) -> str:
+        """Return the configured label for a scenario, if available."""
+        if isinstance(results, dict):
+            scenario_label = results.get("scenario_label")
+            if scenario_label:
+                return scenario_label
+        return self.scenario_labels.get(scenario_id, scenario_id)
 
     def plot_epc_band_distribution(
         self,
@@ -164,6 +173,7 @@ class ReportGenerator:
             save_path = self.output_dir / "scenario_comparison.png"
 
         scenarios = list(scenario_results.keys())
+        scenario_labels = [self._scenario_label(s, scenario_results[s]) for s in scenarios]
         metrics = {
             'Capital Cost (£M)': [scenario_results[s]['capital_cost_total']/1_000_000 for s in scenarios],
             'Annual CO2 Savings (tonnes)': [scenario_results[s]['annual_co2_reduction_kg']/1000 for s in scenarios],
@@ -174,7 +184,7 @@ class ReportGenerator:
 
         for idx, (metric, values) in enumerate(metrics.items()):
             ax = axes[idx]
-            bars = ax.bar(scenarios, values, color='steelblue', edgecolor='black', linewidth=1.2)
+            bars = ax.bar(scenario_labels, values, color='steelblue', edgecolor='black', linewidth=1.2)
 
             # Add value labels
             for bar in bars:
@@ -519,34 +529,35 @@ class ReportGenerator:
                 f.write(f"\nWall Insulation:\n")
                 f.write(f"  Insulation rate: {archetype_results['wall_construction']['insulation_rate']:.1f}%\n")
 
-            # Scenario Results
-            f.write("\n\n2. DECARBONIZATION SCENARIO ANALYSIS\n")
-            f.write("-"*80 + "\n")
-            for scenario, results in scenario_results.items():
-                f.write(f"\n{scenario.upper()}:\n")
-                f.write(f"  Total capital cost: £{results['capital_cost_total']:,.0f}\n")
-                f.write(f"  Cost per property: £{results['capital_cost_per_property']:,.0f}\n")
-                f.write(f"  Annual CO2 reduction: {results['annual_co2_reduction_kg']/1000:,.0f} tonnes\n")
-                f.write(f"  Annual bill savings: £{results['annual_bill_savings']:,.0f}\n")
-                if 'average_payback_years' in results:
-                    f.write(f"  Average payback: {results['average_payback_years']:.1f} years\n")
+        # Scenario Results
+        f.write("\n\n2. DECARBONIZATION SCENARIO ANALYSIS\n")
+        f.write("-"*80 + "\n")
+        for scenario, results in scenario_results.items():
+            scenario_label = self._scenario_label(scenario, results)
+            f.write(f"\n{scenario_label}:\n")
+            f.write(f"  Total capital cost: £{results['capital_cost_total']:,.0f}\n")
+            f.write(f"  Cost per property: £{results['capital_cost_per_property']:,.0f}\n")
+            f.write(f"  Annual CO2 reduction: {results['annual_co2_reduction_kg']/1000:,.0f} tonnes\n")
+            f.write(f"  Annual bill savings: £{results['annual_bill_savings']:,.0f}\n")
+            if 'average_payback_years' in results:
+                f.write(f"  Average payback: {results['average_payback_years']:.1f} years\n")
 
-                # EPC band shift summary
-                band_summary = results.get('epc_band_shift_summary', {})
-                if band_summary:
-                    before_pct = band_summary.get('band_c_or_better_before_pct', 0)
-                    after_pct = band_summary.get('band_c_or_better_after_pct', 0)
-                    f.write(f"  EPC Band C or better: {before_pct:.1f}% -> {after_pct:.1f}% (+{after_pct - before_pct:.1f}pp)\n")
+            # EPC band shift summary
+            band_summary = results.get('epc_band_shift_summary', {})
+            if band_summary:
+                before_pct = band_summary.get('band_c_or_better_before_pct', 0)
+                after_pct = band_summary.get('band_c_or_better_after_pct', 0)
+                f.write(f"  EPC Band C or better: {before_pct:.1f}% -> {after_pct:.1f}% (+{after_pct - before_pct:.1f}pp)\n")
 
-                # Cost-effectiveness summary
-                ce_summary = results.get('cost_effectiveness_summary', {})
-                if ce_summary:
-                    ce_pct = ce_summary.get('cost_effective_pct', 0)
-                    f.write(f"  Cost-effective upgrades: {ce_pct:.1f}%\n")
+            # Cost-effectiveness summary
+            ce_summary = results.get('cost_effectiveness_summary', {})
+            if ce_summary:
+                ce_pct = ce_summary.get('cost_effective_pct', 0)
+                f.write(f"  Cost-effective upgrades: {ce_pct:.1f}%\n")
 
-                # Carbon abatement cost
-                if 'carbon_abatement_cost_median' in results:
-                    f.write(f"  Carbon abatement cost (median): £{results['carbon_abatement_cost_median']:.0f}/tCO2\n")
+            # Carbon abatement cost
+            if 'carbon_abatement_cost_median' in results:
+                f.write(f"  Carbon abatement cost (median): £{results['carbon_abatement_cost_median']:.0f}/tCO2\n")
 
             # Heat Network Tiers
             f.write("\n\n3. HEAT NETWORK ZONE CLASSIFICATION\n")
@@ -636,7 +647,8 @@ class ReportGenerator:
         # Scenario Results
         lines.append("## 2. Decarbonization Scenario Analysis")
         for scenario, results in scenario_results.items():
-            lines.append(f"### {scenario.upper()}")
+            scenario_label = self._scenario_label(scenario, results)
+            lines.append(f"### {scenario_label}")
             lines.append(f"- **Total capital cost:** £{results['capital_cost_total']:,.0f}")
             lines.append(f"- **Cost per property:** £{results['capital_cost_per_property']:,.0f}")
             lines.append(
@@ -735,8 +747,10 @@ class ReportGenerator:
             cost_effectiveness_rows = []
             carbon_abatement_rows = []
             for scenario, results in scenario_results.items():
+                scenario_label = self._scenario_label(scenario, results)
                 scenario_rows.append({
-                    "scenario": scenario,
+                    "scenario_id": scenario,
+                    "scenario": scenario_label,
                     "capital_cost_total": results.get("capital_cost_total"),
                     "capital_cost_per_property": results.get("capital_cost_per_property"),
                     "annual_co2_reduction_tonnes": results.get("annual_co2_reduction_kg", 0) / 1000,
@@ -749,7 +763,8 @@ class ReportGenerator:
                     before_pct = band_summary.get("band_c_or_better_before_pct", 0)
                     after_pct = band_summary.get("band_c_or_better_after_pct", 0)
                     band_shift_rows.append({
-                        "scenario": scenario,
+                        "scenario_id": scenario,
+                        "scenario": scenario_label,
                         "band_c_or_better_before_pct": before_pct,
                         "band_c_or_better_after_pct": after_pct,
                         "band_c_or_better_change_pp": after_pct - before_pct,
@@ -758,13 +773,15 @@ class ReportGenerator:
                 ce_summary = results.get("cost_effectiveness_summary", {})
                 if ce_summary:
                     cost_effectiveness_rows.append({
-                        "scenario": scenario,
+                        "scenario_id": scenario,
+                        "scenario": scenario_label,
                         "cost_effective_pct": ce_summary.get("cost_effective_pct"),
                     })
 
                 if "carbon_abatement_cost_median" in results:
                     carbon_abatement_rows.append({
-                        "scenario": scenario,
+                        "scenario_id": scenario,
+                        "scenario": scenario_label,
                         "carbon_abatement_cost_median": results.get("carbon_abatement_cost_median"),
                     })
 
@@ -921,7 +938,8 @@ class ReportGenerator:
 
         # Scenarios
         for scenario, results in scenario_results.items():
-            summary_data.append([f'{scenario.upper()}'])
+            scenario_label = self._scenario_label(scenario, results)
+            summary_data.append([scenario_label])
             summary_data.append(['Capital Cost (total)', f"£{results['capital_cost_total']:,.0f}"])
             summary_data.append(['Cost per Property', f"£{results['capital_cost_per_property']:,.0f}"])
             summary_data.append(['Annual CO2 Reduction (kg)', f"{results['annual_co2_reduction_kg']:,.0f}"])
@@ -955,9 +973,10 @@ class ReportGenerator:
             # Extract nested summaries
             ce_summary = results.get('cost_effectiveness_summary', {})
             band_summary = results.get('epc_band_shift_summary', {})
+            scenario_label = self._scenario_label(scenario_name, results)
 
             scenarios.append({
-                'Scenario': scenario_name,
+                'Scenario': scenario_label,
                 'Capital Cost (Total)': results['capital_cost_total'],
                 'Cost per Property': results['capital_cost_per_property'],
                 'Annual Energy Reduction (kWh)': results['annual_energy_reduction_kwh'],
@@ -1027,8 +1046,9 @@ class ReportGenerator:
         if scenario_results:
             scenarios = []
             for name, results in scenario_results.items():
+                scenario_label = self._scenario_label(name, results)
                 scenarios.append({
-                    'Scenario': name,
+                    'Scenario': scenario_label,
                     'Cost': results['capital_cost_per_property'],
                     'CO2 Reduction': results['annual_co2_reduction_kg']
                 })

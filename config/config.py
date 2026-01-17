@@ -64,6 +64,24 @@ def get_scenario_definitions() -> Dict[str, Any]:
     return config['scenarios']
 
 
+def get_scenario_label_map() -> Dict[str, str]:
+    """Return a mapping of scenario IDs to human-readable labels."""
+    scenarios = load_config().get('scenarios', {})
+    return {
+        scenario_id: (
+            scenario_def.get('name', scenario_id)
+            if isinstance(scenario_def, dict)
+            else scenario_id
+        )
+        for scenario_id, scenario_def in scenarios.items()
+    }
+
+
+def get_scenario_label(scenario_id: str) -> str:
+    """Return the scenario label for a given scenario ID."""
+    return get_scenario_label_map().get(scenario_id, scenario_id)
+
+
 def get_cost_assumptions() -> Dict[str, float]:
     """Get cost assumptions from config."""
     config = load_config()

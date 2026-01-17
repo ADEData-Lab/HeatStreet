@@ -60,7 +60,7 @@ BOROUGH_NAME_BY_CODE = {
 import numpy as np
 from loguru import logger
 
-from config.config import DATA_OUTPUTS_DIR
+from config.config import DATA_OUTPUTS_DIR, get_scenario_label_map
 from src.utils.analysis_logger import convert_to_json_serializable
 from src.utils.run_metadata import get_total_properties_from_metadata
 
@@ -88,6 +88,14 @@ class DashboardDataBuilder:
     def __init__(self, output_dir: Path = DATA_OUTPUTS_DIR):
         self.output_dir = Path(output_dir) / "dashboard"
         self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.scenario_labels = get_scenario_label_map()
+
+    def _scenario_label(self, scenario_id: str, results: Optional[Dict] = None) -> str:
+        if isinstance(results, dict):
+            scenario_label = results.get("scenario_label")
+            if scenario_label:
+                return scenario_label
+        return self.scenario_labels.get(scenario_id, scenario_id)
 
     def build_dataset(
         self,
@@ -316,9 +324,10 @@ class DashboardDataBuilder:
 
         scenarios = []
         for scenario, results in scenario_results.items():
+            scenario_label = self._scenario_label(scenario, results)
             scenarios.append(
                 {
-                    "scenario": scenario.replace("_", " ").title(),
+                    "scenario": scenario_label,
                     "capitalCost": float(results.get("capital_cost_total", 0)),
                     "costPerProperty": float(results.get("capital_cost_per_property", 0)),
                     "co2Reduction": float(results.get("annual_co2_reduction_kg", 0)),
@@ -649,7 +658,7 @@ class DashboardDataBuilder:
         if load_profile_summary is not None and len(load_profile_summary) > 0:
             for _, row in load_profile_summary.iterrows():
                 pathway_id = row.get("pathway_id", "Unknown")
-                scenario_name = pathway_id.replace("_", " ").title()
+                scenario_name = self._scenario_label(pathway_id)
                 grid_data.append({
                     "scenario": scenario_name,
                     "peak": round(float(row.get("peak_kw_per_home", 0)), 1),
@@ -662,6 +671,7 @@ class DashboardDataBuilder:
             # Estimate based on typical load profiles
             # Peak is typically ~1.9x average for heating
             for scenario_name, results in scenario_results.items():
+                scenario_label = self._scenario_label(scenario_name, results)
                 avg_demand = results.get("average_heat_demand_kwh", 15000)
                 # Convert annual kWh to peak day kW (peak day = ~1.5% annual)
                 peak_day_kwh = avg_demand * 0.015
@@ -670,7 +680,7 @@ class DashboardDataBuilder:
                 peak_kw = avg_kw * 1.9
 
                 grid_data.append({
-                    "scenario": scenario_name.replace("_", " ").title(),
+                    "scenario": scenario_label,
                     "peak": round(peak_kw, 1),
                     "average": round(avg_kw, 1),
                 })
