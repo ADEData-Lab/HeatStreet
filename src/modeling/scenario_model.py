@@ -1718,6 +1718,8 @@ class ScenarioModeler:
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write("SCENARIO MODELING RESULTS\n")
             f.write("="*70 + "\n\n")
+            f.write("Notes:\n")
+            f.write("  All energy figures are annual delivered (final) energy unless stated otherwise; not primary energy.\n\n")
 
             for scenario, results in self.results.items():
                 f.write(f"\nSCENARIO: {scenario.upper()}\n")
