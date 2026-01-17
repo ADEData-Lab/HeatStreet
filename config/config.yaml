@@ -20,6 +20,13 @@ project:
   version: "1.0.0"
   author: "Heat Street Project Team"
 
+# Reporting Settings
+reporting:
+  one_stop_only: true
+  one_stop_header_text: |-
+    # Heat Street — One-Stop Report
+    ## Low-Carbon Heating potential for London’s Edwardian Terraced Housing
+
 # Geographic Scope
 geography:
   region: "London"

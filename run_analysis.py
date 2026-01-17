@@ -36,6 +36,12 @@ from src.utils.analysis_logger import AnalysisLogger
 console = Console()
 
 
+def is_one_stop_only(config=None) -> bool:
+    """Return True when reporting is restricted to the one-stop markdown output."""
+    config = config or load_config()
+    return bool(config.get("reporting", {}).get("one_stop_only", False))
+
+
 def print_header():
     """Print welcome header."""
     console.clear()
@@ -515,6 +521,8 @@ def model_scenarios(df, analysis_logger: AnalysisLogger = None):
     console.print(Panel("[bold]Phase 4: Scenario Modeling[/bold]", border_style="blue"))
     console.print()
 
+    one_stop_only = is_one_stop_only()
+
     if analysis_logger:
         analysis_logger.start_phase(
             "Scenario Modeling",
@@ -556,42 +564,43 @@ def model_scenarios(df, analysis_logger: AnalysisLogger = None):
 
     # Generate pathway-level outputs and HP vs HN comparisons (aligns with main pipeline)
     console.print()
-    console.print("[cyan]Building pathway modeling outputs and HP vs HN comparisons...[/cyan]")
-    try:
-        import pandas as pd
+    if not one_stop_only:
+        console.print("[cyan]Building pathway modeling outputs and HP vs HN comparisons...[/cyan]")
+        try:
+            import pandas as pd
 
-        pathway_modeler = PathwayModeler()
-        property_results_path = pathway_modeler.output_dir / "pathway_results_by_property.parquet"
-        summary_path = pathway_modeler.output_dir / "pathway_results_summary.csv"
+            pathway_modeler = PathwayModeler()
+            property_results_path = pathway_modeler.output_dir / "pathway_results_by_property.parquet"
+            summary_path = pathway_modeler.output_dir / "pathway_results_summary.csv"
 
-        if property_results_path.exists() and summary_path.exists():
-            console.print("[cyan]Loading existing pathway modeling results...[/cyan]")
-            pathway_results = pd.read_parquet(property_results_path)
-            pathway_summary = pd.read_csv(summary_path)
-        else:
-            console.print("[cyan]Running pathway modeling to generate comparison inputs...[/cyan]")
-            pathway_results = pathway_modeler.model_all_pathways(df)
-            pathway_summary = pathway_modeler.generate_pathway_summary(pathway_results)
-            property_results_path, summary_path = pathway_modeler.export_results(pathway_results, pathway_summary)
+            if property_results_path.exists() and summary_path.exists():
+                console.print("[cyan]Loading existing pathway modeling results...[/cyan]")
+                pathway_results = pd.read_parquet(property_results_path)
+                pathway_summary = pd.read_csv(summary_path)
+            else:
+                console.print("[cyan]Running pathway modeling to generate comparison inputs...[/cyan]")
+                pathway_results = pathway_modeler.model_all_pathways(df)
+                pathway_summary = pathway_modeler.generate_pathway_summary(pathway_results)
+                property_results_path, summary_path = pathway_modeler.export_results(pathway_results, pathway_summary)
 
-        comparison_reporter = ComparisonReporter()
-        comparison_reporter.generate_comparisons(results_path=property_results_path)
+            comparison_reporter = ComparisonReporter()
+            comparison_reporter.generate_comparisons(results_path=property_results_path)
 
-        comparisons_dir = comparison_reporter.comparisons_dir
-        console.print(f"[green]✓[/green] HP vs HN comparison artefacts saved to: {comparisons_dir}")
-        console.print(f"    • Property results: {property_results_path}")
-        console.print(f"    • Pathway summary: {summary_path}")
-        console.print(f"    • Comparison CSV: {comparisons_dir / 'hn_vs_hp_comparison.csv'}")
-        console.print(f"    • Comparison snippet: {comparisons_dir / 'hn_vs_hp_report_snippet.md'}")
+            comparisons_dir = comparison_reporter.comparisons_dir
+            console.print(f"[green]✓[/green] HP vs HN comparison artefacts saved to: {comparisons_dir}")
+            console.print(f"    • Property results: {property_results_path}")
+            console.print(f"    • Pathway summary: {summary_path}")
+            console.print(f"    • Comparison CSV: {comparisons_dir / 'hn_vs_hp_comparison.csv'}")
+            console.print(f"    • Comparison snippet: {comparisons_dir / 'hn_vs_hp_report_snippet.md'}")
 
-        if analysis_logger:
-            analysis_logger.add_output(str(property_results_path), "parquet", "Pathway results by property")
-            analysis_logger.add_output(str(summary_path), "csv", "Pathway results summary")
-            analysis_logger.add_output(str(comparisons_dir / 'hn_vs_hp_comparison.csv'), "csv", "HP vs HN comparison table")
-            analysis_logger.add_output(str(comparisons_dir / 'hn_vs_hp_report_snippet.md'), "md", "HP vs HN markdown snippet")
-    except Exception as e:
-        console.print(f"[yellow]⚠ Could not generate pathway comparisons: {e}[/yellow]")
-        logger.exception("Pathway comparison generation failed")
+            if analysis_logger:
+                analysis_logger.add_output(str(property_results_path), "parquet", "Pathway results by property")
+                analysis_logger.add_output(str(summary_path), "csv", "Pathway results summary")
+                analysis_logger.add_output(str(comparisons_dir / 'hn_vs_hp_comparison.csv'), "csv", "HP vs HN comparison table")
+                analysis_logger.add_output(str(comparisons_dir / 'hn_vs_hp_report_snippet.md'), "md", "HP vs HN markdown snippet")
+        except Exception as e:
+            console.print(f"[yellow]⚠ Could not generate pathway comparisons: {e}[/yellow]")
+            logger.exception("Pathway comparison generation failed")
 
     if analysis_logger:
         analysis_logger.add_metric("scenarios_modeled", len(scenario_results), "Decarbonization scenarios analyzed")
@@ -605,7 +614,7 @@ def model_scenarios(df, analysis_logger: AnalysisLogger = None):
     return scenario_results, subsidy_results
 
 
-def analyze_retrofit_readiness(df, analysis_logger: AnalysisLogger = None):
+def analyze_retrofit_readiness(df, analysis_logger: AnalysisLogger = None, one_stop_only: bool = False):
     """Analyze heat pump retrofit readiness."""
     console.print()
     console.print(Panel("[bold]Phase 4.3: Retrofit Readiness Analysis[/bold]", border_style="blue"))
@@ -661,22 +670,24 @@ def analyze_retrofit_readiness(df, analysis_logger: AnalysisLogger = None):
             analysis_logger.add_metric("mean_fabric_cost", summary['mean_fabric_cost'], "Average fabric improvement cost per property")
             analysis_logger.add_metric("total_retrofit_cost", summary['total_retrofit_cost'], "Total retrofit investment needed")
 
-        # Generate visualizations
-        console.print("[cyan]Creating retrofit readiness visualizations...[/cyan]")
+        if not one_stop_only:
+            # Generate visualizations
+            console.print("[cyan]Creating retrofit readiness visualizations...[/cyan]")
 
-        from src.reporting.visualizations import ReportGenerator
-        viz = ReportGenerator()
+            from src.reporting.visualizations import ReportGenerator
+            viz = ReportGenerator()
 
-        viz.plot_retrofit_readiness_dashboard(df_readiness, summary)
-        viz.plot_fabric_cost_distribution(df_readiness)
-        viz.plot_heat_demand_scatter(df_readiness)
+            viz.plot_retrofit_readiness_dashboard(df_readiness, summary)
+            viz.plot_fabric_cost_distribution(df_readiness)
+            viz.plot_heat_demand_scatter(df_readiness)
 
-        console.print(f"[green]✓[/green] Visualizations saved to data/outputs/figures/")
+            console.print(f"[green]✓[/green] Visualizations saved to data/outputs/figures/")
 
         if analysis_logger:
             analysis_logger.add_output("data/outputs/retrofit_readiness_analysis.csv", "csv", "Property-level retrofit readiness")
             analysis_logger.add_output("data/outputs/reports/retrofit_readiness_summary.txt", "report", "Retrofit readiness summary")
-            analysis_logger.add_output("data/outputs/figures/retrofit_readiness_dashboard.png", "png", "Retrofit readiness visualization")
+            if not one_stop_only:
+                analysis_logger.add_output("data/outputs/figures/retrofit_readiness_dashboard.png", "png", "Retrofit readiness visualization")
             analysis_logger.complete_phase(success=True, message="Retrofit readiness assessment complete")
 
         return df_readiness, summary
@@ -689,7 +700,7 @@ def analyze_retrofit_readiness(df, analysis_logger: AnalysisLogger = None):
         return None, None
 
 
-def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None):
+def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None, one_stop_only: bool = False):
     """Run spatial heat network tier analysis (optional - requires GDAL)."""
     console.print()
     console.print(Panel("[bold]Phase 4.5: Spatial Analysis (Optional)[/bold]", border_style="blue"))
@@ -782,7 +793,7 @@ def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None):
         console.print()
 
         properties_classified, pathway_summary = analyzer.run_complete_analysis(
-            df, auto_download_gis=True
+            df, auto_download_gis=True, create_maps=not one_stop_only
         )
 
         if properties_classified is not None and pathway_summary is not None:
@@ -802,22 +813,24 @@ def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None):
             console.print(f"[cyan]📁 Outputs:[/cyan]")
             console.print(f"    • GeoJSON: data/processed/epc_with_heat_network_tiers.geojson")
             console.print(f"    • CSV: data/outputs/pathway_suitability_by_tier.csv")
-            console.print(f"    • Interactive Map: data/outputs/maps/heat_network_tiers.html")
+            if not one_stop_only:
+                console.print(f"    • Interactive Map: data/outputs/maps/heat_network_tiers.html")
 
             if analysis_logger:
-                map_html = Path("data/outputs/maps/heat_network_tiers.html")
-                map_png = map_html.with_suffix('.png')
-                map_pdf = map_html.with_suffix('.pdf')
-
                 analysis_logger.add_metric("properties_geocoded", len(properties_classified), "Properties with spatial classification")
                 analysis_logger.add_output("data/processed/epc_with_heat_network_tiers.geojson", "geojson", "Geocoded properties with heat network tiers")
                 analysis_logger.add_output("data/outputs/pathway_suitability_by_tier.csv", "csv", "Pathway suitability by tier")
-                analysis_logger.add_output("data/outputs/maps/heat_network_tiers.html", "html", "Interactive heat network tier map")
+                if not one_stop_only:
+                    map_html = Path("data/outputs/maps/heat_network_tiers.html")
+                    map_png = map_html.with_suffix('.png')
+                    map_pdf = map_html.with_suffix('.pdf')
 
-                if map_png.exists():
-                    analysis_logger.add_output(str(map_png), "png", "Heat network tier map (image)")
-                if map_pdf.exists():
-                    analysis_logger.add_output(str(map_pdf), "pdf", "Heat network tier map (PDF)")
+                    analysis_logger.add_output("data/outputs/maps/heat_network_tiers.html", "html", "Interactive heat network tier map")
+
+                    if map_png.exists():
+                        analysis_logger.add_output(str(map_png), "png", "Heat network tier map (image)")
+                    if map_pdf.exists():
+                        analysis_logger.add_output(str(map_pdf), "pdf", "Heat network tier map (PDF)")
                 analysis_logger.complete_phase(success=True, message="Spatial analysis with heat network classification complete")
 
             return properties_classified, pathway_summary
@@ -859,6 +872,12 @@ def generate_reports(archetype_results, scenario_results, subsidy_results=None, 
     console.print()
     console.print(Panel("[bold]Phase 5: Report Generation[/bold]", border_style="blue"))
     console.print()
+
+    if is_one_stop_only():
+        console.print("[cyan]One-stop reporting enabled; skipping additional report outputs.[/cyan]")
+        if analysis_logger:
+            analysis_logger.skip_phase("Report Generation", "One-stop report output enabled")
+        return []
 
     if analysis_logger:
         analysis_logger.start_phase(
@@ -978,11 +997,60 @@ def generate_reports(archetype_results, scenario_results, subsidy_results=None, 
     return True
 
 
+def generate_one_stop_report(analysis_logger: AnalysisLogger = None):
+    """Generate the one-stop markdown report."""
+    console.print()
+    console.print(Panel("[bold]Phase 5: One-Stop Report[/bold]", border_style="blue"))
+    console.print()
+    console.print("[cyan]Generating one-stop markdown report...[/cyan]")
+
+    from src.reporting.one_stop_report import OneStopReportGenerator
+
+    generator = OneStopReportGenerator()
+    output_path = generator.generate()
+
+    console.print(f"[green]✓[/green] One-stop report generated: {output_path}")
+
+    if analysis_logger:
+        analysis_logger.add_output("data/outputs/one_stop_output.md", "md", "One-stop report")
+
+    return output_path
+
+
+def cleanup_reporting_outputs():
+    """Remove report artifacts that should not persist in one-stop-only mode."""
+    outputs_dir = Path("data/outputs")
+    reports_dir = outputs_dir / "reports"
+
+    for path in [
+        outputs_dir / "figures",
+        outputs_dir / "maps",
+        outputs_dir / "comparisons",
+    ]:
+        if path.exists():
+            shutil.rmtree(path, ignore_errors=True)
+
+    if reports_dir.exists():
+        for report_path in reports_dir.glob("*"):
+            if report_path.name == "retrofit_readiness_summary.txt":
+                continue
+            if report_path.name == "one_stop_output.md":
+                continue
+            if report_path.is_file():
+                report_path.unlink()
+
+
 def generate_additional_reports(df_raw, df_validated, validation_report, archetype_results, scenario_results, analysis_logger: AnalysisLogger = None):
     """Generate additional specialized reports for client presentation."""
     console.print()
     console.print(Panel("[bold]Phase 5.5: Additional Reports[/bold]", border_style="blue"))
     console.print()
+
+    if is_one_stop_only():
+        console.print("[cyan]One-stop reporting enabled; skipping additional reports.[/cyan]")
+        if analysis_logger:
+            analysis_logger.skip_phase("Additional Reports", "One-stop report output enabled")
+        return {}
 
     if analysis_logger:
         analysis_logger.start_phase(
@@ -1128,6 +1196,12 @@ def package_dashboard_assets(
     console.print()
     console.print(Panel("[bold]Phase 6: Dashboard Packaging[/bold]", border_style="blue"))
     console.print()
+
+    if is_one_stop_only():
+        console.print("[cyan]One-stop reporting enabled; skipping dashboard packaging.[/cyan]")
+        if analysis_logger:
+            analysis_logger.skip_phase("Dashboard Packaging", "One-stop report output enabled")
+        return False
 
     if analysis_logger:
         analysis_logger.start_phase(
@@ -1423,6 +1497,9 @@ def main():
     # Ensure directories exist
     ensure_directories()
 
+    config = load_config()
+    one_stop_only = is_one_stop_only(config)
+
     # Initialize analysis logger
     analysis_logger = AnalysisLogger()
     console.print("[green]✓[/green] Analysis logger initialized")
@@ -1542,35 +1619,48 @@ def main():
     scenario_results, subsidy_results = model_scenarios(df_adjusted, analysis_logger)
 
     # Phase 4.3: Retrofit Readiness
-    df_readiness, readiness_summary = analyze_retrofit_readiness(df_adjusted, analysis_logger)
+    df_readiness, readiness_summary = analyze_retrofit_readiness(
+        df_adjusted,
+        analysis_logger,
+        one_stop_only=one_stop_only,
+    )
 
     # Phase 4.5: Spatial Analysis (optional)
-    properties_with_tiers, pathway_summary = run_spatial_analysis(df_adjusted, analysis_logger)
+    properties_with_tiers, pathway_summary = run_spatial_analysis(
+        df_adjusted,
+        analysis_logger,
+        one_stop_only=one_stop_only,
+    )
 
     # Phase 5: Report
-    generate_reports(archetype_results, scenario_results, subsidy_results, df_adjusted, pathway_summary, analysis_logger)
+    if one_stop_only:
+        generate_one_stop_report(analysis_logger)
+        cleanup_reporting_outputs()
+        additional_outputs = {}
+    else:
+        generate_reports(archetype_results, scenario_results, subsidy_results, df_adjusted, pathway_summary, analysis_logger)
 
-    # Phase 5.5: Additional Reports
-    additional_outputs = generate_additional_reports(
-        df_raw,
-        df_adjusted,
-        validation_report,
-        archetype_results,
-        scenario_results,
-        analysis_logger,
-    )
+        # Phase 5.5: Additional Reports
+        additional_outputs = generate_additional_reports(
+            df_raw,
+            df_adjusted,
+            validation_report,
+            archetype_results,
+            scenario_results,
+            analysis_logger,
+        )
 
-    # Phase 6: Package dashboard
-    package_dashboard_assets(
-        archetype_results,
-        scenario_results,
-        readiness_summary,
-        pathway_summary,
-        additional_outputs,
-        subsidy_results,
-        df_adjusted,
-        analysis_logger,
-    )
+        # Phase 6: Package dashboard
+        package_dashboard_assets(
+            archetype_results,
+            scenario_results,
+            readiness_summary,
+            pathway_summary,
+            additional_outputs,
+            subsidy_results,
+            df_adjusted,
+            analysis_logger,
+        )
 
     # Complete
     elapsed = time.time() - start_time
@@ -1594,13 +1684,15 @@ def main():
     console.print(f"  • Skipped: {summary_stats['skipped_phases']}")
 
     console.print()
+    outputs_label = "one_stop_output.md (one-stop report)" if one_stop_only else "reports and charts"
+
     console.print(Panel.fit(
         f"[bold green]✓ Analysis Complete![/bold green]\n\n"
         f"Time elapsed: {elapsed/60:.1f} minutes\n"
         f"Properties analyzed: {len(df_validated):,}\n\n"
         f"[cyan]Results saved to:[/cyan]\n"
         f"  • data/processed/ (validated data)\n"
-        f"  • data/outputs/ (reports and charts)\n"
+        f"  • data/outputs/ ({outputs_label})\n"
         f"  • data/outputs/analysis_log.txt (analysis log)\n"
         f"  • data/outputs/analysis_outputs_compendium.xlsx (combined workbook)",
         border_style="green"

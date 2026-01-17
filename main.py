@@ -33,6 +33,12 @@ def get_metadata_manager() -> RunMetadataManager:
     return _metadata_manager
 
 
+def is_one_stop_only(config=None) -> bool:
+    """Return True when reporting is restricted to the one-stop markdown output."""
+    config = config or load_config()
+    return bool(config.get("reporting", {}).get("one_stop_only", False))
+
+
 def setup_logging(log_file: Path = None):
     """
     Configure logging for the pipeline.
@@ -178,7 +184,7 @@ def run_analysis_phase(args):
     return results
 
 
-def run_modeling_phase(args):
+def run_modeling_phase(args, one_stop_only: bool = False):
     """Run comprehensive modeling and analysis phase."""
     logger.info("\n" + "="*70)
     logger.info("PHASE 4: COMPREHENSIVE MODELING & ANALYSIS")
@@ -265,10 +271,11 @@ def run_modeling_phase(args):
     logger.info("✓ Pathway modeling complete")
 
     # ---- HP vs HN comparison reporting ----
-    logger.info("\n📑 Building HP vs HN comparison outputs...")
-    comparison_reporter = ComparisonReporter()
-    comparison_reporter.generate_comparisons(results_path=property_path)
-    logger.info("✓ Comparison reporting complete")
+    if not one_stop_only:
+        logger.info("\n📑 Building HP vs HN comparison outputs...")
+        comparison_reporter = ComparisonReporter()
+        comparison_reporter.generate_comparisons(results_path=property_path)
+        logger.info("✓ Comparison reporting complete")
 
     # ---- Load Profiles (Section 9) ----
     logger.info("\n⚡ Running load profile analysis...")
@@ -319,7 +326,7 @@ def run_modeling_phase(args):
     return results
 
 
-def run_spatial_phase(args):
+def run_spatial_phase(args, one_stop_only: bool = False):
     """Run spatial analysis phase."""
     logger.info("\n" + "="*70)
     logger.info("PHASE 5: SPATIAL ANALYSIS")
@@ -379,7 +386,8 @@ def run_spatial_phase(args):
         pathway_summary.to_csv(pathway_file, index=False)
 
         # Create map
-        analyzer.create_heat_network_map(properties_classified)
+        if not one_stop_only:
+            analyzer.create_heat_network_map(properties_classified)
 
         logger.info("✓ Spatial analysis complete")
         return pathway_summary
@@ -388,11 +396,20 @@ def run_spatial_phase(args):
         return None
 
 
-def run_reporting_phase(args, archetype_results, scenario_results, tier_summary):
+def run_reporting_phase(args, archetype_results, scenario_results, tier_summary, one_stop_only: bool = False):
     """Run reporting and visualization phase."""
     logger.info("\n" + "="*70)
     logger.info("PHASE 6: REPORTING & VISUALIZATION")
     logger.info("="*70)
+
+    if one_stop_only:
+        from src.reporting.one_stop_report import OneStopReportGenerator
+
+        logger.info("Generating one-stop markdown report...")
+        generator = OneStopReportGenerator()
+        output_path = generator.generate()
+        logger.info(f"✓ One-stop report generated: {output_path}")
+        return
 
     from src.reporting.executive_summary import ExecutiveSummaryGenerator
 
@@ -482,6 +499,9 @@ def main():
 
     args = parser.parse_args()
 
+    config = load_config()
+    one_stop_only = is_one_stop_only(config)
+
     # Setup logging
     setup_logging(args.log_file)
 
@@ -507,13 +527,13 @@ def main():
         archetype_results = run_analysis_phase(args)
 
     if args.phase in ['all', 'model']:
-        scenario_results = run_modeling_phase(args)
+        scenario_results = run_modeling_phase(args, one_stop_only=one_stop_only)
 
     if args.phase in ['all', 'spatial']:
-        tier_summary = run_spatial_phase(args)
+        tier_summary = run_spatial_phase(args, one_stop_only=one_stop_only)
 
     if args.phase in ['all', 'report']:
-        run_reporting_phase(args, archetype_results, scenario_results, tier_summary)
+        run_reporting_phase(args, archetype_results, scenario_results, tier_summary, one_stop_only=one_stop_only)
 
     # AUDIT FIX: Save run metadata with stage counts and generate reconciliation
     metadata = get_metadata_manager()
