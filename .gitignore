@@ -52,10 +52,8 @@ data/raw/*.dbf
 data/raw/*.shx
 data/raw/*.prj
 data/raw/*.parquet
-data/processed/*.csv
-data/processed/*.xlsx
-data/processed/*.pickle
-data/processed/*.parquet
+data/processed/*.geojson
+data/processed/*.json
 
 # External GIS data (can be re-downloaded)
 data/external/GIS_All_Data/
