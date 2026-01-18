@@ -26,6 +26,7 @@ from config.config import (
     DATA_OUTPUTS_DIR
 )
 from src.acquisition.london_gis_downloader import LondonGISDownloader
+from src.acquisition.hnpd_downloader import HNPDDownloader
 from src.spatial.postcode_geocoder import PostcodeGeocoder
 
 
@@ -140,6 +141,7 @@ class HeatNetworkAnalyzer:
             )
         self.readiness_config = self.config.get('heat_network', {}).get('readiness', {})
         self.gis_downloader = LondonGISDownloader()
+        self.hnpd_downloader = HNPDDownloader()
 
         # Initialize postcode geocoder with caching
         cache_file = DATA_PROCESSED_DIR / "geocoding_cache.csv"
@@ -228,6 +230,128 @@ class HeatNetworkAnalyzer:
             logger.warning("Heat network zones file not found.")
 
         return heat_networks, heat_zones
+
+    def load_hnpd_data(
+        self,
+        region: Optional[str] = None,
+        auto_download: bool = True,
+        use_tier_2: bool = True
+    ) -> Tuple[Optional[gpd.GeoDataFrame], Optional[gpd.GeoDataFrame]]:
+        """
+        Load BEIS Heat Network Planning Database (HNPD) data.
+
+        This provides more current heat network data (2024) compared to
+        the London Heat Map (2012). HNPD covers all of UK, not just London.
+
+        Args:
+            region: Optional region filter (e.g., "London", "South East")
+                   If None, loads all UK records
+            auto_download: If True, automatically download HNPD if not present
+            use_tier_2: If True, also load Tier 2 (planned) networks
+
+        Returns:
+            Tuple of (tier_1_networks GeoDataFrame, tier_2_networks GeoDataFrame)
+            - tier_1_networks: Operational + Under Construction networks
+            - tier_2_networks: Planning Permission Granted networks (or None if use_tier_2=False)
+        """
+        logger.info("Loading BEIS Heat Network Planning Database (HNPD)...")
+
+        # Check if HNPD is available
+        summary = self.hnpd_downloader.get_data_summary()
+
+        if not summary['available'] and auto_download:
+            logger.info("HNPD not found. Downloading from GOV.UK...")
+            if self.hnpd_downloader.download_and_prepare():
+                summary = self.hnpd_downloader.get_data_summary()
+
+        if not summary['available']:
+            logger.warning("HNPD data not available")
+            logger.info("Download from: https://www.gov.uk/government/publications/heat-networks-planning-database")
+            return None, None
+
+        # Load Tier 1 networks (operational + under construction)
+        tier_1_networks = self.hnpd_downloader.get_tier_1_networks(region=region)
+
+        if tier_1_networks is not None:
+            logger.info(f"✓ Loaded {len(tier_1_networks)} Tier 1 networks (operational/under construction)")
+        else:
+            logger.warning("No Tier 1 networks found")
+
+        # Load Tier 2 networks (planning granted) if requested
+        tier_2_networks = None
+        if use_tier_2:
+            tier_2_networks = self.hnpd_downloader.get_tier_2_networks(region=region)
+
+            if tier_2_networks is not None:
+                logger.info(f"✓ Loaded {len(tier_2_networks)} Tier 2 networks (planning granted)")
+            else:
+                logger.warning("No Tier 2 networks found")
+
+        return tier_1_networks, tier_2_networks
+
+    def load_heat_network_data(
+        self,
+        data_source: str = 'hnpd',
+        region: Optional[str] = 'London',
+        auto_download: bool = True
+    ) -> Tuple[Optional[gpd.GeoDataFrame], Optional[gpd.GeoDataFrame]]:
+        """
+        Load heat network data from specified source.
+
+        This is a unified interface that can load from either HNPD (2024, UK-wide)
+        or London Heat Map (2012, London only).
+
+        Args:
+            data_source: 'hnpd' (recommended) or 'london_heat_map'
+            region: Region to filter to (for HNPD), or None for all UK
+            auto_download: If True, automatically download data if not present
+
+        Returns:
+            Tuple of (existing_networks, planned_networks)
+        """
+        if data_source == 'hnpd':
+            logger.info("Using HNPD as heat network data source (2024, UK-wide)")
+            return self.load_hnpd_data(region=region, auto_download=auto_download)
+
+        elif data_source == 'london_heat_map':
+            logger.info("Using London Heat Map as data source (2012, London only)")
+            return self.load_london_heat_map_data(auto_download=auto_download)
+
+        elif data_source == 'both':
+            logger.info("Using hybrid approach: HNPD + London Heat Map")
+
+            # Load HNPD first
+            hnpd_tier1, hnpd_tier2 = self.load_hnpd_data(region=region, auto_download=auto_download)
+
+            # Load London Heat Map as fallback
+            lhm_networks, lhm_zones = self.load_london_heat_map_data(auto_download=auto_download)
+
+            # Merge Tier 1 sources
+            if hnpd_tier1 is not None and lhm_networks is not None:
+                # Combine both sources, removing duplicates
+                # HNPD takes priority as it's more current
+                existing_networks = hnpd_tier1
+                logger.info(f"✓ Combined networks: {len(existing_networks)} from HNPD")
+            elif hnpd_tier1 is not None:
+                existing_networks = hnpd_tier1
+            else:
+                existing_networks = lhm_networks
+
+            # Merge Tier 2 sources
+            if hnpd_tier2 is not None and lhm_zones is not None:
+                planned_networks = hnpd_tier2
+                logger.info(f"✓ Combined planned networks: {len(planned_networks)} from HNPD")
+            elif hnpd_tier2 is not None:
+                planned_networks = hnpd_tier2
+            else:
+                planned_networks = lhm_zones
+
+            return existing_networks, planned_networks
+
+        else:
+            logger.error(f"Unknown data source: {data_source}")
+            logger.info("Valid options: 'hnpd', 'london_heat_map', 'both'")
+            return None, None
 
     def geocode_properties(self, df: pd.DataFrame) -> gpd.GeoDataFrame:
         """
@@ -443,7 +567,16 @@ class HeatNetworkAnalyzer:
             fallback['in_heat_zone'] = False
             return fallback
 
-        heat_networks, heat_zones = self.load_london_heat_map_data(auto_download=auto_download_gis)
+        # Use HNPD by default (2024 data), fallback to London Heat Map if needed
+        # Can be configured via config file in future
+        data_source = self.config.get('data_sources', {}).get('heat_networks', {}).get('primary', 'hnpd')
+        region_filter = self.config.get('data_sources', {}).get('heat_networks', {}).get('hnpd', {}).get('region_filter', 'London')
+
+        heat_networks, heat_zones = self.load_heat_network_data(
+            data_source=data_source,
+            region=region_filter,
+            auto_download=auto_download_gis
+        )
 
         if heat_networks is None and heat_zones is None:
             logger.warning("Heat network readiness skipped: GIS network/zone layers unavailable.")

@@ -484,6 +484,34 @@ heat_pump:
     high_spf: [4.0, 3.5, 3.0, 2.6]
     source: "Electrification of Heat (ESC 2024) field trial SPF vs flow temperature; medians with IQR bounds"
 
+# Data Sources Configuration
+# Configure which data sources to use for heat network spatial analysis
+data_sources:
+  heat_networks:
+    # Primary data source: 'hnpd' (2024, UK-wide), 'london_heat_map' (2012, London only), or 'both'
+    primary: "hnpd"
+
+    # BEIS Heat Network Planning Database (HNPD) configuration
+    hnpd:
+      url: "https://assets.publishing.service.gov.uk/media/65c9f7b89c5b7f000c951cad/hnpd-january-2024.csv"
+      region_filter: "London"  # Filter to specific region, or null for UK-wide
+
+      # Status classifications for tier assignment
+      tier_1_statuses:
+        - "Operational"
+        - "Under Construction"
+        - "No Application Required"
+
+      tier_2_statuses:
+        - "Planning Permission Granted"
+        - "Appeal Granted"
+        - "Secretary of State - Granted"
+
+    # London Heat Map (2012 legacy data) configuration
+    london_heat_map:
+      fallback_enabled: true  # Use as fallback if HNPD unavailable
+      use_for_heat_density: true  # Still use borough shapefiles for Tier 3-5 density
+
 # Heat Network Parameters
 # See authoritative_sources.sections.heat_network_parameters
 # NOTE: current_penetration value (0.2%) may be outdated - UK heat networks now supply ~2-3% of heat
