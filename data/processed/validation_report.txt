@@ -1,0 +1,16 @@
+EPC DATA VALIDATION REPORT
+============================================================
+Generated: 2026-01-18 14:58:37
+
+Total Records: 34,608
+Duplicates Removed: 4,914
+Implausible Floor Areas: 18
+Inconsistent Built Form: 0
+Missing Critical Fields: 48
+Construction Date Mismatches: 0
+Illogical Insulation: 0
+Negative Energy Values: 0
+Negative Co2 Values: 0
+Records Passed: 29,628
+Energy Values Clamped: 0
+Co2 Values Clamped: 0
