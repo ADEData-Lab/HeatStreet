@@ -25,6 +25,7 @@ sys.path.append(str(Path(__file__).parent))
 from config.config import load_config, ensure_directories, DATA_RAW_DIR, DATA_PROCESSED_DIR
 from src.acquisition.epc_api_downloader import EPCAPIDownloader
 from src.acquisition.london_gis_downloader import LondonGISDownloader
+from src.acquisition.hnpd_downloader import HNPDDownloader
 from src.cleaning.data_validator import EPCDataValidator
 from src.analysis.archetype_analysis import ArchetypeAnalyzer
 from src.modeling.scenario_model import ScenarioModeler
@@ -145,6 +146,53 @@ def ask_gis_download():
             console.print("[yellow]⚠[/yellow] GIS data download failed (spatial analysis will be limited)")
             return False
 
+    return False
+
+
+def ask_hnpd_download():
+    """Ask if user wants to download BEIS Heat Network Planning Database."""
+    console.print()
+    console.print("[cyan]BEIS Heat Network Planning Database (Recommended)[/cyan]")
+    console.print()
+    console.print("The HNPD provides current heat network data (January 2024) for:")
+    console.print("  • Operational heat networks across the UK")
+    console.print("  • Networks under construction")
+    console.print("  • Planned networks with planning permission")
+    console.print("  • More accurate than 2012 London Heat Map data")
+    console.print()
+
+    # Check if already downloaded
+    hnpd_downloader = HNPDDownloader()
+    summary = hnpd_downloader.get_data_summary()
+
+    if summary['available']:
+        console.print("[green]✓[/green] HNPD data already downloaded")
+        console.print(f"    Total records: {summary['total_records']}")
+        console.print(f"    Tier 1 networks: {summary['tier_1_networks']} (operational/under construction)")
+        console.print(f"    Tier 2 networks: {summary['tier_2_networks']} (planning granted)")
+        console.print(f"    Regions covered: {summary['region_count']}")
+        return True
+
+    download = questionary.confirm(
+        "Download BEIS HNPD? (~516 KB, recommended for accurate heat network analysis)",
+        default=True
+    ).ask()
+
+    if download:
+        console.print()
+        console.print("[cyan]Downloading BEIS Heat Network Planning Database...[/cyan]")
+
+        if hnpd_downloader.download_and_prepare():
+            console.print("[green]✓[/green] HNPD data downloaded and ready")
+            summary = hnpd_downloader.get_data_summary()
+            console.print(f"    {summary['total_records']} heat network records loaded")
+            console.print(f"    {summary['tier_1_networks']} Tier 1 + {summary['tier_2_networks']} Tier 2 networks")
+            return True
+        else:
+            console.print("[yellow]⚠[/yellow] HNPD download failed (will use London Heat Map 2012 as fallback)")
+            return False
+
+    console.print("[yellow]⚠[/yellow] Skipping HNPD download (will use London Heat Map 2012 as fallback)")
     return False
 
 
@@ -1431,7 +1479,11 @@ def main():
     console.print("[green]✓[/green] Analysis logger initialized")
     console.print()
 
-    # Ask about GIS data download
+    # Ask about heat network data downloads
+    # HNPD first (recommended, 2024 data)
+    ask_hnpd_download()
+
+    # London GIS data second (for heat density in Tiers 3-5)
     ask_gis_download()
 
     # Check for existing data
