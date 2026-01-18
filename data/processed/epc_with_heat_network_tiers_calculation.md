@@ -1,7 +1,7 @@
 # Output Documentation: epc_with_heat_network_tiers.geojson
 
 **Output file:** data\processed\epc_with_heat_network_tiers.geojson
-**Created:** 2026-01-18T15:48:26.791915
+**Created:** 2026-01-18T16:23:47.382285
 **Phase:** Spatial Analysis
 **Output type:** geojson
 

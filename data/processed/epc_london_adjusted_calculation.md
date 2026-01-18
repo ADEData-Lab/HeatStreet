@@ -1,7 +1,7 @@
 # Output Documentation: epc_london_adjusted.csv
 
 **Output file:** C:\Users\PhilipNicholson\OneDrive - ADE\Documents\HeatStreet-1\data\processed\epc_london_adjusted.csv
-**Created:** 2026-01-18T15:44:33.273285
+**Created:** 2026-01-18T16:20:02.928839
 **Phase:** Methodological Adjustments
 **Output type:** csv
 
