@@ -1483,7 +1483,18 @@ def main():
     df = None
 
     if has_existing:
-        use_existing = True  # Automatically use existing data
+        # Ask user whether to use existing data or download new
+        use_existing = questionary.select(
+            "Existing data found. What would you like to do?",
+            choices=[
+                questionary.Choice("Use existing data", value=True),
+                questionary.Choice("Download new data (will overwrite existing)", value=False),
+            ],
+        ).ask()
+
+        if use_existing is None:
+            console.print("[yellow]Analysis cancelled by user[/yellow]")
+            return
 
         if use_existing:
             df = load_existing_data(existing_file, analysis_logger)
