@@ -31,7 +31,10 @@ from config.config import (
 )
 from src.analysis.fabric_tipping_point import FabricTippingPointAnalyzer
 from src.analysis.methodological_adjustments import MethodologicalAdjustments
-from src.spatial.heat_network_analysis import HeatNetworkAnalyzer
+try:
+    from src.spatial.heat_network_analysis import HeatNetworkAnalyzer
+except Exception as _:
+    HeatNetworkAnalyzer = None
 from src.modeling.costing import CostCalculator
 from src.utils.modeling_utils import (
     BAND_ORDER,
@@ -619,7 +622,7 @@ class ScenarioModeler:
         self.results = {}
         self.property_results: Dict[str, pd.DataFrame] = {}
 
-        self.hn_analyzer = HeatNetworkAnalyzer()
+        self.hn_analyzer = HeatNetworkAnalyzer() if HeatNetworkAnalyzer else None
 
         logger.info("Initialized Scenario Modeler")
         logger.info(self.cost_calculator.summary_notes() or "Costing rules configured.")
@@ -647,10 +650,11 @@ class ScenarioModeler:
             return df
 
         try:
-            logger.info("Enriching EPC data with heat network readiness flags...")
-            annotated = self.hn_analyzer.annotate_heat_network_readiness(df)
-            if annotated is not None:
-                return annotated
+            if self.hn_analyzer:
+                logger.info("Enriching EPC data with heat network readiness flags...")
+                annotated = self.hn_analyzer.annotate_heat_network_readiness(df)
+                if annotated is not None:
+                    return annotated
         except Exception as exc:
             logger.warning(f"Heat network readiness annotation failed: {exc}")
 

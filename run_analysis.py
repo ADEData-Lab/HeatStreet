@@ -130,10 +130,7 @@ def ask_gis_download():
         console.print(f"    Heat supply files: {summary['heat_supply_files']}")
         return True
 
-    download = questionary.confirm(
-        "Download London GIS data? (~2 MB, required for spatial analysis)",
-        default=True
-    ).ask()
+    download = True  # Automatically download GIS data for spatial analysis
 
     if download:
         console.print()
@@ -173,10 +170,7 @@ def ask_hnpd_download():
         console.print(f"    Regions covered: {summary['region_count']}")
         return True
 
-    download = questionary.confirm(
-        "Download BEIS HNPD? (~516 KB, recommended for accurate heat network analysis)",
-        default=True
-    ).ask()
+    download = True  # Automatically download HNPD data
 
     if download:
         console.print()
@@ -1324,10 +1318,7 @@ def prompt_use_existing_dataframe(
 
     _describe_existing_file(file_path, f"Existing {description}", include_records)
 
-    use_existing = questionary.confirm(
-        f"Use existing {description} from {file_path.name}?",
-        default=True
-    ).ask()
+    use_existing = True  # Automatically use existing processed datasets
 
     if not use_existing:
         return None
@@ -1492,10 +1483,7 @@ def main():
     df = None
 
     if has_existing:
-        use_existing = questionary.confirm(
-            "Use existing downloaded data?",
-            default=True
-        ).ask()
+        use_existing = True  # Automatically use existing data
 
         if use_existing:
             df = load_existing_data(existing_file, analysis_logger)
@@ -1518,10 +1506,7 @@ def main():
         ))
         console.print()
 
-        proceed = questionary.confirm(
-            "Start download?",
-            default=True
-        ).ask()
+        proceed = True  # Automatically proceed with download
 
         if not proceed:
             console.print("[yellow]Analysis cancelled[/yellow]")
@@ -1694,10 +1679,7 @@ def main():
     console.print()
 
     # Ask if user wants to open results
-    open_results = questionary.confirm(
-        "Open results folder?",
-        default=True
-    ).ask()
+    open_results = False  # Skip opening results folder automatically
 
     if open_results:
         import subprocess
