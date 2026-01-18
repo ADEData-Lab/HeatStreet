@@ -1202,8 +1202,13 @@ class HeatNetworkAnalyzer:
             logger.info(f"✓ Successfully geocoded {len(properties_gdf):,} properties")
 
             # Step 2: Load GIS data
-            logger.info("\nStep 2: Loading London heat network GIS data...")
-            heat_networks, heat_zones = self.load_london_heat_map_data(
+            logger.info("\nStep 2: Loading heat network GIS data...")
+            data_source = self.config.get('data_sources', {}).get('heat_networks', {}).get('primary', 'hnpd')
+            region_filter = self.config.get('data_sources', {}).get('heat_networks', {}).get('hnpd', {}).get('region_filter', 'London')
+
+            heat_networks, heat_zones = self.load_heat_network_data(
+                data_source=data_source,
+                region=region_filter,
                 auto_download=auto_download_gis
             )
 
