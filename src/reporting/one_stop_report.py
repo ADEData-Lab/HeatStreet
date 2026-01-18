@@ -23,6 +23,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
+import numpy as np
 import pandas as pd
 from loguru import logger
 
@@ -58,6 +59,13 @@ class AnnotatedDatapoint:
             return None
         if isinstance(value, float) and pd.isna(value):
             return None
+        # Handle numpy/pandas numeric types
+        if isinstance(value, (np.integer, np.int64, np.int32)):
+            return int(value)
+        if isinstance(value, (np.floating, np.float64, np.float32)):
+            return float(value)
+        if isinstance(value, np.bool_):
+            return bool(value)
         if isinstance(value, (pd.Timestamp, datetime)):
             return value.isoformat()
         if isinstance(value, pd.Series):
@@ -73,15 +81,38 @@ def _snake_case(value: str) -> str:
     return cleaned.lower()
 
 
+def _convert_numpy_types(obj: Any) -> Any:
+    """Recursively convert numpy types to native Python types for JSON serialization."""
+    if obj is None:
+        return None
+    if isinstance(obj, (np.integer, np.int64, np.int32)):
+        return int(obj)
+    if isinstance(obj, (np.floating, np.float64, np.float32)):
+        return float(obj)
+    if isinstance(obj, np.bool_):
+        return bool(obj)
+    if isinstance(obj, (pd.Timestamp, datetime)):
+        return obj.isoformat()
+    if isinstance(obj, dict):
+        return {key: _convert_numpy_types(value) for key, value in obj.items()}
+    if isinstance(obj, list):
+        return [_convert_numpy_types(item) for item in obj]
+    return obj
+
+
 def _serialize_dataframe(df: pd.DataFrame, caption: str = "") -> Dict[str, Any]:
     """Serialize DataFrame to JSON-compatible dict."""
     if df is None or df.empty:
         return {"caption": caption, "data": []}
 
+    # Convert DataFrame to dict and handle numpy types
+    data_dict = df.to_dict(orient="records")
+    converted_data = _convert_numpy_types(data_dict)
+
     return {
         "caption": caption,
         "columns": df.columns.tolist(),
-        "data": df.to_dict(orient="records")
+        "data": converted_data
     }
 
 
@@ -200,6 +231,9 @@ class OneStopReportGenerator:
             },
             "sections": self._sections
         }
+
+        # Convert any remaining numpy types before JSON serialization
+        output = _convert_numpy_types(output)
 
         # Write output
         self.output_dir.mkdir(parents=True, exist_ok=True)
