@@ -1395,59 +1395,50 @@ class OneStopReportGenerator:
 
     def _build_section_13(self) -> Dict[str, Any]:
         """Section 13: Structure of the one-stop output document (glossary)."""
-        lines = [f"## {self.SECTION_TITLES[12]}", ""]
-        lines.append("This section provides a comprehensive glossary of all metrics used in Sections 1-12.")
-        lines.append("")
-        lines.append("### Tier Definitions")
-        lines.append("")
-        lines.append("**Heat Pump Readiness Tiers:**")
-        lines.append("- **Tier 1 (Ready now)**: Properties that can install heat pump immediately without fabric upgrades")
-        lines.append("- **Tier 2 (Minor work)**: Properties requiring minor fabric improvements (e.g., loft top-up)")
-        lines.append("- **Tier 3 (Major work)**: Properties requiring major fabric work (e.g., wall insulation)")
-        lines.append("- **Tier 4 (Challenging)**: Properties with multiple fabric issues requiring substantial investment")
-        lines.append("- **Tier 5 (Not suitable)**: Properties not suitable for heat pump without extensive retrofit")
-        lines.append("")
-        lines.append("**Heat Network Tiers:**")
-        lines.append("- **Tier 1**: Adjacent to existing heat network (within 250m)")
-        lines.append("- **Tier 2**: Within planned heat network zone (HNZ boundary)")
-        lines.append("- **Tier 3**: High heat density area (≥20 GWh/km²)")
-        lines.append("- **Tier 4**: Medium heat density area (5-20 GWh/km²)")
-        lines.append("- **Tier 5**: Low heat density area (<5 GWh/km²)")
-        lines.append("")
-        lines.append("### EPC Band Thresholds")
-        lines.append("")
-        lines.append("| Band | SAP Score Range |")
-        lines.append("|------|----------------|")
-        lines.append("| A | 92-100 |")
-        lines.append("| B | 81-91 |")
-        lines.append("| C | 69-80 |")
-        lines.append("| D | 55-68 |")
-        lines.append("| E | 39-54 |")
-        lines.append("| F | 21-38 |")
-        lines.append("| G | 1-20 |")
-        lines.append("")
-        lines.append("### Cost-Effectiveness Thresholds")
-        lines.append("")
         cost_eff = self.config.get("financial", {}).get("cost_effectiveness", {})
-        lines.append(f"- **Cost-effective**: Payback ≤ {cost_eff.get('max_payback_years', 15)} years AND positive NPV")
-        lines.append(f"- **Marginally cost-effective**: Payback {cost_eff.get('max_payback_years', 15)}-{cost_eff.get('max_payback_marginal', 25)} years AND positive NPV")
-        lines.append(f"- **Not cost-effective**: Payback > {cost_eff.get('max_payback_marginal', 25)} years OR negative NPV")
-        lines.append("")
-        lines.append("### All Datapoints Glossary")
-        lines.append("")
-        lines.append("Complete list of all datapoints in this report:")
-        lines.append("")
 
-        # Render all collected datapoints
-        for datapoint in self._collected_datapoints:
-            lines.extend(_render_datapoint(datapoint))
-            lines.append("")
+        # Collect all datapoints from all sections
+        all_datapoints = []
+        for section_data in self._sections.values():
+            all_datapoints.extend(section_data.get("datapoints", []))
 
-        lines.append("---")
-        lines.append("")
-        lines.append(f"*End of report. Total datapoints: {len(self._collected_datapoints)}*")
-        lines.append("")
-        return lines
+        return {
+            "title": self.SECTION_TITLES[12],
+            "description": "Comprehensive glossary of all metrics, tier definitions, and thresholds used in Sections 1-12",
+            "definitions": {
+                "heat_pump_readiness_tiers": {
+                    "tier_1": "Ready now - Properties that can install heat pump immediately without fabric upgrades",
+                    "tier_2": "Minor work - Properties requiring minor fabric improvements (e.g., loft top-up)",
+                    "tier_3": "Major work - Properties requiring major fabric work (e.g., wall insulation)",
+                    "tier_4": "Challenging - Properties with multiple fabric issues requiring substantial investment",
+                    "tier_5": "Not suitable - Properties not suitable for heat pump without extensive retrofit"
+                },
+                "heat_network_spatial_tiers": {
+                    "tier_1": "Adjacent to existing heat network (within 250m)",
+                    "tier_2": "Within planned heat network zone (HNZ boundary)",
+                    "tier_3": "High heat density area (≥20 GWh/km²)",
+                    "tier_4": "Medium heat density area (5-20 GWh/km²)",
+                    "tier_5": "Low heat density area (<5 GWh/km²)"
+                },
+                "epc_bands": {
+                    "A": {"sap_min": 92, "sap_max": 100},
+                    "B": {"sap_min": 81, "sap_max": 91},
+                    "C": {"sap_min": 69, "sap_max": 80},
+                    "D": {"sap_min": 55, "sap_max": 68},
+                    "E": {"sap_min": 39, "sap_max": 54},
+                    "F": {"sap_min": 21, "sap_max": 38},
+                    "G": {"sap_min": 1, "sap_max": 20}
+                },
+                "cost_effectiveness_thresholds": {
+                    "cost_effective": f"Payback ≤ {cost_eff.get('max_payback_years', 15)} years AND positive NPV",
+                    "marginally_cost_effective": f"Payback {cost_eff.get('max_payback_years', 15)}-{cost_eff.get('max_payback_marginal', 25)} years AND positive NPV",
+                    "not_cost_effective": f"Payback > {cost_eff.get('max_payback_marginal', 25)} years OR negative NPV"
+                }
+            },
+            "datapoints": all_datapoints,
+            "datapoint_count": len(all_datapoints),
+            "tables": []
+        }
 
 
 if __name__ == "__main__":
