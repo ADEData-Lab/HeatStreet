@@ -712,6 +712,8 @@ class HeatNetworkAnalyzer:
         """
         import time
 
+        overall_start = time.time()
+
         spatial_config = self.config.get('spatial', {})
         grid_config = spatial_config.get('grid', {})
 
@@ -747,24 +749,34 @@ class HeatNetworkAnalyzer:
         y_coords = coords[:, 1]
 
         # Assign each property to a grid cell
-        cell_x = np.floor(x_coords / cell_size_m).astype(int)
-        cell_y = np.floor(y_coords / cell_size_m).astype(int)
+        cell_x = np.floor(x_coords / cell_size_m).astype(np.int64)
+        cell_y = np.floor(y_coords / cell_size_m).astype(np.int64)
 
-        properties_27700['_cell_x'] = cell_x
-        properties_27700['_cell_y'] = cell_y
+        # Create single integer cell_id for fast lookups (avoids tuple overhead)
+        # Use a large multiplier to ensure no collisions
+        y_range = cell_y.max() - cell_y.min() + 1
+        multiplier = max(100000, int(y_range * 10))  # Ensure no collisions
+
+        properties_27700['_cell_id'] = (cell_x * multiplier + cell_y).astype(np.int64)
 
         # Count unique cells
-        unique_cells = len(properties_27700[['_cell_x', '_cell_y']].drop_duplicates())
+        unique_cells = properties_27700['_cell_id'].nunique()
         logger.info(f"  ✓ Assigned {len(properties_27700):,} properties to {unique_cells:,} grid cells ({time.time() - start_time:.1f}s)")
 
         # Aggregate to cell level
         logger.info(f"  Step 3/5: Aggregating energy consumption per cell...")
         start_time = time.time()
 
-        cell_aggregates = properties_27700.groupby(['_cell_x', '_cell_y']).agg({
+        cell_aggregates = properties_27700.groupby('_cell_id').agg({
             '_absolute_energy_kwh': 'sum',
             'geometry': 'count'  # Count properties per cell
         }).rename(columns={'geometry': 'property_count'})
+
+        # Also need cell_x and cell_y for offset calculations
+        cell_coords = properties_27700.groupby('_cell_id')[['_cell_x', '_cell_y']].first()
+        cell_aggregates = cell_aggregates.join(cell_coords)
+        properties_27700['_cell_x'] = cell_x
+        properties_27700['_cell_y'] = cell_y
 
         logger.info(f"  ✓ Aggregated to {len(cell_aggregates):,} populated cells ({time.time() - start_time:.1f}s)")
 
@@ -791,82 +803,117 @@ class HeatNetworkAnalyzer:
 
         logger.info(f"  Using {len(offsets)} cell offsets for neighborhood aggregation")
 
-        # Create a dictionary for fast cell lookup
-        cell_dict = cell_aggregates.to_dict('index')
+        # Vectorized neighborhood computation using broadcasting
+        # Create lookup dictionary for fast access: cell_id -> (energy, count)
+        cell_dict = {}
+        for cell_id, row in cell_aggregates.iterrows():
+            cell_dict[cell_id] = (row['_absolute_energy_kwh'], row['property_count'], row['_cell_x'], row['_cell_y'])
 
         # Compute neighborhood totals for each cell
-        neighborhood_totals = {}
+        neighborhood_data = []
 
-        for (cx, cy), cell_data in cell_dict.items():
+        for cell_id, (cell_energy, cell_count, cx, cy) in cell_dict.items():
             neighborhood_energy = 0.0
             neighborhood_properties = 0
 
             # Sum all neighbor cells within radius
             for dx, dy in offsets:
-                neighbor_key = (cx + dx, cy + dy)
-                if neighbor_key in cell_dict:
-                    neighborhood_energy += cell_dict[neighbor_key]['_absolute_energy_kwh']
-                    neighborhood_properties += cell_dict[neighbor_key]['property_count']
+                neighbor_cell_id = (cx + dx) * multiplier + (cy + dy)
+                if neighbor_cell_id in cell_dict:
+                    neighbor_energy, neighbor_count, _, _ = cell_dict[neighbor_cell_id]
+                    neighborhood_energy += neighbor_energy
+                    neighborhood_properties += neighbor_count
 
-            neighborhood_totals[(cx, cy)] = {
+            neighborhood_data.append({
+                'cell_id': cell_id,
                 'neighborhood_energy_kwh': neighborhood_energy,
                 'neighborhood_property_count': neighborhood_properties
-            }
+            })
 
-        logger.info(f"  ✓ Computed neighborhood totals for {len(neighborhood_totals):,} cells ({time.time() - start_time:.1f}s)")
+        # Convert to DataFrame for fast merge
+        neighborhood_df = pd.DataFrame(neighborhood_data).set_index('cell_id')
+
+        logger.info(f"  ✓ Computed neighborhood totals for {len(neighborhood_df):,} cells ({time.time() - start_time:.1f}s)")
 
         # Assign neighborhood values back to properties
-        logger.info(f"  Step 5/5: Assigning neighborhood totals to properties and classifying tiers...")
-        start_time = time.time()
+        logger.info(f"  Step 5a/5: Joining neighborhood totals to properties...")
+        start_time_join = time.time()
 
-        # Map cell coordinates back to properties
-        properties_27700['_neighborhood_energy_kwh'] = properties_27700.apply(
-            lambda row: neighborhood_totals.get((row['_cell_x'], row['_cell_y']), {}).get('neighborhood_energy_kwh', 0),
-            axis=1
-        )
+        # Vectorized join using cell_id (much faster than apply)
+        properties_27700 = properties_27700.join(neighborhood_df, on='_cell_id')
 
-        properties_27700['_neighborhood_property_count'] = properties_27700.apply(
-            lambda row: neighborhood_totals.get((row['_cell_x'], row['_cell_y']), {}).get('neighborhood_property_count', 0),
-            axis=1
-        )
+        # Fill any missing values (cells with no neighbors) with 0
+        properties_27700['neighborhood_energy_kwh'] = properties_27700['neighborhood_energy_kwh'].fillna(0)
+        properties_27700['neighborhood_property_count'] = properties_27700['neighborhood_property_count'].fillna(0)
 
-        # Calculate heat density in GWh/km²
+        logger.info(f"  ✓ Neighborhood join complete ({time.time() - start_time_join:.1f}s)")
+
+        # Calculate heat density in GWh/km² (vectorized)
+        logger.info(f"  Step 5b/5: Calculating heat densities and classifying tiers...")
+        start_time_classify = time.time()
+
         buffer_area_km2 = (np.pi * buffer_radius_m ** 2) / 1_000_000
         properties_27700['heat_density_gwh_km2'] = (
-            properties_27700['_neighborhood_energy_kwh'] / 1_000_000
+            properties_27700['neighborhood_energy_kwh'] / 1_000_000
         ) / buffer_area_km2
 
-        # Classify tiers for unclassified properties
-        unclassified_indices = properties_27700[unclassified_mask].index
+        # Vectorized tier classification using np.select
+        tier_3_threshold = self.heat_network_tiers['tier_3']['min_heat_density_gwh_km2']
+        tier_4_threshold = self.heat_network_tiers['tier_4']['min_heat_density_gwh_km2']
 
-        for idx in unclassified_indices:
-            density = properties_27700.loc[idx, 'heat_density_gwh_km2']
+        # Only classify unclassified properties (tier_number > 2)
+        density = properties_27700.loc[unclassified_mask, 'heat_density_gwh_km2']
 
-            if density >= self.heat_network_tiers['tier_3']['min_heat_density_gwh_km2']:
-                properties.loc[idx, 'heat_network_tier'] = 'Tier 3: High heat density'
-                properties.loc[idx, 'tier_number'] = 3
-                properties.loc[idx, 'heat_density_gwh_km2'] = density
-            elif density >= self.heat_network_tiers['tier_4']['min_heat_density_gwh_km2']:
-                properties.loc[idx, 'heat_network_tier'] = 'Tier 4: Medium heat density'
-                properties.loc[idx, 'tier_number'] = 4
-                properties.loc[idx, 'heat_density_gwh_km2'] = density
-            else:
-                # Tier 5 (already default)
-                properties.loc[idx, 'heat_density_gwh_km2'] = density
+        # Create conditions for np.select
+        conditions = [
+            density >= tier_3_threshold,
+            density >= tier_4_threshold
+        ]
+
+        tier_numbers = [3, 4]
+        tier_labels = [
+            'Tier 3: High heat density',
+            'Tier 4: Medium heat density'
+        ]
+
+        # Apply tier numbers (default is 5, which is already set)
+        properties.loc[unclassified_mask, 'tier_number'] = np.select(
+            conditions,
+            tier_numbers,
+            default=5  # Tier 5 for everything else
+        )
+
+        # Apply tier labels
+        properties.loc[unclassified_mask, 'heat_network_tier'] = np.select(
+            conditions,
+            tier_labels,
+            default='Tier 5: Low heat density'
+        )
+
+        # Copy heat density values to original properties DataFrame
+        properties.loc[unclassified_mask, 'heat_density_gwh_km2'] = properties_27700.loc[unclassified_mask, 'heat_density_gwh_km2']
+
+        logger.info(f"  ✓ Tier classification complete ({time.time() - start_time_classify:.1f}s)")
 
         # Clean up temporary columns
-        properties_27700.drop(columns=['_cell_x', '_cell_y', '_absolute_energy_kwh',
-                                       '_neighborhood_energy_kwh', '_neighborhood_property_count'],
+        properties_27700.drop(columns=['_cell_id', '_cell_x', '_cell_y', '_absolute_energy_kwh',
+                                       'neighborhood_energy_kwh', 'neighborhood_property_count'],
                              inplace=True, errors='ignore')
 
         tier_3_count = (properties['tier_number'] == 3).sum()
         tier_4_count = (properties['tier_number'] == 4).sum()
         tier_5_count = (properties['tier_number'] == 5).sum()
 
-        logger.info(f"  ✓ Classification complete ({time.time() - start_time:.1f}s)")
+        total_step5_time = time.time() - start_time_join
+        logger.info(f"  ✓ Step 5 complete: {total_step5_time:.1f}s (join: {time.time() - start_time_join:.1f}s, classify: {time.time() - start_time_classify:.1f}s)")
         logger.info(f"  Tier 3 (High density ≥{self.heat_network_tiers['tier_3']['min_heat_density_gwh_km2']} GWh/km²): {tier_3_count:,}")
         logger.info(f"  Tier 4 (Medium density {self.heat_network_tiers['tier_4']['min_heat_density_gwh_km2']}-{self.heat_network_tiers['tier_3']['min_heat_density_gwh_km2']} GWh/km²): {tier_4_count:,}")
         logger.info(f"  Tier 5 (Low density <{self.heat_network_tiers['tier_4']['min_heat_density_gwh_km2']} GWh/km²): {tier_5_count:,}")
+
+        overall_time = time.time() - overall_start
+        logger.info(f"  ═══════════════════════════════════════════════════════════")
+        logger.info(f"  Grid-based classification COMPLETE in {overall_time:.1f}s total")
+        logger.info(f"  ═══════════════════════════════════════════════════════════")
 
         return properties
 
