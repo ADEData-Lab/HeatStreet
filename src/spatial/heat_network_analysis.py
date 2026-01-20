@@ -659,6 +659,12 @@ class HeatNetworkAnalyzer:
         """
         logger.info("Calculating heat density tiers using spatial aggregation...")
 
+        # Check if spatial analysis is disabled
+        spatial_config = self.config.get('spatial', {})
+        if spatial_config.get('disable', False):
+            logger.warning("Spatial analysis is disabled in config. Skipping heat density calculation.")
+            return properties
+
         # For properties not already classified as Tier 1 or 2
         unclassified_mask = properties['tier_number'] > 2
         unclassified_count = unclassified_mask.sum()
@@ -669,8 +675,224 @@ class HeatNetworkAnalyzer:
             logger.warning("No energy consumption data - using simplified tertile method")
             return self._classify_by_tertiles(properties, unclassified_mask)
 
+        # Check which method to use
+        spatial_method = spatial_config.get('method', 'grid')
+
+        if spatial_method == 'grid':
+            logger.info("  Using grid-based neighborhood aggregation (memory-efficient)")
+            return self._classify_heat_density_tiers_grid(properties, unclassified_mask)
+        elif spatial_method == 'buffer':
+            logger.info("  Using buffer-based spatial join (legacy method)")
+            return self._classify_heat_density_tiers_buffer(properties, unclassified_mask)
+        else:
+            logger.warning(f"Unknown spatial method '{spatial_method}'. Falling back to grid method.")
+            return self._classify_heat_density_tiers_grid(properties, unclassified_mask)
+
+    def _classify_heat_density_tiers_grid(
+        self,
+        properties: gpd.GeoDataFrame,
+        unclassified_mask: pd.Series
+    ) -> gpd.GeoDataFrame:
+        """
+        Classify properties by heat density using grid-based aggregation.
+
+        This method is memory-efficient and scalable for large datasets (100k+ properties).
+        Instead of creating buffers around each property, it:
+        1. Assigns properties to grid cells
+        2. Aggregates energy consumption per cell
+        3. Computes neighborhood totals using cell offsets
+        4. Assigns neighborhood values back to properties
+
+        Args:
+            properties: GeoDataFrame with all properties
+            unclassified_mask: Boolean mask for properties not in Tier 1-2
+
+        Returns:
+            GeoDataFrame with heat density tiers assigned
+        """
+        import time
+
+        spatial_config = self.config.get('spatial', {})
+        grid_config = spatial_config.get('grid', {})
+
+        # Get grid parameters from config
+        cell_size_m = grid_config.get('cell_size_m', 125)
+        buffer_radius_m = grid_config.get('buffer_radius_m', 250)
+        use_circular_mask = grid_config.get('use_circular_mask', True)
+
+        logger.info(f"  Grid parameters: cell_size={cell_size_m}m, radius={buffer_radius_m}m, circular_mask={use_circular_mask}")
+
+        # Ensure we're in British National Grid (meters)
+        if properties.crs != 'EPSG:27700':
+            logger.info("  Converting to EPSG:27700 (British National Grid)...")
+            properties_27700 = properties.to_crs('EPSG:27700')
+        else:
+            properties_27700 = properties.copy()
+
+        # Calculate absolute energy consumption for all properties
+        logger.info(f"  Step 1/5: Calculating absolute energy consumption...")
+        if 'TOTAL_FLOOR_AREA' in properties_27700.columns:
+            properties_27700['_absolute_energy_kwh'] = (
+                properties_27700['ENERGY_CONSUMPTION_CURRENT'] * properties_27700['TOTAL_FLOOR_AREA']
+            )
+        else:
+            properties_27700['_absolute_energy_kwh'] = properties_27700['ENERGY_CONSUMPTION_CURRENT']
+
+        # Extract coordinates
+        logger.info(f"  Step 2/5: Assigning properties to grid cells (cell_size={cell_size_m}m)...")
+        start_time = time.time()
+
+        coords = np.array([(geom.x, geom.y) for geom in properties_27700.geometry])
+        x_coords = coords[:, 0]
+        y_coords = coords[:, 1]
+
+        # Assign each property to a grid cell
+        cell_x = np.floor(x_coords / cell_size_m).astype(int)
+        cell_y = np.floor(y_coords / cell_size_m).astype(int)
+
+        properties_27700['_cell_x'] = cell_x
+        properties_27700['_cell_y'] = cell_y
+
+        # Count unique cells
+        unique_cells = len(properties_27700[['_cell_x', '_cell_y']].drop_duplicates())
+        logger.info(f"  ✓ Assigned {len(properties_27700):,} properties to {unique_cells:,} grid cells ({time.time() - start_time:.1f}s)")
+
+        # Aggregate to cell level
+        logger.info(f"  Step 3/5: Aggregating energy consumption per cell...")
+        start_time = time.time()
+
+        cell_aggregates = properties_27700.groupby(['_cell_x', '_cell_y']).agg({
+            '_absolute_energy_kwh': 'sum',
+            'geometry': 'count'  # Count properties per cell
+        }).rename(columns={'geometry': 'property_count'})
+
+        logger.info(f"  ✓ Aggregated to {len(cell_aggregates):,} populated cells ({time.time() - start_time:.1f}s)")
+
+        # Compute neighbor cell offsets for the given radius
+        logger.info(f"  Step 4/5: Computing neighborhood totals (radius={buffer_radius_m}m)...")
+        start_time = time.time()
+
+        # Calculate how many cells to look in each direction
+        max_cell_distance = int(np.ceil(buffer_radius_m / cell_size_m))
+
+        # Generate all possible cell offsets within the radius
+        offsets = []
+        for dx in range(-max_cell_distance, max_cell_distance + 1):
+            for dy in range(-max_cell_distance, max_cell_distance + 1):
+                if use_circular_mask:
+                    # Only include offsets where cell center is within radius
+                    # Cell centers are at (dx * cell_size + cell_size/2, dy * cell_size + cell_size/2)
+                    center_dist = np.sqrt((dx * cell_size_m) ** 2 + (dy * cell_size_m) ** 2)
+                    if center_dist <= buffer_radius_m:
+                        offsets.append((dx, dy))
+                else:
+                    # Use square Chebyshev distance (faster)
+                    offsets.append((dx, dy))
+
+        logger.info(f"  Using {len(offsets)} cell offsets for neighborhood aggregation")
+
+        # Create a dictionary for fast cell lookup
+        cell_dict = cell_aggregates.to_dict('index')
+
+        # Compute neighborhood totals for each cell
+        neighborhood_totals = {}
+
+        for (cx, cy), cell_data in cell_dict.items():
+            neighborhood_energy = 0.0
+            neighborhood_properties = 0
+
+            # Sum all neighbor cells within radius
+            for dx, dy in offsets:
+                neighbor_key = (cx + dx, cy + dy)
+                if neighbor_key in cell_dict:
+                    neighborhood_energy += cell_dict[neighbor_key]['_absolute_energy_kwh']
+                    neighborhood_properties += cell_dict[neighbor_key]['property_count']
+
+            neighborhood_totals[(cx, cy)] = {
+                'neighborhood_energy_kwh': neighborhood_energy,
+                'neighborhood_property_count': neighborhood_properties
+            }
+
+        logger.info(f"  ✓ Computed neighborhood totals for {len(neighborhood_totals):,} cells ({time.time() - start_time:.1f}s)")
+
+        # Assign neighborhood values back to properties
+        logger.info(f"  Step 5/5: Assigning neighborhood totals to properties and classifying tiers...")
+        start_time = time.time()
+
+        # Map cell coordinates back to properties
+        properties_27700['_neighborhood_energy_kwh'] = properties_27700.apply(
+            lambda row: neighborhood_totals.get((row['_cell_x'], row['_cell_y']), {}).get('neighborhood_energy_kwh', 0),
+            axis=1
+        )
+
+        properties_27700['_neighborhood_property_count'] = properties_27700.apply(
+            lambda row: neighborhood_totals.get((row['_cell_x'], row['_cell_y']), {}).get('neighborhood_property_count', 0),
+            axis=1
+        )
+
+        # Calculate heat density in GWh/km²
+        buffer_area_km2 = (np.pi * buffer_radius_m ** 2) / 1_000_000
+        properties_27700['heat_density_gwh_km2'] = (
+            properties_27700['_neighborhood_energy_kwh'] / 1_000_000
+        ) / buffer_area_km2
+
+        # Classify tiers for unclassified properties
+        unclassified_indices = properties_27700[unclassified_mask].index
+
+        for idx in unclassified_indices:
+            density = properties_27700.loc[idx, 'heat_density_gwh_km2']
+
+            if density >= self.heat_network_tiers['tier_3']['min_heat_density_gwh_km2']:
+                properties.loc[idx, 'heat_network_tier'] = 'Tier 3: High heat density'
+                properties.loc[idx, 'tier_number'] = 3
+                properties.loc[idx, 'heat_density_gwh_km2'] = density
+            elif density >= self.heat_network_tiers['tier_4']['min_heat_density_gwh_km2']:
+                properties.loc[idx, 'heat_network_tier'] = 'Tier 4: Medium heat density'
+                properties.loc[idx, 'tier_number'] = 4
+                properties.loc[idx, 'heat_density_gwh_km2'] = density
+            else:
+                # Tier 5 (already default)
+                properties.loc[idx, 'heat_density_gwh_km2'] = density
+
+        # Clean up temporary columns
+        properties_27700.drop(columns=['_cell_x', '_cell_y', '_absolute_energy_kwh',
+                                       '_neighborhood_energy_kwh', '_neighborhood_property_count'],
+                             inplace=True, errors='ignore')
+
+        tier_3_count = (properties['tier_number'] == 3).sum()
+        tier_4_count = (properties['tier_number'] == 4).sum()
+        tier_5_count = (properties['tier_number'] == 5).sum()
+
+        logger.info(f"  ✓ Classification complete ({time.time() - start_time:.1f}s)")
+        logger.info(f"  Tier 3 (High density ≥{self.heat_network_tiers['tier_3']['min_heat_density_gwh_km2']} GWh/km²): {tier_3_count:,}")
+        logger.info(f"  Tier 4 (Medium density {self.heat_network_tiers['tier_4']['min_heat_density_gwh_km2']}-{self.heat_network_tiers['tier_3']['min_heat_density_gwh_km2']} GWh/km²): {tier_4_count:,}")
+        logger.info(f"  Tier 5 (Low density <{self.heat_network_tiers['tier_4']['min_heat_density_gwh_km2']} GWh/km²): {tier_5_count:,}")
+
+        return properties
+
+    def _classify_heat_density_tiers_buffer(
+        self,
+        properties: gpd.GeoDataFrame,
+        unclassified_mask: pd.Series
+    ) -> gpd.GeoDataFrame:
+        """
+        Classify properties by heat density using buffer-based spatial join (legacy method).
+
+        WARNING: This method is memory-intensive and may cause OOM errors with large datasets.
+        Use grid-based method instead for 50k+ properties.
+
+        Args:
+            properties: GeoDataFrame with all properties
+            unclassified_mask: Boolean mask for properties not in Tier 1-2
+
+        Returns:
+            GeoDataFrame with heat density tiers assigned
+        """
+        logger.info("  WARNING: Buffer method is memory-intensive for large datasets")
+        logger.info("  Consider using grid method (spatial.method='grid') instead")
+
         try:
-            # Method 1: Grid-based heat density (proper implementation)
+            # Legacy buffer-based heat density calculation
             logger.info("  Using vectorized spatial operations for heat density calculation...")
             logger.info("  This may take 2-5 minutes for 10K+ properties...")
 

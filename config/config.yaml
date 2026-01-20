@@ -512,6 +512,32 @@ data_sources:
       fallback_enabled: true  # Use as fallback if HNPD unavailable
       use_for_heat_density: true  # Still use borough shapefiles for Tier 3-5 density
 
+# Spatial Analysis Configuration
+# Configure how heat density neighborhoods are calculated
+spatial:
+  # Method for calculating neighborhood heat density:
+  # - "grid": Grid-based aggregation (memory-efficient, scalable)
+  # - "buffer": Per-property buffer + spatial join (legacy, memory-intensive)
+  method: "grid"  # Default to grid method for scalability
+
+  # Disable spatial analysis entirely (escape hatch)
+  disable: false
+
+  # Grid-based aggregation parameters (used when method="grid")
+  grid:
+    # Grid cell size in meters (British National Grid EPSG:27700)
+    # Recommended: 125m (so 250m neighborhood = ~2 cells in each direction)
+    cell_size_m: 125
+
+    # Neighborhood radius in meters for heat density calculation
+    # This defines the distance within which to aggregate properties
+    buffer_radius_m: 250
+
+    # Use circular mask to approximate circular neighborhood
+    # If true, only includes grid cells whose centers are within buffer_radius_m
+    # If false, uses square Chebyshev distance (faster but less accurate)
+    use_circular_mask: true
+
 # Heat Network Parameters
 # See authoritative_sources.sections.heat_network_parameters
 # NOTE: current_penetration value (0.2%) may be outdated - UK heat networks now supply ~2-3% of heat
