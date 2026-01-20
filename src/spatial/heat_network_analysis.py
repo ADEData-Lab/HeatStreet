@@ -356,9 +356,58 @@ class HeatNetworkAnalyzer:
             logger.info("Valid options: 'hnpd', 'london_heat_map', 'both'")
             return None, None
 
+    def _create_geodataframe_lazy(self, df: pd.DataFrame) -> gpd.GeoDataFrame:
+        """
+        Create GeoDataFrame with geometry only for rows with valid coordinates.
+
+        Memory-efficient: avoids creating Point objects for rows without coords,
+        and avoids DataFrame.copy() operations.
+
+        Args:
+            df: DataFrame with LATITUDE and LONGITUDE columns
+
+        Returns:
+            GeoDataFrame with geometry column (None for rows without coords)
+        """
+        log_memory("Creating GeoDataFrame (lazy)", force=True)
+
+        # Check for required columns
+        if 'LATITUDE' not in df.columns or 'LONGITUDE' not in df.columns:
+            logger.warning("Missing LATITUDE/LONGITUDE columns - cannot create geometry")
+            return gpd.GeoDataFrame(df, geometry=None, crs='EPSG:4326')
+
+        # Find rows with valid coordinates
+        has_coords = df['LATITUDE'].notna() & df['LONGITUDE'].notna()
+        valid_count = has_coords.sum()
+
+        if valid_count == 0:
+            logger.warning("No valid coordinates found")
+            return gpd.GeoDataFrame(df, geometry=None, crs='EPSG:4326')
+
+        # Create geometry ONLY for rows with valid coords (memory-efficient)
+        # Use gpd.points_from_xy which is faster than list comprehension
+        valid_geometry = gpd.points_from_xy(
+            df.loc[has_coords, 'LONGITUDE'],
+            df.loc[has_coords, 'LATITUDE']
+        )
+
+        # Create GeoDataFrame without copying df
+        # Initialize with None geometry, then assign valid geometries
+        gdf = gpd.GeoDataFrame(df, crs='EPSG:4326')
+        gdf['geometry'] = None
+        gdf.loc[has_coords, 'geometry'] = valid_geometry.values
+
+        logger.info(f"Created GeoDataFrame with {valid_count:,} valid geometries of {len(df):,} rows")
+        log_memory("GeoDataFrame created", force=True)
+
+        return gdf
+
     def geocode_properties(self, df: pd.DataFrame) -> gpd.GeoDataFrame:
         """
         Convert property addresses to geographic coordinates.
+
+        Memory-efficient: uses Series.map for coordinate lookup, creates geometry
+        lazily only for rows with valid coordinates.
 
         Args:
             df: Property DataFrame with postcodes
@@ -366,75 +415,66 @@ class HeatNetworkAnalyzer:
         Returns:
             GeoDataFrame with property locations
         """
+        log_memory("geocode_properties START", force=True)
         logger.info("Geocoding properties...")
 
-        # Check if coordinates already exist in dataset
+        # Check if coordinates already exist with actual values
         if 'LATITUDE' in df.columns and 'LONGITUDE' in df.columns:
-            logger.info("Using existing coordinates from EPC data")
+            has_coords = df['LATITUDE'].notna() & df['LONGITUDE'].notna()
+            coord_count = has_coords.sum()
 
-            # Create geometry from lat/lon
-            geometry = [
-                Point(lon, lat) if pd.notna(lon) and pd.notna(lat) else None
-                for lon, lat in zip(df['LONGITUDE'], df['LATITUDE'])
-            ]
-
-            gdf = gpd.GeoDataFrame(df, geometry=geometry, crs='EPSG:4326')
-
-            # Remove properties without coordinates
-            initial_count = len(gdf)
-            gdf = gdf[gdf.geometry.notna()].copy()
-            logger.info(f"Geocoded {len(gdf):,} of {initial_count:,} properties ({len(gdf)/initial_count*100:.1f}%)")
-
-            return gdf
-
-        else:
-            # No lat/lon columns - try geocoding from postcodes
-            logger.info("No coordinate columns found - will geocode from postcodes")
-
-            # Check for postcode column
-            postcode_col = None
-            for col in df.columns:
-                if 'postcode' in col.lower():
-                    postcode_col = col
-                    break
-
-            if not postcode_col:
-                logger.error("❌ No postcode column found in EPC data")
-                logger.info(f"   Available columns: {', '.join(df.columns[:15].tolist())}...")
-                logger.info("")
-                logger.warning("   Cannot geocode without postcodes. Skipping spatial analysis...")
-                return None
-
-            logger.info(f"Found postcode column: {postcode_col}")
-            logger.info("🌐 Geocoding postcodes using free UK Postcode API (postcodes.io)")
-            logger.info("   This may take a few minutes for large datasets...")
-            logger.info("   Results will be cached for faster subsequent runs")
-            logger.info("")
-
-            try:
-                # Geocode using postcodes
-                gdf = self.geocoder.geocode_dataframe(
-                    df,
-                    postcode_column=postcode_col,
-                    batch_mode=True
-                )
-
-                if gdf is None or len(gdf) == 0:
-                    logger.error("❌ Geocoding failed - no coordinates obtained")
-                    return None
-
-                logger.info("✓ Geocoding complete!")
+            if coord_count > 0:
+                logger.info(f"Using existing coordinates ({coord_count:,} properties have lat/lon)")
+                gdf = self._create_geodataframe_lazy(df)
+                log_memory("geocode_properties END (existing coords)", force=True)
                 return gdf
 
-            except Exception as e:
-                logger.error(f"❌ Error during geocoding: {e}")
-                logger.info("")
-                logger.info("   Alternative options:")
-                logger.info("   1. Check your internet connection (API requires network access)")
-                logger.info("   2. Try again later (API may be temporarily unavailable)")
-                logger.info("   3. Download UK postcode centroids: https://www.freemaptools.com/download-uk-postcode-lat-lng.htm")
-                logger.info("")
+        # No lat/lon columns or all NaN - geocode from postcodes
+        logger.info("No valid coordinates found - will geocode from postcodes")
+
+        # Find postcode column
+        postcode_col = None
+        for col in df.columns:
+            if 'postcode' in col.lower():
+                postcode_col = col
+                break
+
+        if not postcode_col:
+            logger.error("❌ No postcode column found in EPC data")
+            logger.info(f"   Available columns: {', '.join(df.columns[:15].tolist())}...")
+            logger.warning("   Cannot geocode without postcodes. Skipping spatial analysis...")
+            return None
+
+        logger.info(f"Found postcode column: {postcode_col}")
+        logger.info("🌐 Geocoding postcodes using free UK Postcode API (postcodes.io)")
+        logger.info("   Results will be cached for faster subsequent runs")
+
+        try:
+            # Use memory-efficient in-place geocoding (no df.copy())
+            df = self.geocoder.geocode_dataframe_inplace(
+                df,
+                postcode_column=postcode_col,
+                batch_mode=True
+            )
+
+            # Create GeoDataFrame with lazy geometry
+            gdf = self._create_geodataframe_lazy(df)
+
+            if gdf is None or len(gdf) == 0:
+                logger.error("❌ Geocoding failed - no coordinates obtained")
                 return None
+
+            logger.info("✓ Geocoding complete!")
+            log_memory("geocode_properties END", force=True)
+            return gdf
+
+        except Exception as e:
+            logger.error(f"❌ Error during geocoding: {e}")
+            logger.info("   Alternative options:")
+            logger.info("   1. Check your internet connection (API requires network access)")
+            logger.info("   2. Try again later (API may be temporarily unavailable)")
+            logger.info("   3. Download UK postcode centroids: https://www.freemaptools.com/download-uk-postcode-lat-lng.htm")
+            return None
 
     def classify_heat_network_tiers(
         self,
