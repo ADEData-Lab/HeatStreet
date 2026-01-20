@@ -995,8 +995,10 @@ class ScenarioModeler:
             if tier_values is None:
                 processed['hn_ready'] = False
             else:
+                # BUG FIX: Only include Tiers 1-3 for heat network readiness, not Tier 4
+                # Tier 4 (medium density 5-15 GWh/km²) should be routed to heat pumps
                 processed['hn_ready'] = tier_values.fillna('').apply(
-                    lambda tier: isinstance(tier, str) and not str(tier).startswith('Tier 5') and str(tier).strip() != ''
+                    lambda tier: isinstance(tier, str) and str(tier).startswith(('Tier 1', 'Tier 2', 'Tier 3'))
                 )
 
         processed['ashp_meets_heat_demand'] = heat_demand <= self.ashp_heat_demand_threshold

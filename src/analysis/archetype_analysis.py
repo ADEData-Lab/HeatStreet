@@ -647,6 +647,10 @@ class ArchetypeAnalyzer:
         if output_path is None:
             output_path = DATA_OUTPUTS_DIR / "archetype_analysis_results.txt"
 
+        # BUG FIX: Also save JSON version for one_stop_report.py
+        json_output_path = output_path.with_suffix('.json')
+
+        # Save text version
         with open(output_path, 'w', encoding='utf-8') as f:
             f.write("ARCHETYPE CHARACTERIZATION RESULTS\n")
             f.write("="*70 + "\n\n")
@@ -667,6 +671,12 @@ class ArchetypeAnalyzer:
                 f.write(str(data) + "\n")
 
         logger.info(f"Results saved to: {output_path}")
+
+        # Save JSON version for structured access
+        import json
+        with open(json_output_path, 'w', encoding='utf-8') as f:
+            json.dump(self.results, f, indent=2, default=str)
+        logger.info(f"JSON results saved to: {json_output_path}")
 
 
 def main():

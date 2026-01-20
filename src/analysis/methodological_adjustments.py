@@ -579,8 +579,11 @@ class MethodologicalAdjustments:
 
         # Prebound summary
         if 'prebound_factor' in df.columns:
+            # BUG FIX: Count properties that were adjusted (prebound_factor != 1.0)
+            properties_adjusted = int((df['prebound_factor'] != 1.0).sum())
             summary['prebound_adjustment'] = {
                 'applied': True,
+                'properties_adjusted': properties_adjusted,
                 'mean_factor': df['prebound_factor'].mean(),
                 'description': 'Adjusts EPC-modeled consumption to realistic baseline (Few et al., 2023)'
             }
