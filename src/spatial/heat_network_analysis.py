@@ -859,23 +859,34 @@ class HeatNetworkAnalyzer:
 
         logger.info(f"  ✓ Computed neighborhood totals for {len(neighborhood_df):,} cells ({time.time() - start_time:.1f}s)")
 
-        # Assign neighborhood values back to properties
-        logger.info(f"  Step 5a/5: Joining neighborhood totals to properties...")
+        # Assign neighborhood values back to properties using memory-efficient Series.map()
+        # (avoids DataFrame.join which creates a full copy)
+        logger.info(f"  Step 5a/5: Mapping neighborhood totals to properties...")
         start_time_join = time.time()
 
-        # Profiling: Log dtypes for join keys to catch type mismatch issues
-        log_dtype(properties_27700['_cell_id'], "properties._cell_id")
-        log_dtype(neighborhood_df.index.to_series(), "neighborhood_df.index")
-        log_memory("Before join")
+        # Log RSS before mapping
+        rss_before = log_memory("Before Step 5a mapping", force=True)
 
-        # Vectorized join using cell_id (much faster than apply)
-        properties_27700 = properties_27700.join(neighborhood_df, on='_cell_id')
+        # Ensure cell_id is int64 for fast hash lookups
+        cell_id_col = properties_27700['_cell_id'].astype(np.int64)
 
-        # Fill any missing values (cells with no neighbors) with 0
-        properties_27700['neighborhood_energy_kwh'] = properties_27700['neighborhood_energy_kwh'].fillna(0)
-        properties_27700['neighborhood_property_count'] = properties_27700['neighborhood_property_count'].fillna(0)
+        # Create Series for each neighborhood value (indexed by int64 cell_id)
+        # neighborhood_df already has int64 index from earlier
+        neigh_energy_series = neighborhood_df['neighborhood_energy_kwh']
+        neigh_count_series = neighborhood_df['neighborhood_property_count']
 
-        logger.info(f"  ✓ Neighborhood join complete ({time.time() - start_time_join:.1f}s)")
+        # Log dtypes to verify
+        log_dtype(cell_id_col, "properties._cell_id")
+        log_dtype(neigh_energy_series.index.to_series(), "neighborhood_df.index")
+
+        # Map values using Series.map() - much more memory efficient than join
+        # This avoids creating a copy of the entire DataFrame
+        properties_27700['neighborhood_energy_kwh'] = cell_id_col.map(neigh_energy_series).fillna(0.0)
+        properties_27700['neighborhood_property_count'] = cell_id_col.map(neigh_count_series).fillna(0).astype(np.int64)
+
+        # Log RSS after mapping
+        rss_after = log_memory("After Step 5a mapping", force=True)
+        logger.info(f"  ✓ Neighborhood mapping complete ({time.time() - start_time_join:.1f}s, RSS delta: {rss_after - rss_before:+.1f} MB)")
 
         # Calculate heat density in GWh/km² (vectorized)
         logger.info(f"  Step 5b/5: Calculating heat densities and classifying tiers...")
