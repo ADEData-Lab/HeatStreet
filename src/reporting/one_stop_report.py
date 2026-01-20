@@ -727,8 +727,11 @@ class OneStopReportGenerator:
         for col, (measure, label) in measures.items():
             if col in readiness_df.columns:
                 count = int(readiness_df[col].sum())
+                # BUG FIX: Filter count to only include non-ready properties (Tier 2-5)
+                # to prevent percentages exceeding 100%
+                count_non_ready = int(readiness_df[readiness_df["hp_readiness_tier"] > 1][col].sum()) if "hp_readiness_tier" in readiness_df.columns else count
                 pct_all = (count / total_properties * 100) if total_properties > 0 else 0
-                pct_non_ready = (count / non_ready_count * 100) if non_ready_count > 0 else 0
+                pct_non_ready = (count_non_ready / non_ready_count * 100) if non_ready_count > 0 else 0
 
                 datapoints.extend([
                     AnnotatedDatapoint(
@@ -755,7 +758,7 @@ class OneStopReportGenerator:
                         value=pct_non_ready,
                         definition=f"Share of non-ready properties needing {measure} (percent of non-ready).",
                         denominator="Non-ready properties (Tier 2-5)",
-                        source=f"data/outputs/retrofit_readiness_analysis.csv -> {col}.sum() / (total - tier_1)",
+                        source=f"data/outputs/retrofit_readiness_analysis.csv -> {col}[hp_readiness_tier > 1].sum() / (total - tier_1)",
                         usage="Fabric intervention share (non-ready)",
                     ),
                 ])
@@ -954,11 +957,14 @@ class OneStopReportGenerator:
 
             # Cost-effectiveness metrics (if not baseline)
             if not is_baseline:
+                # BUG FIX: Add marginal_count to explain the gap between cost_effective + not_cost_effective and total
                 ce_fields = {
-                    "cost_effective_count": ("Cost-effective properties (count)", "Count of cost-effective properties (count).", "All properties in scenario"),
-                    "cost_effective_pct": ("Cost-effective properties (%)", "Share of cost-effective properties (percent).", "All properties in scenario"),
-                    "not_cost_effective_count": ("Not cost-effective (count)", "Count of non cost-effective properties (count).", "All properties in scenario"),
-                    "not_cost_effective_pct": ("Not cost-effective (%)", "Share of non cost-effective properties (percent).", "All properties in scenario"),
+                    "cost_effective_count": ("Cost-effective properties (count)", "Count of cost-effective properties (payback ≤15 years) (count).", "All properties in scenario"),
+                    "cost_effective_pct": ("Cost-effective properties (%)", "Share of cost-effective properties (payback ≤15 years) (percent).", "All properties in scenario"),
+                    "marginal_count": ("Marginally cost-effective properties (count)", "Count of marginally cost-effective properties (payback 15-25 years) (count).", "All properties in scenario"),
+                    "marginal_pct": ("Marginally cost-effective properties (%)", "Share of marginally cost-effective properties (payback 15-25 years) (percent).", "All properties in scenario"),
+                    "not_cost_effective_count": ("Not cost-effective (count)", "Count of non cost-effective properties (payback >25 years or no savings) (count).", "All properties in scenario"),
+                    "not_cost_effective_pct": ("Not cost-effective (%)", "Share of non cost-effective properties (payback >25 years or no savings) (percent).", "All properties in scenario"),
                     "carbon_abatement_cost_mean": ("Carbon abatement cost (mean)", "Mean carbon abatement cost (GBP/tCO₂).", "Cost-effective properties"),
                     "carbon_abatement_cost_median": ("Carbon abatement cost (median)", "Median carbon abatement cost (GBP/tCO₂).", "Cost-effective properties"),
                 }
