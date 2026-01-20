@@ -1481,6 +1481,7 @@ def main():
     has_existing, existing_file, record_count = check_existing_data()
 
     df = None
+    fresh_data_downloaded = False  # Track if we just downloaded new data
 
     if has_existing:
         # Ask user whether to use existing data or download new
@@ -1502,9 +1503,11 @@ def main():
             console.print()
             console.print("[yellow]Downloading new data (existing data will be overwritten)...[/yellow]")
             console.print()
+            fresh_data_downloaded = True  # Flag that we're downloading fresh data
 
     # If not using existing data, download new
     if df is None or df.empty:
+        fresh_data_downloaded = True  # Flag that we're downloading fresh data
         from_year = 2015
 
         # Show summary
@@ -1540,13 +1543,16 @@ def main():
     df_raw = df.copy()
 
     # Phase 2: Check for existing validated data before running validation
+    # If we just downloaded fresh data, force re-validation instead of using old validated data
     validated_path = DATA_PROCESSED_DIR / "epc_london_validated.csv"
-    df_validated = prompt_use_existing_dataframe(
-        "Data Validation",
-        "validated EPC dataset",
-        validated_path,
-        analysis_logger
-    )
+    df_validated = None
+    if not fresh_data_downloaded:
+        df_validated = prompt_use_existing_dataframe(
+            "Data Validation",
+            "validated EPC dataset",
+            validated_path,
+            analysis_logger
+        )
     validation_report = None
 
     if df_validated is not None:
@@ -1585,13 +1591,16 @@ def main():
         return
 
     # Phase 2.5: Methodological Adjustments (check for existing adjusted data)
+    # If we just downloaded fresh data, force re-adjustment instead of using old adjusted data
     adjusted_path = DATA_PROCESSED_DIR / "epc_london_adjusted.csv"
-    df_adjusted = prompt_use_existing_dataframe(
-        "Methodological Adjustments",
-        "methodologically adjusted dataset",
-        adjusted_path,
-        analysis_logger
-    )
+    df_adjusted = None
+    if not fresh_data_downloaded:
+        df_adjusted = prompt_use_existing_dataframe(
+            "Methodological Adjustments",
+            "methodologically adjusted dataset",
+            adjusted_path,
+            analysis_logger
+        )
     adjustment_summary = None
     if df_adjusted is not None:
         adjustment_summary = load_json_if_exists(DATA_PROCESSED_DIR / "methodological_adjustments_summary.json")
