@@ -6,6 +6,7 @@ Supports multiple geocoding providers with fallback options.
 """
 
 import pandas as pd
+import numpy as np
 import requests
 import time
 from pathlib import Path
@@ -16,6 +17,8 @@ import geopandas as gpd
 from shapely.geometry import Point
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import threading
+
+from src.utils.profiling import log_memory
 
 
 class PostcodeGeocoder:
@@ -209,6 +212,78 @@ class PostcodeGeocoder:
             self._save_cache()
 
         return results
+
+    def geocode_dataframe_inplace(
+        self,
+        df: pd.DataFrame,
+        postcode_column: str = 'POSTCODE',
+        batch_mode: bool = True
+    ) -> pd.DataFrame:
+        """
+        Geocode postcodes and add lat/lon columns IN-PLACE (memory-efficient).
+
+        This method avoids DataFrame.copy() and uses Series.map() for minimal
+        memory overhead. Suitable for large datasets (700k+ rows) on 16GB systems.
+
+        Args:
+            df: DataFrame with postcode column (modified in-place)
+            postcode_column: Name of postcode column
+            batch_mode: Use batch API (much faster)
+
+        Returns:
+            The same DataFrame with LATITUDE and LONGITUDE columns added (float32)
+        """
+        log_memory("Geocoding START", force=True)
+        logger.info(f"Geocoding {len(df):,} properties from postcode column: {postcode_column}")
+
+        if postcode_column not in df.columns:
+            logger.error(f"Column '{postcode_column}' not found in DataFrame")
+            return df
+
+        # Get unique postcodes and geocode them
+        unique_postcodes = df[postcode_column].dropna().unique()
+        logger.info(f"Found {len(unique_postcodes):,} unique postcodes")
+
+        # Geocode unique postcodes (this populates self.cache)
+        if batch_mode:
+            coords_map = self.geocode_batch(unique_postcodes)
+        else:
+            coords_map = {}
+            for pc in tqdm(unique_postcodes, desc="Geocoding"):
+                result = self.geocode_single(pc)
+                if result:
+                    coords_map[self.clean_postcode(pc)] = result
+                time.sleep(0.05)
+
+        logger.info(f"Successfully geocoded {len(coords_map):,} postcodes ({len(coords_map)/max(1,len(unique_postcodes))*100:.1f}%)")
+
+        # Create lookup Series indexed by cleaned postcode (for fast map)
+        # Extract lat/lon into separate Series with float32 dtype
+        postcodes_list = list(coords_map.keys())
+        lat_values = np.array([coords_map[pc][0] for pc in postcodes_list], dtype=np.float32)
+        lon_values = np.array([coords_map[pc][1] for pc in postcodes_list], dtype=np.float32)
+
+        postcode_to_lat = pd.Series(lat_values, index=postcodes_list)
+        postcode_to_lon = pd.Series(lon_values, index=postcodes_list)
+
+        log_memory("Before postcode mapping", force=True)
+
+        # Clean postcodes in input df (no copy - creates new column)
+        df['POSTCODE_CLEAN'] = df[postcode_column].apply(self.clean_postcode)
+
+        # Map lat/lon using Series.map (memory-efficient, no DataFrame copy)
+        df['LATITUDE'] = df['POSTCODE_CLEAN'].map(postcode_to_lat).astype(np.float32)
+        df['LONGITUDE'] = df['POSTCODE_CLEAN'].map(postcode_to_lon).astype(np.float32)
+
+        # Drop temporary column
+        df.drop(columns=['POSTCODE_CLEAN'], inplace=True)
+
+        rss_after = log_memory("After postcode mapping", force=True)
+
+        geocoded_count = df['LATITUDE'].notna().sum()
+        logger.info(f"✓ Added coordinates to {geocoded_count:,} of {len(df):,} properties ({geocoded_count/len(df)*100:.1f}%)")
+
+        return df
 
     def geocode_dataframe(self,
                          df: pd.DataFrame,
