@@ -14,6 +14,8 @@ from loguru import logger
 from concurrent.futures import ProcessPoolExecutor
 import multiprocessing
 import os
+import gc
+import time
 
 import sys
 sys.path.append(str(Path(__file__).parent.parent.parent))
@@ -58,6 +60,10 @@ from src.utils.modeling_utils import (
     calculate_carbon_abatement_cost,
     calculate_cost_effectiveness_summary,
     summarize_series,
+)
+from src.utils.profiling import (
+    profile_enabled, log_memory, log_dataframe_info,
+    get_worker_count, get_chunk_size
 )
 
 
@@ -163,9 +169,42 @@ class PropertyUpgrade:
     discounted_payback_years: float = np.inf
 
 
+# Global state for worker processes (set by initializer)
+_WORKER_COSTS = None
+_WORKER_COST_RULES = None
+_WORKER_CONFIG = None
+_WORKER_ADJUSTER = None
+
+
+def _worker_initializer(costs, cost_rules, config):
+    """
+    Initialize shared objects once per worker process.
+
+    This avoids repeated pickling of large config objects and reduces memory usage.
+    Called once when each worker process starts.
+    """
+    global _WORKER_COSTS, _WORKER_COST_RULES, _WORKER_CONFIG, _WORKER_ADJUSTER
+    _WORKER_COSTS = costs
+    _WORKER_COST_RULES = cost_rules
+    _WORKER_CONFIG = config
+    _WORKER_ADJUSTER = MethodologicalAdjustments()
+
+
 def _calculate_property_upgrade_worker(args):
     """Worker wrapper to enable parallel execution in ProcessPool."""
-    return _calculate_property_upgrade_core(*args)
+    # Use global shared state if available (set by initializer)
+    if _WORKER_COSTS is not None:
+        # Unpack only property-specific args (costs/config from globals)
+        (property_dict, scenario_name, measures, applied_fabric,
+         removed_hp, hybrid_pathway, removed_measures) = args
+        return _calculate_property_upgrade_core(
+            property_dict, scenario_name, measures,
+            _WORKER_COSTS, _WORKER_COST_RULES, _WORKER_CONFIG,
+            applied_fabric, removed_hp, hybrid_pathway, removed_measures
+        )
+    else:
+        # Fallback to full args (backwards compatibility)
+        return _calculate_property_upgrade_core(*args)
 
 
 def _calculate_property_upgrade_core(
@@ -199,10 +238,14 @@ def _calculate_property_upgrade_core(
     design_flow_temps = hp_cfg.get('design_flow_temps', [])
     cost_calculator = CostCalculator(costs, cost_rules)
 
-    adjuster = getattr(_calculate_property_upgrade_core, "_adjuster", None)
+    # Use adjuster from initializer globals if available (avoids repeated creation)
+    adjuster = _WORKER_ADJUSTER
     if adjuster is None:
-        adjuster = MethodologicalAdjustments()
-        setattr(_calculate_property_upgrade_core, "_adjuster", adjuster)
+        # Fallback: cache on function for non-initializer usage
+        adjuster = getattr(_calculate_property_upgrade_core, "_adjuster", None)
+        if adjuster is None:
+            adjuster = MethodologicalAdjustments()
+            setattr(_calculate_property_upgrade_core, "_adjuster", adjuster)
 
     def _flow_temp_reduction(measure_name: str) -> float:
         lookup = 'radiator_upsizing' if measure_name == 'emitter_upgrades' else measure_name
@@ -695,7 +738,11 @@ class ScenarioModeler:
         scenario_config: Dict
     ) -> Dict:
         """
-        Model a single decarbonization scenario with parallel processing.
+        Model a single decarbonization scenario with memory-efficient chunked processing.
+
+        Uses chunked processing to avoid OOM on large datasets. Configuration via env vars:
+        - HEATSTREET_WORKERS: Number of parallel workers (default: 2)
+        - HEATSTREET_CHUNK_SIZE: Rows per chunk (default: 50000)
 
         Args:
             df: Property DataFrame
@@ -705,6 +752,7 @@ class ScenarioModeler:
         Returns:
             Dictionary containing scenario results
         """
+        scenario_start = time.time()
         measures = scenario_config.get('measures', [])
         measures = self._resolve_scenario_measures(measures)
 
@@ -716,46 +764,74 @@ class ScenarioModeler:
 
         df_with_flags = self._preprocess_ashp_readiness(df_ready)
 
-        # Calculate costs and impacts for each property using parallel processing
-        logger.info(f"  Processing {len(df_with_flags):,} properties in parallel...")
+        # Get configurable scaling parameters
+        max_workers = get_worker_count(default=2)
+        chunk_size = get_chunk_size(default=50000)
+        total_properties = len(df_with_flags)
 
-        # Convert DataFrame rows to dictionaries for pickling
-        property_dicts = df_with_flags.to_dict('records')
+        logger.info(f"  Processing {total_properties:,} properties (workers={max_workers}, chunk_size={chunk_size:,})")
+        log_memory("Scenario modeling START")
+        log_dataframe_info(df_with_flags, "Input DataFrame")
 
-        # Prepare arguments for parallel processing
-        args_list = []
+        # Process in chunks to limit memory usage
+        all_upgrades = []
+        num_chunks = (total_properties + chunk_size - 1) // chunk_size
 
-        for prop_dict in property_dicts:
-            property_measures, applied_fabric, removed_hp, hybrid_pathway, removed_measures = self._build_property_measures(
-                measures,
-                prop_dict
-            )
+        for chunk_idx in range(num_chunks):
+            chunk_start = chunk_idx * chunk_size
+            chunk_end = min(chunk_start + chunk_size, total_properties)
+            chunk_df = df_with_flags.iloc[chunk_start:chunk_end]
 
-            args_list.append(
-                (
+            chunk_time_start = time.time()
+            logger.info(f"  Chunk {chunk_idx + 1}/{num_chunks}: rows {chunk_start:,}-{chunk_end:,} ({len(chunk_df):,} properties)")
+
+            # Convert chunk to dicts (only this chunk, not full DataFrame)
+            property_dicts = chunk_df.to_dict('records')
+
+            # Prepare arguments - DON'T include costs/config (use initializer globals)
+            args_list = []
+            for prop_dict in property_dicts:
+                property_measures, applied_fabric, removed_hp, hybrid_pathway, removed_measures = self._build_property_measures(
+                    measures,
+                    prop_dict
+                )
+                # Compact args tuple (costs/config come from worker initializer)
+                args_list.append((
                     prop_dict,
                     scenario_name,
                     property_measures,
-                    self.costs,
-                    self.cost_rules,
-                    self.config,
                     applied_fabric,
                     removed_hp,
                     hybrid_pathway,
                     removed_measures
-                )
-            )
+                ))
 
-        # Use ProcessPoolExecutor for CPU-bound calculations
-        # Use max_workers based on CPU count, leave some cores free
-        max_workers = max(1, multiprocessing.cpu_count() - 1)
+            # Process chunk with limited workers and initializer for shared state
+            with ProcessPoolExecutor(
+                max_workers=max_workers,
+                initializer=_worker_initializer,
+                initargs=(self.costs, self.cost_rules, self.config)
+            ) as executor:
+                chunk_upgrades = list(executor.map(
+                    _calculate_property_upgrade_worker,
+                    args_list,
+                    chunksize=min(100, len(args_list))
+                ))
 
-        with ProcessPoolExecutor(max_workers=max_workers) as executor:
-            property_upgrades = list(executor.map(_calculate_property_upgrade_worker, args_list, chunksize=100))
+            all_upgrades.extend(chunk_upgrades)
 
-        logger.info(f"  Parallel processing complete!")
+            chunk_time = time.time() - chunk_time_start
+            logger.info(f"    Chunk {chunk_idx + 1} complete in {chunk_time:.1f}s ({len(chunk_df) / chunk_time:.0f} props/sec)")
 
-        property_df = pd.DataFrame([asdict(upgrade) for upgrade in property_upgrades])
+            # Force garbage collection between chunks to release memory
+            del property_dicts, args_list, chunk_upgrades
+            gc.collect()
+            log_memory(f"After chunk {chunk_idx + 1}")
+
+        total_time = time.time() - scenario_start
+        logger.info(f"  Parallel processing complete! Total time: {total_time:.1f}s")
+
+        property_df = pd.DataFrame([asdict(upgrade) for upgrade in all_upgrades])
         self.property_results[scenario_name] = property_df
 
         # Aggregate results

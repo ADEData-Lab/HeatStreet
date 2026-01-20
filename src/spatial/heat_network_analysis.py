@@ -28,6 +28,9 @@ from config.config import (
 from src.acquisition.london_gis_downloader import LondonGISDownloader
 from src.acquisition.hnpd_downloader import HNPDDownloader
 from src.spatial.postcode_geocoder import PostcodeGeocoder
+from src.utils.profiling import (
+    profile_enabled, log_memory, log_dataframe_info, log_dtype, timed_section
+)
 
 
 class HeatNetworkAnalyzer:
@@ -714,6 +717,11 @@ class HeatNetworkAnalyzer:
 
         overall_start = time.time()
 
+        # Profiling: Log initial state
+        log_memory("Grid classification START")
+        log_dataframe_info(properties, "Input properties")
+        logger.info(f"  Processing {len(properties):,} total properties, {unclassified_mask.sum():,} unclassified")
+
         spatial_config = self.config.get('spatial', {})
         grid_config = spatial_config.get('grid', {})
 
@@ -767,16 +775,18 @@ class HeatNetworkAnalyzer:
         logger.info(f"  Step 3/5: Aggregating energy consumption per cell...")
         start_time = time.time()
 
+        # Add cell_x and cell_y columns BEFORE groupby (fix for column access bug)
+        properties_27700['_cell_x'] = cell_x
+        properties_27700['_cell_y'] = cell_y
+
         cell_aggregates = properties_27700.groupby('_cell_id').agg({
             '_absolute_energy_kwh': 'sum',
             'geometry': 'count'  # Count properties per cell
         }).rename(columns={'geometry': 'property_count'})
 
-        # Also need cell_x and cell_y for offset calculations
+        # Get cell_x and cell_y for offset calculations
         cell_coords = properties_27700.groupby('_cell_id')[['_cell_x', '_cell_y']].first()
         cell_aggregates = cell_aggregates.join(cell_coords)
-        properties_27700['_cell_x'] = cell_x
-        properties_27700['_cell_y'] = cell_y
 
         logger.info(f"  ✓ Aggregated to {len(cell_aggregates):,} populated cells ({time.time() - start_time:.1f}s)")
 
@@ -803,41 +813,60 @@ class HeatNetworkAnalyzer:
 
         logger.info(f"  Using {len(offsets)} cell offsets for neighborhood aggregation")
 
-        # Vectorized neighborhood computation using broadcasting
-        # Create lookup dictionary for fast access: cell_id -> (energy, count)
-        cell_dict = {}
-        for cell_id, row in cell_aggregates.iterrows():
-            cell_dict[cell_id] = (row['_absolute_energy_kwh'], row['property_count'], row['_cell_x'], row['_cell_y'])
+        # Fully vectorized neighborhood computation using pandas Series.map()
+        # Extract arrays from cell_aggregates (avoid iterrows)
+        cell_ids = cell_aggregates.index.values.astype(np.int64)
+        cell_x_arr = cell_aggregates['_cell_x'].values.astype(np.int64)
+        cell_y_arr = cell_aggregates['_cell_y'].values.astype(np.int64)
 
-        # Compute neighborhood totals for each cell
-        neighborhood_data = []
+        n_cells = len(cell_ids)
 
-        for cell_id, (cell_energy, cell_count, cx, cy) in cell_dict.items():
-            neighborhood_energy = 0.0
-            neighborhood_properties = 0
+        # Create Series for O(1) vectorized lookups: cell_id -> value
+        energy_series = pd.Series(
+            cell_aggregates['_absolute_energy_kwh'].values,
+            index=cell_ids,
+            dtype=np.float64
+        )
+        count_series = pd.Series(
+            cell_aggregates['property_count'].values,
+            index=cell_ids,
+            dtype=np.int64
+        )
 
-            # Sum all neighbor cells within radius
-            for dx, dy in offsets:
-                neighbor_cell_id = (cx + dx) * multiplier + (cy + dy)
-                if neighbor_cell_id in cell_dict:
-                    neighbor_energy, neighbor_count, _, _ = cell_dict[neighbor_cell_id]
-                    neighborhood_energy += neighbor_energy
-                    neighborhood_properties += neighbor_count
+        # Initialize accumulators
+        neighborhood_energy = np.zeros(n_cells, dtype=np.float64)
+        neighborhood_count = np.zeros(n_cells, dtype=np.int64)
 
-            neighborhood_data.append({
-                'cell_id': cell_id,
-                'neighborhood_energy_kwh': neighborhood_energy,
-                'neighborhood_property_count': neighborhood_properties
-            })
+        # For each offset, compute neighbor cell_ids vectorized and lookup values
+        # This is O(n_offsets) iterations with O(n_cells) vectorized ops each
+        for dx, dy in offsets:
+            # Compute neighbor cell_ids for all cells at this offset (vectorized)
+            neighbor_cell_ids = ((cell_x_arr + dx) * multiplier + (cell_y_arr + dy)).astype(np.int64)
 
-        # Convert to DataFrame for fast merge
-        neighborhood_df = pd.DataFrame(neighborhood_data).set_index('cell_id')
+            # Vectorized lookup using Series.map() - returns NaN for missing
+            neighbor_energy = energy_series.reindex(neighbor_cell_ids).values
+            neighbor_count = count_series.reindex(neighbor_cell_ids).values
+
+            # Accumulate (NaN becomes 0)
+            neighborhood_energy += np.nan_to_num(neighbor_energy, nan=0.0)
+            neighborhood_count += np.nan_to_num(neighbor_count, nan=0).astype(np.int64)
+
+        # Create result DataFrame with int64 index to match properties
+        neighborhood_df = pd.DataFrame({
+            'neighborhood_energy_kwh': neighborhood_energy,
+            'neighborhood_property_count': neighborhood_count
+        }, index=pd.Index(cell_ids, dtype=np.int64, name='cell_id'))
 
         logger.info(f"  ✓ Computed neighborhood totals for {len(neighborhood_df):,} cells ({time.time() - start_time:.1f}s)")
 
         # Assign neighborhood values back to properties
         logger.info(f"  Step 5a/5: Joining neighborhood totals to properties...")
         start_time_join = time.time()
+
+        # Profiling: Log dtypes for join keys to catch type mismatch issues
+        log_dtype(properties_27700['_cell_id'], "properties._cell_id")
+        log_dtype(neighborhood_df.index.to_series(), "neighborhood_df.index")
+        log_memory("Before join")
 
         # Vectorized join using cell_id (much faster than apply)
         properties_27700 = properties_27700.join(neighborhood_df, on='_cell_id')
@@ -911,6 +940,7 @@ class HeatNetworkAnalyzer:
         logger.info(f"  Tier 5 (Low density <{self.heat_network_tiers['tier_4']['min_heat_density_gwh_km2']} GWh/km²): {tier_5_count:,}")
 
         overall_time = time.time() - overall_start
+        log_memory("Grid classification END")
         logger.info(f"  ═══════════════════════════════════════════════════════════")
         logger.info(f"  Grid-based classification COMPLETE in {overall_time:.1f}s total")
         logger.info(f"  ═══════════════════════════════════════════════════════════")
