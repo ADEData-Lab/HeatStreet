@@ -398,7 +398,7 @@ class HeatNetworkAnalyzer:
             df.loc[has_coords, 'LONGITUDE'],
             df.loc[has_coords, 'LATITUDE']
         )
-        geometry.loc[has_coords] = valid_geometry.values
+        geometry.loc[has_coords] = valid_geometry
 
         # Create GeoDataFrame with explicit geometry parameter and CRS
         gdf = gpd.GeoDataFrame(df, geometry=geometry, crs='EPSG:4326')
