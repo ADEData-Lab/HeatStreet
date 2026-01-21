@@ -374,7 +374,9 @@ class HeatNetworkAnalyzer:
         # Check for required columns
         if 'LATITUDE' not in df.columns or 'LONGITUDE' not in df.columns:
             logger.warning("Missing LATITUDE/LONGITUDE columns - cannot create geometry")
-            return gpd.GeoDataFrame(df, geometry=None, crs='EPSG:4326')
+            # Create empty geometry Series filled with None
+            empty_geometry = pd.Series([None] * len(df), index=df.index, dtype=object)
+            return gpd.GeoDataFrame(df, geometry=empty_geometry, crs='EPSG:4326')
 
         # Find rows with valid coordinates
         has_coords = df['LATITUDE'].notna() & df['LONGITUDE'].notna()
@@ -382,20 +384,24 @@ class HeatNetworkAnalyzer:
 
         if valid_count == 0:
             logger.warning("No valid coordinates found")
-            return gpd.GeoDataFrame(df, geometry=None, crs='EPSG:4326')
+            # Create empty geometry Series filled with None
+            empty_geometry = pd.Series([None] * len(df), index=df.index, dtype=object)
+            return gpd.GeoDataFrame(df, geometry=empty_geometry, crs='EPSG:4326')
 
-        # Create geometry ONLY for rows with valid coords (memory-efficient)
+        # Create geometry Series: None for invalid coords, Point for valid coords
+        # This is the correct way to create a GeoDataFrame with mixed geometry
+        geometry = pd.Series([None] * len(df), index=df.index, dtype=object)
+
+        # Create Point geometries ONLY for rows with valid coords (memory-efficient)
         # Use gpd.points_from_xy which is faster than list comprehension
         valid_geometry = gpd.points_from_xy(
             df.loc[has_coords, 'LONGITUDE'],
             df.loc[has_coords, 'LATITUDE']
         )
+        geometry.loc[has_coords] = valid_geometry.values
 
-        # Create GeoDataFrame without copying df
-        # Initialize with None geometry, then assign valid geometries
-        gdf = gpd.GeoDataFrame(df, crs='EPSG:4326')
-        gdf['geometry'] = None
-        gdf.loc[has_coords, 'geometry'] = valid_geometry.values
+        # Create GeoDataFrame with explicit geometry parameter and CRS
+        gdf = gpd.GeoDataFrame(df, geometry=geometry, crs='EPSG:4326')
 
         logger.info(f"Created GeoDataFrame with {valid_count:,} valid geometries of {len(df):,} rows")
         log_memory("GeoDataFrame created", force=True)
@@ -494,6 +500,7 @@ class HeatNetworkAnalyzer:
             GeoDataFrame with tier classification added
         """
         logger.info("Classifying properties by heat network tier...")
+        log_memory("classify_heat_network_tiers START", force=True)
 
         # Initialize tier column
         properties['heat_network_tier'] = 'Tier 5: Low heat density'
@@ -506,6 +513,7 @@ class HeatNetworkAnalyzer:
         # Tier 1: Adjacent to existing network (within 250m)
         if heat_networks is not None:
             logger.info("Identifying Tier 1: Adjacent to existing network...")
+            log_memory("Before Tier 1 classification")
 
             if heat_networks.crs != 'EPSG:27700':
                 heat_networks = heat_networks.to_crs('EPSG:27700')
@@ -514,7 +522,7 @@ class HeatNetworkAnalyzer:
             buffer_distance = self.heat_network_tiers['tier_1']['distance_meters']
             heat_network_buffer = heat_networks.buffer(buffer_distance).unary_union
 
-            # Check which properties are within buffer
+            # Check which properties are within buffer (vectorized)
             tier_1_mask = properties.geometry.within(heat_network_buffer)
             tier_1_count = tier_1_mask.sum()
 
@@ -522,6 +530,7 @@ class HeatNetworkAnalyzer:
             properties.loc[tier_1_mask, 'tier_number'] = 1
 
             logger.info(f"  Tier 1: {tier_1_count:,} properties ({tier_1_count/len(properties)*100:.1f}%)")
+            log_memory("After Tier 1 classification")
 
         # Tier 2: Within planned Heat Network Zone
         if heat_zones is not None:
@@ -532,21 +541,38 @@ class HeatNetworkAnalyzer:
                 logger.info("  Converting heat zones to EPSG:27700...")
                 heat_zones = heat_zones.to_crs('EPSG:27700')
 
-            # Use spatial join instead of unary_union for better performance
-            logger.info("  Performing spatial join (this may take 1-2 minutes for large datasets)...")
+            # Use spatial join with bounding box pre-filtering for better performance
+            logger.info("  Performing spatial join (optimized with bounding box pre-filtering)...")
+            log_memory("Before Tier 2 spatial join")
 
             # Filter to properties not already classified as Tier 1
-            unclassified_properties = properties[properties['tier_number'] > 2].copy()
+            # No .copy() needed - we're only reading from this filtered view
+            unclassified_properties = properties[properties['tier_number'] > 2]
 
             if len(unclassified_properties) > 0:
-                # Use sjoin to find properties within any heat zone
-                # This is much faster than unary_union + within for complex geometries
-                joined = gpd.sjoin(
-                    unclassified_properties[['geometry']],
-                    heat_zones[['geometry']],
-                    how='left',
-                    predicate='within'
-                )
+                # Pre-filter using bounding box to reduce spatial join workload
+                # This can reduce processing time by 50-80% for sparse geometries
+                zones_bounds = heat_zones.total_bounds  # [minx, miny, maxx, maxy]
+
+                # Filter to properties within bounding box of all heat zones
+                props_in_bbox = unclassified_properties.cx[zones_bounds[0]:zones_bounds[2], zones_bounds[1]:zones_bounds[3]]
+
+                if len(props_in_bbox) > 0:
+                    logger.info(f"  Bounding box filter: {len(props_in_bbox):,} of {len(unclassified_properties):,} properties to check")
+
+                    # Use sjoin to find properties within any heat zone
+                    # This is much faster than unary_union + within for complex geometries
+                    joined = gpd.sjoin(
+                        props_in_bbox[['geometry']],
+                        heat_zones[['geometry']],
+                        how='left',
+                        predicate='within'
+                    )
+                else:
+                    # No properties in bounding box - create empty result
+                    joined = gpd.GeoDataFrame(columns=['geometry', 'index_right'])
+
+                log_memory("After Tier 2 spatial join")
 
                 # Properties with a match are within a heat zone
                 tier_2_indices = joined[joined.index_right.notna()].index.unique()
@@ -572,6 +598,7 @@ class HeatNetworkAnalyzer:
         for tier, count in tier_summary.items():
             logger.info(f"  {tier}: {count:,} ({count/len(properties)*100:.1f}%)")
 
+        log_memory("classify_heat_network_tiers END", force=True)
         return properties
 
     def annotate_heat_network_readiness(
@@ -603,12 +630,12 @@ class HeatNetworkAnalyzer:
 
         if properties_gdf is None or len(properties_gdf) == 0:
             logger.warning("Heat network readiness skipped: no geocoded properties available.")
-            fallback = df.copy()
-            fallback['hn_ready'] = False
-            fallback['tier_number'] = fallback.get('tier_number', 5)
-            fallback['distance_to_network_m'] = np.nan
-            fallback['in_heat_zone'] = False
-            return fallback
+            # Add columns in-place without copying
+            df['hn_ready'] = False
+            df['tier_number'] = df.get('tier_number', 5)
+            df['distance_to_network_m'] = np.nan
+            df['in_heat_zone'] = False
+            return df
 
         # Use HNPD by default (2024 data), fallback to London Heat Map if needed
         # Can be configured via config file in future
@@ -623,37 +650,50 @@ class HeatNetworkAnalyzer:
 
         if heat_networks is None and heat_zones is None:
             logger.warning("Heat network readiness skipped: GIS network/zone layers unavailable.")
-            fallback = df.copy()
-            fallback['hn_ready'] = False
-            fallback['tier_number'] = fallback.get('tier_number', 5)
-            fallback['distance_to_network_m'] = np.nan
-            fallback['in_heat_zone'] = False
-            return fallback
+            # Add columns in-place without copying
+            df['hn_ready'] = False
+            df['tier_number'] = df.get('tier_number', 5)
+            df['distance_to_network_m'] = np.nan
+            df['in_heat_zone'] = False
+            return df
 
         classified = self.classify_heat_network_tiers(properties_gdf, heat_networks, heat_zones)
 
         # Compute distance to nearest existing network (meters)
+        # Using vectorized distance calculation instead of .apply() for much better performance
         classified['distance_to_network_m'] = np.nan
         if heat_networks is not None and len(heat_networks) > 0:
+            log_memory("Before distance calculation")
             networks_27700 = heat_networks.to_crs('EPSG:27700') if heat_networks.crs != 'EPSG:27700' else heat_networks
             network_union = networks_27700.unary_union
             classified_27700 = classified.to_crs('EPSG:27700')
-            classified['distance_to_network_m'] = classified_27700.geometry.apply(
-                lambda geom: geom.distance(network_union) if network_union else np.nan
-            )
+
+            # Vectorized distance calculation (much faster than .apply())
+            classified['distance_to_network_m'] = classified_27700.geometry.distance(network_union)
+            log_memory("After distance calculation")
 
         # Flag whether property sits inside a heat network zone polygon
+        # Using bounding box pre-filtering for better performance
         classified['in_heat_zone'] = False
         if heat_zones is not None and len(heat_zones) > 0:
+            log_memory("Before zone classification")
             zones_27700 = heat_zones.to_crs('EPSG:27700') if heat_zones.crs != 'EPSG:27700' else heat_zones
             classified_27700 = classified.to_crs('EPSG:27700')
-            zone_join = gpd.sjoin(
-                classified_27700[['geometry']],
-                zones_27700[['geometry']],
-                how='left',
-                predicate='within'
-            )
-            classified.loc[zone_join.index, 'in_heat_zone'] = zone_join.index_right.notna().values
+
+            # Pre-filter using bounding box to reduce spatial join workload
+            zones_bounds = zones_27700.total_bounds  # [minx, miny, maxx, maxy]
+            props_in_bbox = classified_27700.cx[zones_bounds[0]:zones_bounds[2], zones_bounds[1]:zones_bounds[3]]
+
+            if len(props_in_bbox) > 0:
+                zone_join = gpd.sjoin(
+                    props_in_bbox[['geometry']],
+                    zones_27700[['geometry']],
+                    how='left',
+                    predicate='within'
+                )
+                classified.loc[zone_join.index, 'in_heat_zone'] = zone_join.index_right.notna().values
+
+            log_memory("After zone classification")
 
         # Derive deterministic readiness flag
         max_distance = self.readiness_config.get('max_distance_to_network_m', 250)
@@ -671,15 +711,15 @@ class HeatNetworkAnalyzer:
         readiness_df = classified[readiness_cols]
         readiness_df['tier_number'] = pd.to_numeric(readiness_df['tier_number'], errors='coerce').fillna(5).astype(int)
 
-        merged = df.copy()
+        # Add columns in-place without copying the full DataFrame
         for col in readiness_cols:
-            merged[col] = readiness_df.get(col)
+            df[col] = readiness_df.get(col)
 
-        merged['hn_ready'] = merged['hn_ready'].fillna(False).astype(bool)
-        merged['in_heat_zone'] = merged['in_heat_zone'].fillna(False).astype(bool)
-        merged['tier_number'] = merged['tier_number'].fillna(5).astype(int)
+        df['hn_ready'] = df['hn_ready'].fillna(False).astype(bool)
+        df['in_heat_zone'] = df['in_heat_zone'].fillna(False).astype(bool)
+        df['tier_number'] = df['tier_number'].fillna(5).astype(int)
 
-        return merged
+        return df
 
     def _classify_heat_density_tiers(
         self,
@@ -777,7 +817,8 @@ class HeatNetworkAnalyzer:
             logger.info("  Converting to EPSG:27700 (British National Grid)...")
             properties_27700 = properties.to_crs('EPSG:27700')
         else:
-            properties_27700 = properties.copy()
+            # No copy needed - we can work directly on the input GeoDataFrame
+            properties_27700 = properties
 
         # Calculate absolute energy consumption for all properties
         logger.info(f"  Step 1/5: Calculating absolute energy consumption...")
@@ -788,13 +829,13 @@ class HeatNetworkAnalyzer:
         else:
             properties_27700['_absolute_energy_kwh'] = properties_27700['ENERGY_CONSUMPTION_CURRENT']
 
-        # Extract coordinates
+        # Extract coordinates (vectorized - much faster and memory-efficient)
         logger.info(f"  Step 2/5: Assigning properties to grid cells (cell_size={cell_size_m}m)...")
         start_time = time.time()
 
-        coords = np.array([(geom.x, geom.y) for geom in properties_27700.geometry])
-        x_coords = coords[:, 0]
-        y_coords = coords[:, 1]
+        # Use vectorized extraction instead of list comprehension
+        x_coords = properties_27700.geometry.x.values
+        y_coords = properties_27700.geometry.y.values
 
         # Assign each property to a grid cell
         cell_x = np.floor(x_coords / cell_size_m).astype(np.int64)
