@@ -925,7 +925,7 @@ def main():
     if input_file.suffix == '.parquet':
         df = pd.read_parquet(input_file)
     else:
-        df = pd.read_csv(input_file, low_memory=False)
+        df = pd.read_csv(input_file)
 
     # Run analysis
     modeler = PathwayModeler()

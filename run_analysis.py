@@ -10,7 +10,10 @@ import json
 import shutil
 import sys
 import subprocess
+import gc
+import re
 from pathlib import Path
+from typing import Union
 from loguru import logger
 import questionary
 from rich.console import Console
@@ -35,6 +38,44 @@ from src.utils.analysis_logger import AnalysisLogger
 
 
 console = Console()
+
+
+def validate_email(email: str) -> Union[bool, str]:
+    """
+    Validate email address format.
+
+    Returns:
+        True if valid, error message string if invalid
+    """
+    if not email or '@' not in email:
+        return "Email address must contain '@'"
+
+    # RFC 5322 simplified regex
+    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+    if not re.match(pattern, email):
+        return "Please enter a valid email (e.g., user@example.com)"
+
+    return True
+
+
+def validate_api_key(api_key: str) -> Union[bool, str]:
+    """
+    Validate API key format.
+
+    Returns:
+        True if valid, error message string if invalid
+    """
+    if not api_key or len(api_key.strip()) == 0:
+        return "API key cannot be empty"
+
+    # EPC API keys: 10-64 alphanumeric characters
+    if len(api_key) < 10:
+        return "API key too short (expected ≥10 characters)"
+
+    if not re.match(r'^[a-zA-Z0-9\-_]+$', api_key):
+        return "API key contains invalid characters"
+
+    return True
 
 
 def is_one_stop_only(config=None) -> bool:
@@ -85,12 +126,21 @@ def check_credentials():
 
         email = questionary.text(
             "Email address:",
-            validate=lambda x: '@' in x
+            validate=validate_email
         ).ask()
 
+        if email is None:
+            console.print("[yellow]Credential input cancelled[/yellow]")
+            return False
+
         api_key = questionary.text(
-            "API key:"
+            "API key:",
+            validate=validate_api_key
         ).ask()
+
+        if api_key is None:
+            console.print("[yellow]Credential input cancelled[/yellow]")
+            return False
 
         # Save to .env
         with open('.env', 'w') as f:
@@ -332,12 +382,24 @@ def validate_data(df, analysis_logger: AnalysisLogger = None):
     # Try to save parquet (optional for performance)
     try:
         parquet_file = output_file.with_suffix('.parquet')
-        # Convert object columns to strings to avoid mixed-type issues
-        df_parquet = df_validated.copy()
-        for col in df_parquet.columns:
-            if df_parquet[col].dtype == 'object':
-                df_parquet[col] = df_parquet[col].astype(str)
-        df_parquet.to_parquet(parquet_file, index=False)
+        # Convert object/categorical columns to strings for parquet compatibility
+        # Save original dtypes to restore after
+        cat_cols = df_validated.select_dtypes(include=['category']).columns.tolist()
+        obj_cols = df_validated.select_dtypes(include=['object']).columns.tolist()
+        cols_to_convert = cat_cols + obj_cols
+
+        if cols_to_convert:
+            original_dtypes = {col: df_validated[col].dtype for col in cols_to_convert}
+            for col in cols_to_convert:
+                df_validated[col] = df_validated[col].astype(str)
+
+        df_validated.to_parquet(parquet_file, index=False)
+
+        # Restore original dtypes
+        if cols_to_convert:
+            for col, dtype in original_dtypes.items():
+                if col in df_validated.columns:
+                    df_validated[col] = df_validated[col].astype(dtype)
     except Exception as e:
         console.print(f"[yellow]Note: Could not save parquet format (CSV saved successfully)[/yellow]")
         logger.debug(f"Parquet save failed: {e}")
@@ -389,11 +451,23 @@ def apply_methodological_adjustments(df, analysis_logger: AnalysisLogger = None)
     parquet_file = None
     try:
         parquet_file = output_file.with_suffix(".parquet")
-        df_parquet = df_adjusted.copy()
-        for col in df_parquet.columns:
-            if df_parquet[col].dtype == 'object':
-                df_parquet[col] = df_parquet[col].astype(str)
-        df_parquet.to_parquet(parquet_file, index=False)
+        # Convert object/categorical columns to strings for parquet compatibility
+        cat_cols = df_adjusted.select_dtypes(include=['category']).columns.tolist()
+        obj_cols = df_adjusted.select_dtypes(include=['object']).columns.tolist()
+        cols_to_convert = cat_cols + obj_cols
+
+        if cols_to_convert:
+            original_dtypes = {col: df_adjusted[col].dtype for col in cols_to_convert}
+            for col in cols_to_convert:
+                df_adjusted[col] = df_adjusted[col].astype(str)
+
+        df_adjusted.to_parquet(parquet_file, index=False)
+
+        # Restore original dtypes
+        if cols_to_convert:
+            for col, dtype in original_dtypes.items():
+                if col in df_adjusted.columns:
+                    df_adjusted[col] = df_adjusted[col].astype(dtype)
     except Exception as e:
         parquet_file = None
         logger.debug(f"Could not save adjusted parquet: {e}")
@@ -1003,9 +1077,12 @@ def cleanup_reporting_outputs():
                 if file_path.name not in preserved_files:
                     try:
                         file_path.unlink()
-                    except Exception:
-                        # Ignore errors - file may be locked or already deleted
-                        pass
+                    except FileNotFoundError:
+                        pass  # Already deleted, this is fine
+                    except PermissionError:
+                        logger.warning(f"Cannot delete {file_path.name}: Permission denied (file in use)")
+                    except OSError as e:
+                        logger.warning(f"Cannot delete {file_path.name}: {e}")
 
 
 def generate_additional_reports(df_raw, df_validated, validation_report, archetype_results, scenario_results, analysis_logger: AnalysisLogger = None):
@@ -1534,6 +1611,7 @@ def main():
         if df is None or df.empty:
             console.print("[red]✗ Analysis stopped - no data available[/red]")
             return
+        gc.collect()  # Cleanup API response objects
     else:
         start_time = time.time()
         console.print()
@@ -1582,9 +1660,12 @@ def main():
     else:
         # Phase 2: Validate
         df_validated, validation_report = validate_data(df, analysis_logger)
+        # Cleanup raw dataframe since we now use df_validated
+        del df
+        gc.collect()
 
     # Set metadata
-    analysis_logger.set_metadata("total_properties", len(df))
+    analysis_logger.set_metadata("total_properties", len(df_validated))
 
     if df_validated.empty:
         console.print("[red]✗ Analysis stopped - no valid data[/red]")
@@ -1610,12 +1691,18 @@ def main():
             console.print("[yellow]⚠ Adjustment summary JSON not found; proceeding without it[/yellow]")
     else:
         df_adjusted, adjustment_summary = apply_methodological_adjustments(df_validated, analysis_logger)
+        # Cleanup pre-adjustment dataframe since we now use df_adjusted
+        if 'df_validated' in locals() and df_validated is not df_adjusted:
+            del df_validated
+        gc.collect()
 
     # Phase 3: Analyze (use adjusted data)
     archetype_results = analyze_archetype(df_adjusted, analysis_logger)
+    gc.collect()  # Cleanup analysis intermediate results
 
     # Phase 4: Model (use adjusted data for realistic baselines)
     scenario_results, subsidy_results = model_scenarios(df_adjusted, analysis_logger)
+    gc.collect()  # Major cleanup after expensive modeling phase
 
     # Phase 4.3: Retrofit Readiness
     df_readiness, readiness_summary = analyze_retrofit_readiness(
@@ -1623,6 +1710,7 @@ def main():
         analysis_logger,
         one_stop_only=one_stop_only,
     )
+    gc.collect()  # Cleanup readiness calculation intermediates
 
     # Phase 4.5: Spatial Analysis (optional)
     properties_with_tiers, pathway_summary = run_spatial_analysis(
@@ -1630,14 +1718,17 @@ def main():
         analysis_logger,
         one_stop_only=one_stop_only,
     )
+    gc.collect()  # Cleanup GIS objects and geocoding cache
 
     # Phase 5: Report
     if one_stop_only:
         generate_one_stop_report(analysis_logger)
         cleanup_reporting_outputs()
         additional_outputs = {}
+        gc.collect()  # Cleanup report generation objects
     else:
         generate_reports(archetype_results, scenario_results, subsidy_results, df_adjusted, pathway_summary, analysis_logger)
+        gc.collect()  # Cleanup matplotlib figures and Excel writer objects
 
         # Phase 5.5: Additional Reports
         additional_outputs = generate_additional_reports(
@@ -1660,6 +1751,7 @@ def main():
             df_adjusted,
             analysis_logger,
         )
+        gc.collect()  # Final cleanup after dashboard packaging
 
     # Complete
     elapsed = time.time() - start_time

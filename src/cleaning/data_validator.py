@@ -97,7 +97,7 @@ class EPCDataValidator:
 
         return df
 
-    def validate_energy_and_emissions(self, df: pd.DataFrame) -> pd.DataFrame:
+    def validate_energy_and_emissions(self, df: pd.DataFrame, inplace: bool = True) -> pd.DataFrame:
         """
         Remove or clamp negative energy consumption and CO₂ emission values.
 
@@ -119,13 +119,17 @@ class EPCDataValidator:
 
         Args:
             df: EPC DataFrame
+            inplace: If True, modify df directly (default for memory efficiency)
 
         Returns:
             DataFrame with negative energy/CO₂ values handled
         """
         logger.info("Validating energy and CO₂ metrics for negative/implausible values...")
 
-        df_validated = df.copy()
+        if not inplace:
+            df = df.copy()
+
+        df_validated = df
         energy_negatives = 0
         co2_negatives = 0
         energy_clamped = 0
@@ -479,6 +483,74 @@ class EPCDataValidator:
 
         # Normalize energy consumption to kWh/m²/year
         df = self._normalize_energy_metrics(df)
+
+        # Convert high-cardinality string columns to categorical dtype for memory efficiency
+        df = self._convert_to_categorical(df)
+
+        return df
+
+    def _convert_to_categorical(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Convert high-cardinality string columns to categorical dtype for memory efficiency.
+
+        For 500k properties with 7 unique EPC bands, string storage uses ~24MB vs
+        categorical 4MB (83% savings per column).
+
+        Returns:
+            DataFrame with categorical columns
+        """
+        logger.info("Converting string columns to categorical dtype for memory efficiency...")
+
+        categorical_conversions = {
+            # EPC fields (7-33 unique values)
+            'CURRENT_ENERGY_RATING': ['A', 'B', 'C', 'D', 'E', 'F', 'G'],
+            'POTENTIAL_ENERGY_RATING': ['A', 'B', 'C', 'D', 'E', 'F', 'G'],
+            'CONSTRUCTION_AGE_BAND': None,  # Auto-detect (~15 bands)
+            'PROPERTY_TYPE': None,
+            'BUILT_FORM': None,
+            'TENURE': None,
+            'LOCAL_AUTHORITY': None,
+
+            # Standardized fields (created by our processing)
+            'heating_system_type': ['District/Communal/Heat Network', 'Gas Boiler',
+                                     'Electric', 'Heat Pump', 'Other'],
+            'wall_type': ['solid_brick', 'cavity', 'stone', 'timber_frame',
+                          'system_built', 'other', 'unknown'],
+            'wall_insulation_status': ['none', 'internal', 'external',
+                                        'cavity_filled', 'partial', 'unknown'],
+            'roof_insulation_category': ['none', 'minimal', 'partial',
+                                          'good', 'excellent', 'unknown'],
+            'floor_insulation': ['none', 'some', 'full', 'unknown'],
+            'glazing_type': ['single', 'double', 'triple', 'mixed', 'unknown'],
+            'ventilation_type': ['natural', 'extract_fans', 'mev', 'mvhr', 'other', 'unknown'],
+            'tenure': ['owner_occupied', 'private_rented', 'social', 'unknown'],
+        }
+
+        memory_before = df.memory_usage(deep=True).sum() / (1024 * 1024)
+
+        for col, categories in categorical_conversions.items():
+            if col not in df.columns:
+                continue
+
+            try:
+                if categories:
+                    # Use specified categories
+                    df[col] = pd.Categorical(df[col], categories=categories, ordered=False)
+                else:
+                    # Auto-detect unique values
+                    df[col] = df[col].astype('category')
+
+                n_unique = df[col].nunique()
+                logger.info(f"  ✓ {col} → categorical ({n_unique} unique values)")
+            except Exception as e:
+                logger.warning(f"  ✗ Could not convert {col} to categorical: {e}")
+
+        memory_after = df.memory_usage(deep=True).sum() / (1024 * 1024)
+        savings_mb = memory_before - memory_after
+
+        if savings_mb > 0:
+            savings_pct = (savings_mb / memory_before) * 100
+            logger.info(f"✓ Categorical conversion saved {savings_mb:.1f} MB ({savings_pct:.1f}%)")
 
         return df
 
@@ -915,7 +987,7 @@ class EPCDataValidator:
                 logger.info("Normalized by dividing by floor area")
             else:
                 # Already normalized - use directly
-                df['energy_kwh_per_m2_year'] = df['ENERGY_CONSUMPTION_CURRENT'].copy()
+                df['energy_kwh_per_m2_year'] = df['ENERGY_CONSUMPTION_CURRENT']
                 logger.info(f"Energy consumption appears already normalized ({raw_mean:.1f} kWh/m²/year mean)")
 
             # Validate the result
@@ -939,8 +1011,8 @@ class EPCDataValidator:
                 logger.warning(f"Clamping {negative_energy_norm:,} negative normalized energy values to zero")
                 df['energy_kwh_per_m2_year'] = df['energy_kwh_per_m2_year'].clip(lower=0)
         elif 'ENERGY_CONSUMPTION_CURRENT' in df.columns:
-            # No floor area available - copy as-is with warning
-            df['energy_kwh_per_m2_year'] = df['ENERGY_CONSUMPTION_CURRENT'].copy()
+            # No floor area available - use as-is with warning
+            df['energy_kwh_per_m2_year'] = df['ENERGY_CONSUMPTION_CURRENT']
             logger.warning("TOTAL_FLOOR_AREA not available for energy normalization check")
 
         # Handle CO2 emissions
@@ -1243,7 +1315,7 @@ def main():
         return
 
     logger.info(f"Loading data from: {input_file}")
-    df = pd.read_csv(input_file, low_memory=False)
+    df = pd.read_csv(input_file)
 
     # Validate data
     validator = EPCDataValidator()

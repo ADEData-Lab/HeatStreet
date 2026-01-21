@@ -98,7 +98,7 @@ class MethodologicalAdjustments:
             return 'central'
         return next(iter(self.performance_gap_variants.keys()))
 
-    def apply_prebound_adjustment(self, df: pd.DataFrame, variant: str = None) -> pd.DataFrame:
+    def apply_prebound_adjustment(self, df: pd.DataFrame, variant: str = None, inplace: bool = False) -> pd.DataFrame:
         """
         Apply prebound effect adjustment to energy consumption.
 
@@ -112,13 +112,18 @@ class MethodologicalAdjustments:
 
         Args:
             df: DataFrame with CURRENT_ENERGY_RATING and ENERGY_CONSUMPTION_CURRENT
+            variant: Performance gap variant to use
+            inplace: If True, modify df directly (saves memory)
 
         Returns:
             DataFrame with adjusted energy consumption columns
         """
         logger.info("Applying prebound effect adjustment...")
 
-        df_adj = df.copy()
+        if inplace:
+            df_adj = df
+        else:
+            df_adj = df.copy()
 
         # Get EPC band
         if 'CURRENT_ENERGY_RATING' not in df.columns:
@@ -271,9 +276,16 @@ class MethodologicalAdjustments:
 
         return results
 
-    def estimate_flow_temperature(self, df: pd.DataFrame) -> pd.DataFrame:
+    def estimate_flow_temperature(self, df: pd.DataFrame, inplace: bool = False) -> pd.DataFrame:
         """
         Estimate required flow temperature for heat pumps based on fabric performance.
+
+        Args:
+            df: DataFrame with fabric and heating data
+            inplace: If True, modify df directly (saves memory)
+
+        Returns:
+            DataFrame with flow temperature estimates
 
         Heat pumps operate efficiently at 35-55°C. Older radiators sized for
         70-80°C gas boilers may need upsizing (typically 2-2.5× larger surface area).
@@ -286,7 +298,10 @@ class MethodologicalAdjustments:
         """
         logger.info("Estimating heat pump flow temperature requirements...")
 
-        df_temp = df.copy()
+        if inplace:
+            df_temp = df
+        else:
+            df_temp = df.copy()
 
         # Base flow temp from SAP score (proxy for fabric quality)
         # SAP 80+ = 45°C (good fabric), SAP 40 = 70°C (poor fabric)
@@ -344,14 +359,27 @@ class MethodologicalAdjustments:
     def attach_cop_estimates(
         self,
         df: pd.DataFrame,
-        flow_temp_col: str = 'estimated_flow_temp'
+        flow_temp_col: str = 'estimated_flow_temp',
+        inplace: bool = False
     ) -> pd.DataFrame:
-        """Add COP estimates to dataframe based on flow temperatures."""
+        """Add COP estimates to dataframe based on flow temperatures.
+
+        Args:
+            df: DataFrame with flow temperature data
+            flow_temp_col: Column name containing flow temperatures
+            inplace: If True, modify df directly (saves memory)
+
+        Returns:
+            DataFrame with COP estimates attached
+        """
         if flow_temp_col not in df.columns:
             logger.warning("Flow temperature column '%s' missing; skipping COP attachment", flow_temp_col)
             return df
 
-        df_cop = df.copy()
+        if inplace:
+            df_cop = df
+        else:
+            df_cop = df.copy()
         cop = self.derive_heat_pump_cop(df_cop[flow_temp_col], include_bounds=True)
         df_cop['hp_cop_central'] = cop['central']
         df_cop['hp_cop_low'] = cop.get('low', cop['central'])
