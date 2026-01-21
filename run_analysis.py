@@ -1780,7 +1780,7 @@ def main():
     console.print(Panel.fit(
         f"[bold green]✓ Analysis Complete![/bold green]\n\n"
         f"Time elapsed: {elapsed/60:.1f} minutes\n"
-        f"Properties analyzed: {len(df_validated):,}\n\n"
+        f"Properties analyzed: {len(df_adjusted):,}\n\n"
         f"[cyan]Results saved to:[/cyan]\n"
         f"  • data/processed/ (validated data)\n"
         f"  • data/outputs/ ({outputs_label})\n"
