@@ -155,6 +155,8 @@ class MethodologicalAdjustments:
             factor_col = f'prebound_factor_{variant_name}'
             df_adj[factor_col] = df_adj['CURRENT_ENERGY_RATING'].map(factor_map)
             df_adj[factor_col] = df_adj[factor_col].fillna(default_fill)
+            # Ensure numeric dtype (categorical EPC_RATING can produce categorical factor)
+            df_adj[factor_col] = df_adj[factor_col].astype(float)
 
             if 'ENERGY_CONSUMPTION_CURRENT' in df.columns:
                 adjusted_col = f'energy_consumption_adjusted_{variant_name}'
@@ -173,6 +175,8 @@ class MethodologicalAdjustments:
             df_adj['prebound_factor'] = df_adj[base_factor_col]
         else:
             df_adj['prebound_factor'] = df_adj['CURRENT_ENERGY_RATING'].map(central_factors).fillna(default_fill)
+            # Ensure numeric dtype
+            df_adj['prebound_factor'] = df_adj['prebound_factor'].astype(float)
 
         if 'ENERGY_CONSUMPTION_CURRENT' in df.columns:
             base_adjusted_col = f'energy_consumption_adjusted_{base_variant}'
@@ -444,6 +448,8 @@ class MethodologicalAdjustments:
         # Map EPC band to rebound factor
         df_adj['rebound_factor'] = df_adj['CURRENT_ENERGY_RATING'].map(self.REBOUND_FACTORS)
         df_adj['rebound_factor'] = df_adj['rebound_factor'].fillna(0.85)  # Default for unknown bands
+        # Ensure numeric dtype (categorical EPC_RATING can produce categorical rebound_factor)
+        df_adj['rebound_factor'] = df_adj['rebound_factor'].astype(float)
 
         # Apply to any savings columns that exist
         savings_columns = [

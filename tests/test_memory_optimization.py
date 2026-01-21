@@ -200,6 +200,44 @@ def test_specific_exception_handling():
     assert 'except PermissionError:' in content, "PermissionError should be caught specifically"
 
 
+def test_categorical_numeric_operations():
+    """Verify that categorical CURRENT_ENERGY_RATING doesn't break numeric factor columns."""
+    from src.analysis.methodological_adjustments import MethodologicalAdjustments
+
+    # Create test data with categorical EPC rating (simulates post-validation data)
+    df = pd.DataFrame({
+        'CURRENT_ENERGY_RATING': pd.Categorical(['D', 'E', 'F', 'G'] * 250, categories=['A', 'B', 'C', 'D', 'E', 'F', 'G']),
+        'ENERGY_CONSUMPTION_CURRENT': np.random.randint(100, 300, 1000),
+        'TOTAL_FLOOR_AREA': np.random.randint(50, 200, 1000),
+    })
+
+    adjuster = MethodologicalAdjustments()
+
+    # Apply prebound adjustment - should create numeric factor columns
+    df_adj = adjuster.apply_prebound_adjustment(df, variant='central')
+
+    # Verify prebound_factor is numeric, not categorical
+    assert pd.api.types.is_numeric_dtype(df_adj['prebound_factor']), \
+        f"prebound_factor should be numeric, got {df_adj['prebound_factor'].dtype}"
+
+    # Verify we can calculate mean (this would fail if categorical)
+    mean_factor = df_adj['prebound_factor'].mean()
+    assert isinstance(mean_factor, (float, np.floating)), \
+        f"mean() should return float, got {type(mean_factor)}"
+
+    # Apply rebound adjustment - should create numeric rebound_factor
+    df_adj = adjuster.apply_rebound_adjustment(df_adj)
+
+    # Verify rebound_factor is numeric
+    assert pd.api.types.is_numeric_dtype(df_adj['rebound_factor']), \
+        f"rebound_factor should be numeric, got {df_adj['rebound_factor'].dtype}"
+
+    # Verify we can calculate mean
+    mean_rebound = df_adj['rebound_factor'].mean()
+    assert isinstance(mean_rebound, (float, np.floating)), \
+        f"mean() should return float, got {type(mean_rebound)}"
+
+
 if __name__ == "__main__":
     # Run tests
     pytest.main([__file__, '-v'])
