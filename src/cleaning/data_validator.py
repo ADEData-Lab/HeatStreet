@@ -532,6 +532,11 @@ class EPCDataValidator:
             if col not in df.columns:
                 continue
 
+            # Skip numeric columns (float, int) - only convert object/string columns
+            if pd.api.types.is_numeric_dtype(df[col]):
+                logger.debug(f"  ⊘ Skipping {col} (numeric dtype: {df[col].dtype})")
+                continue
+
             try:
                 if categories:
                     # Use specified categories
