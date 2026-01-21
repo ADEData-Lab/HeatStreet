@@ -692,7 +692,7 @@ def main():
         return
 
     logger.info(f"Loading data from: {input_file}")
-    df = pd.read_csv(input_file, low_memory=False)
+    df = pd.read_csv(input_file)
 
     # Perform analysis
     analyzer = ArchetypeAnalyzer()

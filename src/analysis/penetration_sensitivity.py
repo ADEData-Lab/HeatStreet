@@ -338,7 +338,7 @@ def main():
     else:
         input_file = DATA_PROCESSED_DIR / "epc_london_validated.csv"
         if input_file.exists():
-            properties_df = pd.read_csv(input_file, low_memory=False)
+            properties_df = pd.read_csv(input_file)
 
     # Run analysis
     analyzer = PenetrationSensitivityAnalyzer()
