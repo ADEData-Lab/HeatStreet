@@ -25,7 +25,7 @@ import time
 # Add src to path
 sys.path.append(str(Path(__file__).parent))
 
-from config.config import load_config, ensure_directories, DATA_RAW_DIR, DATA_PROCESSED_DIR
+from config.config import load_config, ensure_directories, DATA_RAW_DIR, DATA_PROCESSED_DIR, DATA_OUTPUTS_DIR
 from src.acquisition.epc_api_downloader import EPCAPIDownloader
 from src.acquisition.london_gis_downloader import LondonGISDownloader
 from src.acquisition.hnpd_downloader import HNPDDownloader
@@ -407,8 +407,18 @@ def validate_data(df, analysis_logger: AnalysisLogger = None):
     validator.save_validation_report()
     try:
         validation_report_json = DATA_PROCESSED_DIR / "validation_report.json"
+
+        # Ensure JSON is always written (numpy scalar types can otherwise truncate the file mid-write).
+        from src.utils.analysis_logger import convert_to_json_serializable
+
+        report = dict(report)
+        report["records_passed"] = int(len(df_validated))
+        total_records = int(report.get("total_records", len(df)))
+        duplicates_removed = int(report.get("duplicates_removed", 0))
+        report["invalid_records"] = max(total_records - duplicates_removed - int(report["records_passed"]), 0)
+
         with open(validation_report_json, "w", encoding="utf-8") as f:
-            json.dump(report, f, indent=2)
+            json.dump(convert_to_json_serializable(report), f, indent=2)
     except Exception as e:
         logger.debug(f"Could not save validation report JSON: {e}")
 
@@ -1054,35 +1064,84 @@ def generate_one_stop_report(analysis_logger: AnalysisLogger = None):
 
 def cleanup_reporting_outputs():
     """
-    Remove ALL report artifacts except one_stop_output.json and analysis_log.txt.
+    Archive non-core report artifacts for one-stop mode.
 
-    This aggressive cleanup ensures only the consolidated JSON report persists,
-    eliminating scattered CSVs, JSONs, TXTs, PNGs, HTMLs, PDFs, and subdirectories.
+    Historically, one-stop mode aggressively deleted intermediate reporting outputs to
+    leave only the consolidated one-stop JSON. That makes QA/auditing harder, because
+    the one-stop output still references source CSV/JSON files that no longer exist.
+
+    Instead of deleting, move everything except the core outputs into:
+      data/outputs/bin/<run_timestamp>/
+
+    Returns:
+        Path to the archive directory, or None if nothing was moved.
     """
-    outputs_dir = Path("data/outputs")
+    from datetime import datetime
 
-    # Files to preserve
-    preserved_files = {"one_stop_output.json", "analysis_log.txt"}
+    outputs_dir = Path(DATA_OUTPUTS_DIR)
 
-    # Remove ALL subdirectories in data/outputs/
-    for subdir in ["figures", "maps", "comparisons", "reports"]:
-        path = outputs_dir / subdir
-        if path.exists():
-            shutil.rmtree(path, ignore_errors=True)
+    preserved_files = {
+        "one_stop_output.json",
+        "analysis_log.txt",
+        "analysis_log.json",
+        "run_metadata.json",
+        "analysis_outputs_compendium.xlsx",
+    }
 
-    # Remove ALL files in data/outputs/ except preserved ones
+    # Prefer using analysis_log.json metadata for a stable run identifier.
+    run_id = None
+    try:
+        analysis_log_path = outputs_dir / "analysis_log.json"
+        if analysis_log_path.exists():
+            run_id = (json.loads(analysis_log_path.read_text(encoding="utf-8")) or {}).get("metadata", {}).get("analysis_start")
+    except Exception:
+        run_id = None
+
+    run_stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    if run_id:
+        try:
+            run_stamp = datetime.fromisoformat(str(run_id)).strftime("%Y%m%d-%H%M%S")
+        except Exception:
+            pass
+
+    archive_root = outputs_dir / "bin"
+    archive_root.mkdir(parents=True, exist_ok=True)
+
+    archive_dir = archive_root / f"run_{run_stamp}"
+    if archive_dir.exists():
+        archive_dir = archive_root / f"run_{run_stamp}_{datetime.now().strftime('%f')}"
+    archive_dir.mkdir(parents=True, exist_ok=True)
+
+    moved = []
     if outputs_dir.exists():
-        for file_path in outputs_dir.glob("*"):
-            if file_path.is_file():
-                if file_path.name not in preserved_files:
-                    try:
-                        file_path.unlink()
-                    except FileNotFoundError:
-                        pass  # Already deleted, this is fine
-                    except PermissionError:
-                        logger.warning(f"Cannot delete {file_path.name}: Permission denied (file in use)")
-                    except OSError as e:
-                        logger.warning(f"Cannot delete {file_path.name}: {e}")
+        for path in outputs_dir.iterdir():
+            if path.name in preserved_files or path.name == "bin":
+                continue
+            try:
+                dest = archive_dir / path.name
+                shutil.move(str(path), str(dest))
+                moved.append({"from": str(path), "to": str(dest)})
+            except Exception as exc:
+                logger.warning(f"Could not archive output {path}: {exc}")
+
+    if not moved:
+        return None
+
+    try:
+        manifest = {
+            "archived_at": datetime.now().isoformat(),
+            "run_id": run_id,
+            "archive_dir": str(archive_dir),
+            "moved": moved,
+        }
+        (archive_dir / "archive_manifest.json").write_text(
+            json.dumps(manifest, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+    except Exception as exc:
+        logger.warning(f"Could not write archive manifest: {exc}")
+
+    return archive_dir
 
 
 def generate_additional_reports(df_raw, df_validated, validation_report, archetype_results, scenario_results, analysis_logger: AnalysisLogger = None):
@@ -1723,7 +1782,6 @@ def main():
     # Phase 5: Report
     if one_stop_only:
         generate_one_stop_report(analysis_logger)
-        cleanup_reporting_outputs()
         additional_outputs = {}
         gc.collect()  # Cleanup report generation objects
     else:
@@ -1760,6 +1818,25 @@ def main():
     console.print()
     console.print("[cyan]Saving analysis log...[/cyan]")
     log_path = analysis_logger.save_log()
+
+    # Post-process one-stop output (if present) to ensure run timings and validation totals are auditable.
+    try:
+        from src.reporting.patch_one_stop_output import patch_one_stop_output
+
+        patched_path = patch_one_stop_output(DATA_OUTPUTS_DIR)
+        if patched_path:
+            console.print(f"[green]OK[/green] Patched one-stop report metadata: {patched_path}")
+    except Exception as e:
+        logger.warning(f"Could not patch one-stop output from analysis_log.json: {e}")
+
+    # Archive intermediate outputs for auditability in one-stop mode (instead of deleting them).
+    if one_stop_only:
+        try:
+            archived_to = cleanup_reporting_outputs()
+            if archived_to:
+                console.print(f"[cyan]Archived intermediate outputs to:[/cyan] {archived_to}")
+        except Exception as e:
+            logger.warning(f"Could not archive one-stop outputs: {e}")
     console.print(f"[green]✓[/green] Analysis log saved to: {log_path}")
     combined_workbook = analysis_logger.metadata.get('combined_workbook')
     if combined_workbook:

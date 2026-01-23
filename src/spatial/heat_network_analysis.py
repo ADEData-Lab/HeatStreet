@@ -697,8 +697,9 @@ class HeatNetworkAnalyzer:
 
         # Derive deterministic readiness flag
         max_distance = self.readiness_config.get('max_distance_to_network_m', 250)
-        min_density = self.readiness_config.get('min_density_gwh_km2', 5)
-        ready_tier_max = self.readiness_config.get('ready_tier_max', 4)
+        # Default thresholds align with recommended pathway routing (Tiers 1-3 -> heat networks).
+        min_density = self.readiness_config.get('min_density_gwh_km2', 20)
+        ready_tier_max = self.readiness_config.get('ready_tier_max', 3)
         include_zones = self.readiness_config.get('heat_zone_ready', True)
 
         classified['hn_ready'] = (
