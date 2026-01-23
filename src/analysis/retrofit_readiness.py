@@ -791,11 +791,22 @@ class RetrofitReadinessAnalyzer:
 
 def main():
     """Example usage."""
-    from src.cleaning.data_validator import DataValidator
+    from config.config import DATA_PROCESSED_DIR
 
-    # Load sample data
-    validator = DataValidator()
-    df = validator.load_data(Path("data/processed/epc_london_validated.csv"))
+    # Load processed data (prefer adjusted dataset if available)
+    input_path = DATA_PROCESSED_DIR / "epc_london_adjusted.csv"
+    if not input_path.exists():
+        input_path = DATA_PROCESSED_DIR / "epc_london_validated.csv"
+
+    if not input_path.exists():
+        raise FileNotFoundError(
+            "Could not find processed EPC dataset. Expected one of:\n"
+            f" - {DATA_PROCESSED_DIR / 'epc_london_adjusted.csv'}\n"
+            f" - {DATA_PROCESSED_DIR / 'epc_london_validated.csv'}"
+        )
+
+    df = pd.read_csv(input_path)
+    logger.info(f"Loaded {len(df):,} records from {input_path}")
 
     # Run readiness analysis
     analyzer = RetrofitReadinessAnalyzer()

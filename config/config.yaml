@@ -560,9 +560,9 @@ heat_network:
     # Any property intersecting a heat network zone polygon is treated as "in zone"
     heat_zone_ready: true
     # Minimum buffered heat density (GWh/km²) to consider an area viable for HN expansion
-    min_density_gwh_km2: 5
-    # Tiers 1 through this value are treated as "ready" (Tier 5 is excluded)
-    ready_tier_max: 4
+    min_density_gwh_km2: 20
+    # Tiers 1 through this value are treated as "ready" (Tier 4-5 are excluded)
+    ready_tier_max: 3
     # Column used for deterministic access checks throughout the pipeline
     access_column: "hn_ready"
 

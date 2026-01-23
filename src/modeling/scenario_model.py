@@ -1029,10 +1029,24 @@ class ScenarioModeler:
         removed: List[str] = []
 
         if {'heat_network_where_available', 'ashp_elsewhere'} & set(measure_plan):
-            hn_ready = bool(property_dict.get('hn_ready', False))
             updated_plan: List[str] = [
                 m for m in measure_plan if m not in ['heat_network_where_available', 'ashp_elsewhere']
             ]
+
+            hn_tier_max = int(
+                self.config.get('heat_network', {}).get('readiness', {}).get('ready_tier_max', 3)
+            )
+            tier_number = property_dict.get('tier_number')
+
+            hn_ready: Optional[bool] = None
+            if tier_number is not None:
+                try:
+                    hn_ready = int(tier_number) <= hn_tier_max
+                except (TypeError, ValueError):
+                    hn_ready = None
+
+            if hn_ready is None:
+                hn_ready = bool(property_dict.get('hn_ready', False))
 
             if hn_ready:
                 updated_plan.append('district_heating_connection')
@@ -1806,6 +1820,8 @@ class ScenarioModeler:
                 'upgrade_recommended_pct': results.get('upgrade_recommended_pct'),
                 'cost_effective_count': ce_summary.get('cost_effective_count'),
                 'cost_effective_pct': ce_summary.get('cost_effective_pct'),
+                'marginal_count': ce_summary.get('marginal_count'),
+                'marginal_pct': ce_summary.get('marginal_pct'),
                 'not_cost_effective_count': ce_summary.get('not_cost_effective_count'),
                 'not_cost_effective_pct': ce_summary.get('not_cost_effective_pct'),
                 'carbon_abatement_cost_mean': results.get('carbon_abatement_cost_mean'),

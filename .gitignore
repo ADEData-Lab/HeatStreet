@@ -76,6 +76,7 @@ data/outputs/*.xlsx
 data/outputs/*.json
 data/outputs/*.txt
 data/outputs/*.parquet
+data/outputs/bin/
 data/outputs/dashboard/
 data/outputs/figures/
 data/outputs/reports/

@@ -17,7 +17,9 @@ All datapoints include comprehensive metadata:
 from __future__ import annotations
 
 import json
+import math
 import re
+import sys
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -26,6 +28,9 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 import numpy as np
 import pandas as pd
 from loguru import logger
+
+# Ensure project root is on sys.path so `config.*` imports work when running as a script
+sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from config.config import DATA_OUTPUTS_DIR, DATA_PROCESSED_DIR, load_config
 
@@ -85,10 +90,17 @@ def _convert_numpy_types(obj: Any) -> Any:
     """Recursively convert numpy types to native Python types for JSON serialization."""
     if obj is None:
         return None
+    if isinstance(obj, float):
+        if math.isnan(obj) or math.isinf(obj):
+            return None
+        return obj
     if isinstance(obj, (np.integer, np.int64, np.int32)):
         return int(obj)
     if isinstance(obj, (np.floating, np.float64, np.float32)):
-        return float(obj)
+        value = float(obj)
+        if math.isnan(value) or math.isinf(value):
+            return None
+        return value
     if isinstance(obj, np.bool_):
         return bool(obj)
     if isinstance(obj, (pd.Timestamp, datetime)):

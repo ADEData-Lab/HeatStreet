@@ -4,15 +4,6 @@ from pathlib import Path
 import pandas as pd
 import pytest
 import sys
-import types
-
-# Lightweight stubs so scenario_model import does not require heavyweight spatial deps
-sys.modules.setdefault(
-    'geopandas',
-    types.SimpleNamespace(GeoDataFrame=object, read_file=lambda *_, **__: None)
-)
-sys.modules.setdefault('shapely', types.SimpleNamespace())
-sys.modules.setdefault('shapely.geometry', types.SimpleNamespace(Point=object))
 
 sys.path.append(str(Path(__file__).parent.parent))
 
@@ -160,6 +151,45 @@ def test_hn_ready_generation_drives_pathway(monkeypatch, scenario_modeler_factor
     assert pathway == 'heat_network'
     assert 'district_heating_connection' in plan
     assert 'ashp_installation' not in plan
+
+
+def test_hybrid_routing_uses_tier_number_over_hn_ready(scenario_modeler_factory):
+    modeler = scenario_modeler_factory()
+
+    measures = ['fabric_improvements', 'heat_network_where_available', 'ashp_elsewhere']
+
+    tier_4_property = {
+        'LMK_KEY': 'TIER4',
+        'TOTAL_FLOOR_AREA': 80,
+        'ENERGY_CONSUMPTION_CURRENT': 150,
+        'ashp_ready': True,
+        'ashp_projected_ready': True,
+        # Deliberately conflicting flags: Tier 4 should route to ASHP even if hn_ready is True.
+        'tier_number': 4,
+        'hn_ready': True,
+    }
+
+    tier_3_property = {
+        'LMK_KEY': 'TIER3',
+        'TOTAL_FLOOR_AREA': 80,
+        'ENERGY_CONSUMPTION_CURRENT': 150,
+        'ashp_ready': True,
+        'ashp_projected_ready': True,
+        # Deliberately conflicting flags: Tier 3 should route to HN even if hn_ready is False.
+        'tier_number': 3,
+        'hn_ready': False,
+    }
+
+    tier_4_plan, _, _, tier_4_pathway, _ = modeler._build_property_measures(measures, tier_4_property)
+    tier_3_plan, _, _, tier_3_pathway, _ = modeler._build_property_measures(measures, tier_3_property)
+
+    assert tier_4_pathway == 'ashp'
+    assert 'ashp_installation' in tier_4_plan
+    assert 'district_heating_connection' not in tier_4_plan
+
+    assert tier_3_pathway == 'heat_network'
+    assert 'district_heating_connection' in tier_3_plan
+    assert 'ashp_installation' not in tier_3_plan
 
 
 def test_negative_energy_intensity_rejected(scenario_modeler_factory):
