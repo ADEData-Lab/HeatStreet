@@ -384,6 +384,7 @@ scenarios:
 ### Analysis Reports
 
 - `data/outputs/one_stop_output.json` - One-stop report output (definitive reporting output when `reporting.one_stop_only: true`)
+- `data/outputs/one_stop_dashboard.html` - Self-contained HTML dashboard generated from `one_stop_output.json`
 - `data/outputs/archetype_analysis_results.txt` - Property characteristics summary
 - `data/outputs/scenario_modeling_results.txt` - Scenario cost-benefit analysis
 - `data/outputs/validation_report.txt` - Data quality report
