@@ -1143,6 +1143,7 @@ def cleanup_reporting_outputs():
 
     preserved_files = {
         "one_stop_output.json",
+        "one_stop_dashboard.html",
         "analysis_log.txt",
         "analysis_log.json",
         "run_metadata.json",
@@ -1900,6 +1901,22 @@ def main():
             console.print(f"[green]OK[/green] Patched one-stop report metadata: {patched_path}")
     except Exception as e:
         logger.warning(f"Could not patch one-stop output from analysis_log.json: {e}")
+
+    # Generate a lightweight, self-contained HTML dashboard from the one-stop JSON output.
+    try:
+        from src.reporting.one_stop_html_dashboard import build_one_stop_html_dashboard
+
+        dashboard_path = build_one_stop_html_dashboard(Path(DATA_OUTPUTS_DIR))
+        if dashboard_path:
+            console.print(f"[green]✓[/green] One-stop HTML dashboard generated: {dashboard_path}")
+            if analysis_logger:
+                analysis_logger.add_output(
+                    "data/outputs/one_stop_dashboard.html",
+                    "html",
+                    "One-stop HTML dashboard (self-contained)",
+                )
+    except Exception as e:
+        logger.warning(f"Could not generate one-stop HTML dashboard: {e}")
 
     # Archive intermediate outputs for auditability in one-stop mode (instead of deleting them).
     if one_stop_only:
