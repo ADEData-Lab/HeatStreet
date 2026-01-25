@@ -442,7 +442,7 @@ Properties are classified into five tiers:
 | Tier | Definition (screening) | Main evidence input | Recommended Pathway |
 |------|------------|---------------------|
 | **Tier 1** | Within 250m of existing heat network | HNPD (Operational / Under Construction) or London Heat Map fallback | District heating connection |
-| **Tier 2** | Within a planned heat network zone / “potential network” geometry | London Heat Map GIS zone layer (if available) | District heating (planned) |
+| **Tier 2** | Near planned heat network (proxy) | HNPD planned schemes (planning granted) buffered by the configured distance; polygon zone layer used if available | District heating (planned) |
 | **Tier 3** | High local heat density (default ≥20 GWh/km²) | EPC-derived heat density (postcode centroids) | District heating (extension potentially viable) |
 | **Tier 4** | Moderate density (default 5–20 GWh/km²) | EPC-derived heat density | Heat pump (network marginal) |
 | **Tier 5** | Low density (default <5 GWh/km²) | EPC-derived heat density | Heat pump (network not viable) |

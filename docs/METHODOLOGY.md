@@ -387,7 +387,7 @@ For reliable distance calculations, geometries are converted to **British Nation
 The pipeline assigns each dwelling a heat network tier, reflecting increasing uncertainty and infrastructure requirements:
 
 - **Tier 1:** within a configured distance (default 250m) of an existing network (highest confidence)
-- **Tier 2:** inside a planned heat network zone / heat priority polygon (policy intent indicator)
+- **Tier 2:** *planned network indicator* — either inside a zone/priority polygon layer (if available) **or** within a configured buffer of an HNPD planned scheme point (proxy)
 - **Tier 3:** high local heat density (≥ threshold, default 20 GWh/km²) indicating plausible economic viability *if* networks are built and anchor loads exist
 - **Tier 4:** moderate density (between Tier 4 threshold and Tier 3 threshold) — borderline cases that may require subsidy, anchor loads, or high uptake
 - **Tier 5:** low density — heat networks are unlikely to be economic, so heat pumps are usually preferred
@@ -421,6 +421,7 @@ A boolean readiness flag (`hn_ready`) is derived deterministically using configu
 - Distance to existing network ≤ 250m
 - Heat density ≥ configured threshold
 - Inside a heat network zone polygon (if enabled)
+- Inside a planned-network indicator area (zone polygon if available; otherwise the HNPD buffer proxy)
 
 This is used to allocate properties to heat networks in the hybrid scenario.
 

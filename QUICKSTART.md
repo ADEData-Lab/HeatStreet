@@ -400,12 +400,12 @@ energy_prices:
 | Tier | Heat Density | Distance to Network | Recommendation |
 |------|-------------|---------------------|----------------|
 | 1 | Any | Within 250m | **Connect now** - lowest cost |
-| 2 | Any | Within HN Zone | **Connect planned** - wait for rollout |
+| 2 | Any | Planned-network indicator (zone polygon or HNPD buffer proxy) | **Connect planned** - wait for rollout |
 | 3 | ≥20 GWh/km² | Outside zone | **DH viable** - extension worth considering |
 | 4 | 5-20 GWh/km² | Outside zone | **Marginal** - consider heat pumps |
 | 5 | <5 GWh/km² | Outside zone | **HP recommended** - DH not economical |
 
-Tier 1 evidence is sourced from HNPD (2024) where available; Tier 2 relies on a zone/potential-network geometry layer (London Heat Map GIS package).
+Tier 1 evidence is sourced from HNPD (2024) where available. Tier 2 is treated as a **planned network indicator**: if a polygon zone layer is available it is used directly; otherwise the pipeline uses a configurable proximity buffer around HNPD planned scheme points as a proxy.
 
 ### Decarbonization Pathways
 
