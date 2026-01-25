@@ -122,6 +122,11 @@ The interactive CLI guides you through:
 - `scenario_modeling_results.txt`
 
 ### Phase 4: Spatial Analysis (Conda method only)
+**Uses multiple evidence layers**:
+- **DESNZ/BEIS Heat Network Planning Database (HNPD, Jan 2024)** for up-to-date heat network scheme locations (Tier 1 evidence; London fallback if unavailable)
+- **London Heat Map GIS package (legacy)** for zone / “potential network” geometries used by the Tier 2 overlay (optional)
+- **EPC-derived heat demand** to compute local heat density for Tier 3–5
+
 **Classifies properties into tiers**:
 - **Tier 1**: Within 250m of existing heat network
 - **Tier 2**: Within designated Heat Network Zone
@@ -399,6 +404,8 @@ energy_prices:
 | 3 | ≥20 GWh/km² | Outside zone | **DH viable** - extension worth considering |
 | 4 | 5-20 GWh/km² | Outside zone | **Marginal** - consider heat pumps |
 | 5 | <5 GWh/km² | Outside zone | **HP recommended** - DH not economical |
+
+Tier 1 evidence is sourced from HNPD (2024) where available; Tier 2 relies on a zone/potential-network geometry layer (London Heat Map GIS package).
 
 ### Decarbonization Pathways
 
