@@ -44,7 +44,7 @@ This release addresses critical audit findings related to property count mismatc
   - Why lower CAPEX can have longer payback
   - Why tipping-point fabric can outperform minimum fabric
 
-##### 6. Pipeline Integration (`main.py`)
+##### 6. Pipeline Integration (`run_analysis.py`)
 - Added `RunMetadataManager` integration across all phases
 - Counts recorded at: acquisition, validation, modeling start, modeling end, geocoding
 - Metadata saved automatically at pipeline completion
@@ -61,7 +61,7 @@ This release addresses critical audit findings related to property count mismatc
 
 #### Files Changed
 
-- `main.py` - Added metadata tracking and reconciliation
+- `run_analysis.py` - Added metadata tracking and reconciliation
 - `src/utils/run_metadata.py` - NEW: Stage count tracking
 - `src/reporting/executive_summary.py` - NEW: Summary generator
 - `src/reporting/dashboard_data_builder.py` - Uses run_metadata
@@ -75,7 +75,7 @@ This release addresses critical audit findings related to property count mismatc
 
 Run the full pipeline to verify:
 ```bash
-python main.py --phase all
+python run_analysis.py
 ```
 
 Check reconciliation:
@@ -86,5 +86,5 @@ cat data/outputs/reports/executive_summary.md
 
 Verify no hard-coded constants remain:
 ```bash
-grep -r "704483\|703993\|704,483\|703,993" src/ --include="*.py"
+rg -n "704483|703993|704,483|703,993" src/
 ```

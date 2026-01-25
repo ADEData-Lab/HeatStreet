@@ -43,9 +43,11 @@ HeatStreet/
 │   └── utils/                # Utility functions
 ├── tests/                    # Unit tests
 ├── docs/                     # Additional documentation
-├── notebooks/                # Jupyter notebooks for exploration
-├── main.py                   # Main pipeline orchestrator
-└── requirements.txt          # Python dependencies
+├── run_analysis.py           # Interactive pipeline orchestrator
+├── run-conda.bat             # Windows conda launcher (recommended for spatial analysis)
+├── run-conda.ps1             # PowerShell conda launcher (recommended for spatial analysis)
+├── requirements.txt          # Core Python dependencies
+└── requirements-spatial.txt  # Optional spatial dependencies (GDAL/geopandas)
 ```
 
 ## Installation
@@ -95,31 +97,23 @@ This single command:
 
 #### Method 2: Standard Launcher (Core Analysis Only)
 
-**Use this if you don't need spatial analysis or have GDAL issues.**
-
-Works perfectly for EPC analysis, scenarios, charts, and reports (85% of functionality).
+**Use this if you don't need spatial analysis (or you're not on Windows).**
 
 ```bash
 git clone https://github.com/ADEData-Lab/HeatStreet.git
 cd HeatStreet
 
-# Windows Command Prompt
-run.bat
+python -m venv venv
+# Activate venv (platform-specific)
+# Windows PowerShell: .\venv\Scripts\Activate.ps1
+# Windows Cmd:       venv\Scripts\activate.bat
+# Linux/Mac:         source venv/bin/activate
 
-# OR Windows PowerShell
-.\run.ps1
-
-# OR Linux/Mac
-./run.sh
+pip install -r requirements.txt
+python run_analysis.py
 ```
 
-This automatically:
-- Creates virtual environment
-- Installs all core dependencies
-- Optionally attempts spatial dependencies (may fail on Windows)
-- Runs the interactive analysis
-
-**The analysis works even if spatial dependencies fail!**
+For spatial analysis on Windows, use the Conda launcher above (or see `docs/SPATIAL_SETUP.md`).
 
 #### Method 3: Manual Setup (Advanced Users)
 
@@ -201,11 +195,10 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 **Conda: "conda is not recognized"**
 - Install Miniconda: https://docs.conda.io/en/latest/miniconda.html
 - Restart your terminal after installation
-- Use `run-conda.bat` or `run-conda.ps1` (not `run.bat`)
+- Use `run-conda.bat` or `run-conda.ps1`
 
-**GDAL/Geopandas installation fails with run.bat**
-- This is normal on Windows!
-- The core analysis still works (85% of functionality)
+**GDAL/Geopandas installation fails**
+- This is common on Windows when installing GDAL via pip/venv
 - For spatial analysis, use `run-conda.bat` instead
 - See [docs/SPATIAL_SETUP.md](docs/SPATIAL_SETUP.md) for detailed guide
 
@@ -214,13 +207,12 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 - Use `run-conda.bat` for automatic installation
 - Or skip spatial analysis (analysis works without it)
 
-#### Which Run Script Should I Use?
+#### How Should I Run It?
 
-| Script | Best For | Spatial Analysis? |
+| Option | Best For | Spatial Analysis? |
 |--------|----------|-------------------|
 | `run-conda.bat/ps1` | **Windows users wanting heat network tiers** | ✅ Yes (auto-installs GDAL) |
-| `run.bat/ps1` | Quick start, core analysis only | ⚠️ Attempts install (may fail) |
-| `setup.bat/ps1` | First-time setup only | ❌ No (run separately) |
+| `python run_analysis.py` (in your own env) | Core analysis and non-Windows runs | ⚠️ Depends on GDAL/geopandas |
 
 **Recommendation**: Use `run-conda.bat` if you want the complete analysis with spatial features on Windows!
 
@@ -228,17 +220,12 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 
 ### EPC Register Data
 
-EPC data must be obtained from the UK Government's EPC Register:
+HeatStreet can obtain EPC data via the UK Government EPC Register in two ways:
 
-1. **Register** at [https://epc.opendatacommunities.org/](https://epc.opendatacommunities.org/)
-2. **Download** bulk data for London boroughs (see `data/raw/DOWNLOAD_INSTRUCTIONS.txt`)
-3. **Place** CSV files in `data/raw/` directory with naming pattern `epc_*.csv`
+1. **API download (recommended)**: run the interactive pipeline and choose a download scope. The runner will prompt for (or read) your API email/key from `.env`.
+2. **Bulk/manual download**: place EPC CSVs in `data/raw/` and skip the download step when prompted.
 
-Alternatively, run:
-```bash
-python main.py --phase acquire --download
-```
-This creates detailed download instructions.
+Register for API access at [https://epc.opendatacommunities.org/](https://epc.opendatacommunities.org/) and copy `.env.example` to `.env` if you prefer to set credentials up-front.
 
 ### Supplementary Data
 
@@ -258,11 +245,14 @@ This creates detailed download instructions.
 The easiest way to run the complete analysis is using the interactive CLI:
 
 ```bash
-# If using Conda method
-run-conda.bat   # or run-conda.ps1 for PowerShell
+# Windows Command Prompt (Conda launcher)
+run-conda.bat
 
-# If using standard method
-run.bat         # or run.ps1 for PowerShell
+# Windows PowerShell (Conda launcher)
+.\run-conda.ps1
+
+# Any platform (if dependencies already installed)
+python run_analysis.py
 ```
 
 The interactive CLI will guide you through:
@@ -390,7 +380,7 @@ scenarios:
 
 ### Analysis Reports
 
-- `data/outputs/one_stop_output.md` - One-stop markdown report (definitive reporting output when `reporting.one_stop_only: true`)
+- `data/outputs/one_stop_output.json` - One-stop report output (definitive reporting output when `reporting.one_stop_only: true`)
 - `data/outputs/archetype_analysis_results.txt` - Property characteristics summary
 - `data/outputs/scenario_modeling_results.txt` - Scenario cost-benefit analysis
 - `data/outputs/validation_report.txt` - Data quality report
@@ -410,31 +400,10 @@ scenarios:
 - `data/outputs/figures/hn_vs_hp_comparison.png` - Mean capex/bill/CO₂ savings for HP vs HN pathways
 - `data/outputs/maps/heat_network_tiers.html` - Interactive map
 
-When `reporting.one_stop_only: true` is enabled in `config/config.yaml`, the pipeline suppresses the executive summary,
-dashboard assets, maps, figures, and other reporting artefacts in favor of the single `one_stop_output.md`. Core analysis
-inputs (e.g., scenario summaries, readiness summaries, tier/borough CSVs) are still produced so the one-stop report can be
-compiled from them.
-
-## Generating HP vs HN comparison and sensitivities
-
-- Default runs still use the single heat network connection cost and exclude the shared ground loop proxy.
-- To add the optional proxy pathway and HN connection-cost sensitivity, run the modeling phase with:
-
-```bash
-python main.py --phase model --include-ground-loop-proxy --ground-loop-cop 3.6 \
-  --ground-loop-capex-delta 0 --run-hn-sensitivity
-```
-
-This produces:
-- `data/outputs/comparisons/hn_vs_hp_comparison.csv` and `hn_vs_hp_report_snippet.md` with mean/median/p10/p90/min/max
-  for per-home capex, bill savings/change, CO₂ savings/change, and payback.
-- `data/outputs/figures/hn_vs_hp_comparison.png` bar chart of mean capex, bill saving, and CO₂ saving.
-- `data/outputs/comparisons/hn_cost_sensitivity.csv` summarising base/base+£2k/base+£5k HN connection costs.
-
-Sign convention: savings columns (e.g., `bill_saving_mean`, `co2_saving_p90`) are positive when costs/emissions fall; change
-columns (e.g., `bill_change_mean`) are negative when costs/emissions fall and positive when they rise. The markdown snippet
-reiterates tariff assumptions, the COP used (including the proxy when enabled), and the base HN connection cost used for the
-run.
+When `reporting.one_stop_only: true` is enabled in `config/config.yaml`, the pipeline focuses on producing the single
+`one_stop_output.json` plus a small set of supporting CSVs and key figures used in reporting (including the fabric tipping
+point and EPC lodgement charts). Set `one_stop_only: false` to generate the full suite of dashboard assets, maps, and
+additional reporting artefacts.
 
 Example CSV header and row:
 

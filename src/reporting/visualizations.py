@@ -12,6 +12,8 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from matplotlib.lines import Line2D
+from matplotlib.patches import Patch
 from loguru import logger
 
 import sys
@@ -115,6 +117,132 @@ class ReportGenerator:
         plt.close()
 
         logger.info(f"Saved EPC band distribution to: {save_path}")
+
+    def plot_epc_lodgements_by_year_band(
+        self,
+        df: pd.DataFrame,
+        save_counts_path: Optional[Path] = None,
+        save_share_path: Optional[Path] = None,
+        include_share_chart: bool = True,
+    ):
+        """
+        Create stacked bar chart of EPC lodgements by year, broken down by band.
+
+        The y-axis is counts, while the A/B, C, and D bar segments are labelled as
+        percentages of the yearly total (to highlight the shift toward higher ratings).
+
+        Args:
+            df: EPC dataframe (expects LODGEMENT_DATE/INSPECTION_DATE and CURRENT_ENERGY_RATING).
+            save_counts_path: Output path for the stacked counts PNG.
+            save_share_path: Output path for the stacked share PNG (optional).
+            include_share_chart: Whether to also write the share chart.
+        """
+        logger.info("Creating EPC lodgements-by-year stacked bar chart...")
+
+        if save_counts_path is None:
+            save_counts_path = self.output_dir / "epc_lodgement_year_band_stacked_counts.png"
+        if save_share_path is None:
+            save_share_path = self.output_dir / "epc_lodgement_year_band_stacked_share.png"
+
+        if df is None or df.empty:
+            logger.warning("No data provided for EPC lodgements-by-year chart; skipping.")
+            return
+
+        # Dates: prefer LODGEMENT_DATE, fallback to INSPECTION_DATE
+        lodgement = pd.to_datetime(df.get("LODGEMENT_DATE"), errors="coerce")
+        inspection = pd.to_datetime(df.get("INSPECTION_DATE"), errors="coerce")
+        effective = lodgement.fillna(inspection)
+        years = effective.dt.year
+
+        band = df.get("CURRENT_ENERGY_RATING")
+        if band is None:
+            logger.warning("CURRENT_ENERGY_RATING missing; cannot create EPC lodgements-by-year chart.")
+            return
+        band = band.astype("string").fillna("Unknown").str.strip().str.upper()
+        band = band.replace({"": "Unknown"})
+        band = band.where(band.isin(list("ABCDEFG")), other="Unknown")
+        band = band.replace({"A": "A/B", "B": "A/B"})
+
+        tmp = pd.DataFrame({"year": years, "band": band}).dropna(subset=["year"])
+        if tmp.empty:
+            logger.warning("No valid dates found for EPC lodgements-by-year chart; skipping.")
+            return
+        tmp["year"] = tmp["year"].astype(int)
+
+        wide = (
+            tmp.groupby(["year", "band"])
+            .size()
+            .unstack(fill_value=0)
+            .sort_index()
+        )
+
+        cols = [c for c in ["A/B", "C", "D", "E", "F", "G", "Unknown"] if c in wide.columns]
+        label_cols = [c for c in ["A/B", "C", "D"] if c in cols]
+        colors = {
+            "A/B": "#2ca02c",
+            "C": "#8bc34a",
+            "D": "#ffeb3b",
+            "E": "#ff9800",
+            "F": "#f44336",
+            "G": "#b71c1c",
+            "Unknown": "#9e9e9e",
+        }
+
+        # Stacked counts chart
+        fig, ax = plt.subplots(figsize=(12, 6))
+        wide[cols].plot(kind="bar", stacked=True, ax=ax, color=[colors[c] for c in cols], width=0.9)
+        ax.set_title("EPC lodgements by year (counts; A-D segments labelled % of year)")
+        ax.set_xlabel("Lodgement year (LODGEMENT_DATE; fallback INSPECTION_DATE)")
+        ax.set_ylabel("Number of EPCs")
+        ax.tick_params(axis="x", rotation=0)
+        ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, _: f"{int(x):,}"))
+        ax.legend(title="EPC band", bbox_to_anchor=(1.02, 1), loc="upper left")
+
+        # Add percentage labels for A/B, C, D segments while keeping y-axis in counts.
+        totals = wide[cols].sum(axis=1).values
+        for col, container in zip(cols, ax.containers):
+            if col not in label_cols:
+                continue
+            text_color = "white" if col == "A/B" else "black"
+            for rect, total in zip(container, totals):
+                height = rect.get_height()
+                if height <= 0 or total <= 0:
+                    continue
+                pct = (height / total) * 100.0
+                label = "<1%" if 0 < pct < 1 else f"{pct:.0f}%"
+                x = rect.get_x() + rect.get_width() / 2
+                y = rect.get_y() + height / 2
+                ax.text(
+                    x,
+                    y,
+                    label,
+                    ha="center",
+                    va="center",
+                    fontsize=8,
+                    fontweight="bold",
+                    color=text_color,
+                )
+
+        fig.tight_layout()
+        fig.savefig(save_counts_path, dpi=300, bbox_inches="tight")
+        plt.close(fig)
+        logger.info(f"Saved EPC lodgements-by-year chart to: {save_counts_path}")
+
+        # Optional share chart
+        if include_share_chart:
+            share = wide[cols].div(wide[cols].sum(axis=1), axis=0) * 100.0
+            fig, ax = plt.subplots(figsize=(12, 6))
+            share.plot(kind="bar", stacked=True, ax=ax, color=[colors[c] for c in cols], width=0.9)
+            ax.set_title("EPC lodgements by year (share, stacked by EPC band)")
+            ax.set_xlabel("Lodgement year (LODGEMENT_DATE; fallback INSPECTION_DATE)")
+            ax.set_ylabel("% of EPCs (within each year)")
+            ax.tick_params(axis="x", rotation=0)
+            ax.set_ylim(0, 100)
+            ax.legend(title="EPC band", bbox_to_anchor=(1.02, 1), loc="upper left")
+            fig.tight_layout()
+            fig.savefig(save_share_path, dpi=300, bbox_inches="tight")
+            plt.close(fig)
+            logger.info(f"Saved EPC lodgements-by-year share chart to: {save_share_path}")
 
     def plot_sap_score_distribution(
         self,
@@ -455,6 +583,284 @@ class ReportGenerator:
         plt.close()
 
         logger.info(f"Saved cost-effectiveness summary to: {save_path}")
+
+    def plot_fabric_tipping_point_analysis(
+        self,
+        curve_csv: Optional[Path] = None,
+        save_png: Optional[Path] = None,
+        save_svg: Optional[Path] = None,
+    ):
+        """
+        Recreate the "Fabric Investment Tipping Point Analysis" chart from the pipeline curve CSV.
+
+        Args:
+            curve_csv: Path to fabric_tipping_point_curve.csv. If omitted, uses the latest run in
+                data/outputs/bin/run_*/ or falls back to data/outputs/.
+            save_png: Output PNG path (defaults to data/outputs/figures/tipping_point.png).
+            save_svg: Output SVG path (defaults to data/outputs/figures/tipping_point.svg).
+        """
+        logger.info("Creating fabric tipping point chart...")
+
+        if save_png is None:
+            save_png = self.output_dir / "tipping_point.png"
+        if save_svg is None:
+            save_svg = self.output_dir / "tipping_point.svg"
+
+        if curve_csv is None:
+            candidates: List[Path] = []
+            bin_dir = DATA_OUTPUTS_DIR / "bin"
+            if bin_dir.exists():
+                run_dirs = [p for p in bin_dir.iterdir() if p.is_dir() and p.name.startswith("run_")]
+                run_dirs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
+                if run_dirs:
+                    candidates.append(run_dirs[0] / "fabric_tipping_point_curve.csv")
+            candidates.append(DATA_OUTPUTS_DIR / "fabric_tipping_point_curve.csv")
+            for c in candidates:
+                if c.exists():
+                    curve_csv = c
+                    break
+
+        if curve_csv is None or not curve_csv.exists():
+            logger.warning("Could not find fabric_tipping_point_curve.csv; skipping tipping point chart.")
+            return
+
+        df = pd.read_csv(curve_csv)
+        required = {
+            "step",
+            "measure_id",
+            "measure_name",
+            "cumulative_capex",
+            "marginal_kwh_saved",
+            "marginal_capex",
+            "remaining_demand_pct",
+            "is_beyond_tipping_point",
+        }
+        missing = required.difference(df.columns)
+        if missing:
+            logger.warning(f"fabric_tipping_point_curve.csv missing columns {sorted(missing)}; skipping chart.")
+            return
+
+        df = df[df["step"] > 0].reset_index(drop=True).copy()
+        if df.empty:
+            logger.warning("fabric_tipping_point_curve.csv contains no measure rows; skipping chart.")
+            return
+
+        df["marginal_efficiency_kwh_per_1k"] = (
+            df["marginal_kwh_saved"].astype(float) / df["marginal_capex"].astype(float) * 1000.0
+        )
+
+        def _wrap_label(text: str, width: int = 14) -> str:
+            words = str(text).split()
+            lines: List[str] = []
+            current: List[str] = []
+            for w in words:
+                if not current:
+                    current = [w]
+                    continue
+                if len(" ".join(current + [w])) <= width:
+                    current.append(w)
+                else:
+                    lines.append(" ".join(current))
+                    current = [w]
+            if current:
+                lines.append(" ".join(current))
+            if len(lines) <= 2:
+                return "\n".join(lines)
+            return "\n".join(lines[:2]) + "\n..."
+
+        def _format_gbp(value: float) -> str:
+            return f"£{value:,.0f}"
+
+        label_map = {
+            "loft_insulation": "Loft\ninsulation\n(top-up)",
+            "draught_proofing": "Draught-\nproofing",
+            "cavity_wall_insulation": "Cavity wall\ninsulation",
+            "floor_insulation": "Floor\ninsulation",
+            "solid_wall_insulation_ewi": "External wall\ninsulation",
+            "solid_wall_insulation_iwi": "Internal wall\ninsulation",
+            "triple_glazing_upgrade": "Triple\nglazing",
+            "double_glazing_upgrade": "Double glazing\nupgrade",
+        }
+
+        x_labels = []
+        for mid, mname in zip(df["measure_id"], df["measure_name"]):
+            mid_str = str(mid)
+            if mid_str in label_map:
+                x_labels.append(label_map[mid_str])
+            else:
+                x_labels.append(_wrap_label(str(mname)))
+
+        efficiency = df["marginal_efficiency_kwh_per_1k"].astype(float).tolist()
+        cumulative_capex = df["cumulative_capex"].astype(float).tolist()
+
+        threshold_eff = 2500.0
+        moderate_eff = 1000.0
+
+        colors = {
+            "high": "#2e7d32",
+            "moderate": "#ffa726",
+            "low": "#ef5350",
+            "threshold": "#1e88e5",
+            "line": "#4e342e",
+            "grid": "#e0e0e0",
+        }
+
+        bar_colors: List[str] = []
+        for v in efficiency:
+            if v >= threshold_eff:
+                bar_colors.append(colors["high"])
+            elif v >= moderate_eff:
+                bar_colors.append(colors["moderate"])
+            else:
+                bar_colors.append(colors["low"])
+
+        n = len(df)
+        x = list(range(n))
+
+        y_max = max(3500.0, max(efficiency) * 1.8 if efficiency else 3500.0)
+        right_max = max(cumulative_capex) * 1.15 if cumulative_capex else 1.0
+
+        fig, ax = plt.subplots(figsize=(16, 7))
+        ax.set_axisbelow(True)
+        ax.yaxis.grid(True, color=colors["grid"], linewidth=1)
+
+        bars = ax.bar(x, efficiency, color=bar_colors, width=0.7, edgecolor="white")
+
+        ax.set_title(
+            "Fabric Investment Tipping Point Analysis\nDiminishing Returns from Sequential Retrofit Measures",
+            fontsize=16,
+            fontweight="bold",
+            pad=15,
+        )
+        ax.set_xlabel("Retrofit Measure (sequential application)", fontsize=12, fontweight="bold")
+        ax.set_ylabel(
+            "Marginal Efficiency (kWh saved per £1,000 invested)",
+            fontsize=12,
+            fontweight="bold",
+            color=colors["high"],
+        )
+        ax.tick_params(axis="y", labelcolor=colors["high"])
+        ax.set_ylim(0, y_max)
+        ax.set_xticks(x)
+        ax.set_xticklabels(x_labels, rotation=0)
+
+        ax.axhline(threshold_eff, linestyle="--", color=colors["threshold"], linewidth=2, alpha=0.8)
+        threshold_y_frac = threshold_eff / y_max if y_max > 0 else 0.0
+        ax.text(
+            0.98,
+            min(threshold_y_frac + 0.03, 0.98),
+            "Cost-effective threshold\n(2,500 kWh/£1k)",
+            transform=ax.transAxes,
+            ha="right",
+            va="bottom",
+            fontsize=10,
+            color=colors["threshold"],
+            fontweight="bold",
+        )
+
+        # Bar value labels
+        for rect, v in zip(bars, efficiency):
+            ax.text(
+                rect.get_x() + rect.get_width() / 2,
+                rect.get_height() + y_max * 0.02,
+                f"{v:,.0f}",
+                ha="center",
+                va="bottom",
+                fontsize=11,
+                fontweight="bold",
+            )
+
+        # Secondary axis for cumulative capex
+        ax2 = ax.twinx()
+        ax2.plot(x, cumulative_capex, color=colors["line"], marker="o", linewidth=3)
+        ax2.set_ylabel("Cumulative Investment (£)", fontsize=12, fontweight="bold", color=colors["line"])
+        ax2.tick_params(axis="y", labelcolor=colors["line"])
+        ax2.set_ylim(0, right_max)
+        ax2.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda v, _: f"{int(v):,}"))
+
+        # Cumulative capex labels near markers (avoid top overlap)
+        capex_offset = right_max * 0.02
+        for xi, capex in zip(x, cumulative_capex):
+            y = capex + capex_offset
+            va = "bottom"
+            if y >= right_max * 0.97:
+                y = capex - capex_offset * 1.2
+                va = "top"
+            ax2.text(
+                xi,
+                y,
+                _format_gbp(capex),
+                ha="center",
+                va=va,
+                fontsize=10,
+                fontweight="bold",
+                color=colors["line"],
+            )
+
+        # Tipping point callouts
+        pre_tipping = df[~df["is_beyond_tipping_point"] & (df["step"] > 0)]
+        if not pre_tipping.empty:
+            tp1 = pre_tipping.iloc[-1]
+            tp1_x = int(pre_tipping.index[-1])
+            tp1_cost = float(tp1["cumulative_capex"])
+            tp1_reduction = 100.0 - float(tp1["remaining_demand_pct"])
+            ax.annotate(
+                f"TIPPING POINT 1\n{_format_gbp(tp1_cost)} cumulative\n{tp1_reduction:.0f}% demand reduction",
+                xy=(tp1_x, threshold_eff),
+                xytext=(min(tp1_x + 0.8, n - 0.2), y_max * 0.88),
+                ha="left",
+                va="top",
+                fontsize=10,
+                fontweight="bold",
+                color=colors["threshold"],
+                bbox=dict(boxstyle="round,pad=0.35", fc="#e3f2fd", ec=colors["threshold"], lw=1.5),
+                arrowprops=dict(arrowstyle="->", color=colors["threshold"], lw=2),
+            )
+
+        post_tipping = df[df["is_beyond_tipping_point"] & (df["step"] > 0)]
+        if not post_tipping.empty:
+            tp2 = post_tipping.iloc[0]
+            tp2_x = int(post_tipping.index[0])
+            tp2_cost = float(tp2["cumulative_capex"])
+            ax.annotate(
+                f"TIPPING POINT 2\n{_format_gbp(tp2_cost)} cumulative\nMarginal returns collapse",
+                xy=(tp2_x, float(tp2["marginal_efficiency_kwh_per_1k"])),
+                xytext=(min(tp2_x + 2.0, n - 0.2), y_max * 0.62),
+                ha="left",
+                va="top",
+                fontsize=10,
+                fontweight="bold",
+                color="#e65100",
+                bbox=dict(boxstyle="round,pad=0.35", fc="#fff3e0", ec="#fb8c00", lw=1.5),
+                arrowprops=dict(arrowstyle="->", color="#fb8c00", lw=2),
+            )
+
+        handles = [
+            Patch(color=colors["high"], label="High efficiency (>2,500 kWh/£1k)"),
+            Patch(color=colors["moderate"], label="Moderate efficiency (1,000–2,500 kWh/£1k)"),
+            Patch(color=colors["low"], label="Low efficiency (<1,000 kWh/£1k)"),
+            Line2D([0], [0], color=colors["line"], marker="o", lw=3, label="Cumulative investment (£)"),
+        ]
+        ax.legend(handles=handles, loc="upper left", frameon=True)
+
+        fig.text(
+            0.99,
+            0.02,
+            "Source: Energy Saving Trust (2024) costs; Heat Street EPC analysis",
+            ha="right",
+            va="bottom",
+            fontsize=9,
+            style="italic",
+            color="#757575",
+        )
+
+        fig.tight_layout(rect=[0, 0.03, 1, 1])
+        fig.savefig(save_png, dpi=300, bbox_inches="tight")
+        fig.savefig(save_svg, bbox_inches="tight")
+        plt.close(fig)
+
+        logger.info(f"Saved tipping point chart to: {save_png}")
+        logger.info(f"Saved tipping point chart (SVG) to: {save_svg}")
 
     def plot_heat_network_tiers(
         self,

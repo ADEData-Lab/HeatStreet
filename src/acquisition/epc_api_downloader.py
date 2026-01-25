@@ -454,7 +454,7 @@ def main():
             df_filtered = downloader.apply_edwardian_filters(df)
 
             # Save filtered data
-            downloader.save_data(df_filtered, "epc_london_edwardian_filtered.csv")
+            downloader.save_data(df_filtered, "epc_london_filtered.csv")
 
             logger.info("Data acquisition complete!")
             logger.info(f"Raw dataset: {len(df):,} properties")

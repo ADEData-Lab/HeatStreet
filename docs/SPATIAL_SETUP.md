@@ -188,7 +188,7 @@ print('-' * 60)
 print('✓ All spatial dependencies installed successfully!')
 print('')
 print('You can now run the full spatial analysis:')
-print('  .\\run.ps1')
+print('  python run_analysis.py')
 """
 ```
 
@@ -199,8 +199,8 @@ Once GDAL is installed, you'll get these additional features:
 ### Heat Network Tier Classification
 - **Tier 1**: Properties within 250m of existing heat networks
 - **Tier 2**: Properties within planned Heat Network Zones
-- **Tier 3**: High heat density areas (>15 GWh/km²)
-- **Tier 4**: Medium heat density areas (5-15 GWh/km²)
+- **Tier 3**: High heat density areas (≥20 GWh/km²; configurable in `config/config.yaml`)
+- **Tier 4**: Moderate heat density areas (5-20 GWh/km²)
 - **Tier 5**: Low heat density areas (<5 GWh/km²)
 
 ### Outputs
@@ -241,7 +241,7 @@ Once GDAL is installed, you'll get these additional features:
 ### Still Having Issues?
 
 **Option 1**: Skip spatial analysis
-- Run: `.\run.ps1`
+- Run: `python run_analysis.py`
 - When prompted about spatial dependencies, it will skip gracefully
 - You still get 85% of functionality!
 
@@ -306,7 +306,7 @@ Packages install system-wide:
 - [ ] Geopandas installed: `conda install -c conda-forge geopandas`
 - [ ] Test passes: `python -c "import geopandas"`
 - [ ] Core requirements: `pip install -r requirements.txt`
-- [ ] Analysis runs: `.\run.ps1`
+- [ ] Analysis runs: `python run_analysis.py` (or `run-conda.bat` / `.\run-conda.ps1` on Windows)
 - [ ] Spatial phase completes successfully
 - [ ] Map generated: `data/outputs/maps/heat_network_tiers.html`
 
