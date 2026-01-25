@@ -23,7 +23,7 @@ This release addresses critical audit findings related to property count mismatc
 
 ##### 3. Heat Network Tier Labeling (`src/spatial/heat_network_analysis.py`)
 - **FIXED**: All 5 tiers now always appear in output (Tier 1-5)
-- **FIXED**: Tier 2 (Within planned HNZ) no longer skipped when count is 0
+- **FIXED**: Tier 2 (planned network indicator) no longer skipped when count is 0
 - Added explicit notes for each tier definition
 
 ##### 4. Scenario Model Improvements (`src/modeling/scenario_model.py`)

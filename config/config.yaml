@@ -125,12 +125,15 @@ eligibility:
       recommended_pathway: "district_heating"
       notes: "Properties within 250m of existing network infrastructure"
     tier_2:
-      name: "Within planned HNZ"
-      criteria: "inside_hnz_boundary"
+      name: "Near planned network (proxy)"
+      criteria: "within_planned_network_buffer"
+      # Proxy assumption: planned schemes are represented as point locations in HNPD.
+      # We approximate a likely "zone of influence" by buffering those points.
+      distance_meters: 500
       viability: "MEDIUM"
       connection_cost_estimate_gbp: 7500
       recommended_pathway: "district_heating"
-      notes: "Inside borough heat priority areas; network may be built"
+      notes: "Within 500m of an HNPD planned scheme (planning granted) — proxy for HNZ boundary"
     tier_3:
       name: "High heat density"
       # AUDIT FIX: Raised from 15 to 20 GWh/km² for more conservative estimate

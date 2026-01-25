@@ -532,54 +532,94 @@ class HeatNetworkAnalyzer:
             logger.info(f"  Tier 1: {tier_1_count:,} properties ({tier_1_count/len(properties)*100:.1f}%)")
             log_memory("After Tier 1 classification")
 
-        # Tier 2: Within planned Heat Network Zone
-        if heat_zones is not None:
-            logger.info("Identifying Tier 2: Within planned HNZ...")
-            logger.info(f"  Processing {len(heat_zones):,} heat zone polygons...")
+        # Tier 2: Planned network proximity
+        #
+        # Tier 2 is intended to represent a "planned Heat Network Zone" concept.
+        # When a polygon zone layer is available (e.g., legacy London Heat Map), we
+        # do a point-in-polygon overlay. When using HNPD, planned schemes are
+        # represented as POINT locations only; we therefore use a proximity buffer
+        # as a screening proxy.
+        if heat_zones is not None and len(heat_zones) > 0:
+            tier_2_distance = (
+                self.heat_network_tiers.get('tier_2', {}).get('distance_meters')
+                or self.heat_network_tiers.get('tier_1', {}).get('distance_meters', 250)
+            )
+
+            zone_geom_types = set(heat_zones.geometry.geom_type.unique())
+            has_polygons = any(t in zone_geom_types for t in ("Polygon", "MultiPolygon"))
+
+            label_tier_2 = 'Tier 2: Near planned network (proxy)'
+
+            logger.info(f"Identifying {label_tier_2}...")
+            if has_polygons:
+                logger.info(f"  Processing {len(heat_zones):,} heat zone polygons...")
+            else:
+                logger.info(f"  Processing {len(heat_zones):,} planned network points (buffer={tier_2_distance}m)...")
 
             if heat_zones.crs != 'EPSG:27700':
                 logger.info("  Converting heat zones to EPSG:27700...")
                 heat_zones = heat_zones.to_crs('EPSG:27700')
 
-            # Use spatial join with bounding box pre-filtering for better performance
-            logger.info("  Performing spatial join (optimized with bounding box pre-filtering)...")
-            log_memory("Before Tier 2 spatial join")
+            # Use spatial join / distance check with bounding box pre-filtering for better performance
+            logger.info("  Performing Tier 2 classification (optimized with bounding box pre-filtering)...")
+            log_memory("Before Tier 2 classification")
 
             # Filter to properties not already classified as Tier 1
             # No .copy() needed - we're only reading from this filtered view
             unclassified_properties = properties[properties['tier_number'] > 2]
 
             if len(unclassified_properties) > 0:
-                # Pre-filter using bounding box to reduce spatial join workload
-                # This can reduce processing time by 50-80% for sparse geometries
+                # Pre-filter using bounding box to reduce workload
                 zones_bounds = heat_zones.total_bounds  # [minx, miny, maxx, maxy]
 
-                # Filter to properties within bounding box of all heat zones
-                props_in_bbox = unclassified_properties.cx[zones_bounds[0]:zones_bounds[2], zones_bounds[1]:zones_bounds[3]]
+                if has_polygons:
+                    # Filter to properties within bounding box of all heat zones
+                    props_in_bbox = unclassified_properties.cx[zones_bounds[0]:zones_bounds[2], zones_bounds[1]:zones_bounds[3]]
 
-                if len(props_in_bbox) > 0:
-                    logger.info(f"  Bounding box filter: {len(props_in_bbox):,} of {len(unclassified_properties):,} properties to check")
+                    if len(props_in_bbox) > 0:
+                        logger.info(
+                            f"  Bounding box filter: {len(props_in_bbox):,} of {len(unclassified_properties):,} properties to check"
+                        )
 
-                    # Use sjoin to find properties within any heat zone
-                    # This is much faster than unary_union + within for complex geometries
-                    joined = gpd.sjoin(
-                        props_in_bbox[['geometry']],
-                        heat_zones[['geometry']],
-                        how='left',
-                        predicate='within'
-                    )
+                        # Use sjoin to find properties within any heat zone polygon.
+                        joined = gpd.sjoin(
+                            props_in_bbox[['geometry']],
+                            heat_zones[['geometry']],
+                            how='left',
+                            predicate='within'
+                        )
+                        tier_2_indices = joined[joined.index_right.notna()].index.unique()
+                    else:
+                        tier_2_indices = []
                 else:
-                    # No properties in bounding box - create empty result
-                    joined = gpd.GeoDataFrame(columns=['geometry', 'index_right'])
+                    # Proxy: classify properties within tier_2_distance of any planned network point.
+                    expanded_bounds = [
+                        zones_bounds[0] - tier_2_distance,
+                        zones_bounds[1] - tier_2_distance,
+                        zones_bounds[2] + tier_2_distance,
+                        zones_bounds[3] + tier_2_distance,
+                    ]
+                    props_in_bbox = unclassified_properties.cx[
+                        expanded_bounds[0]:expanded_bounds[2],
+                        expanded_bounds[1]:expanded_bounds[3]
+                    ]
 
-                log_memory("After Tier 2 spatial join")
+                    if len(props_in_bbox) > 0:
+                        logger.info(
+                            f"  Bounding box filter: {len(props_in_bbox):,} of {len(unclassified_properties):,} properties to check"
+                        )
+                        planned_union = heat_zones.unary_union
+                        distances = props_in_bbox.geometry.distance(planned_union)
+                        tier_2_indices = distances[distances <= tier_2_distance].index.unique()
+                    else:
+                        tier_2_indices = []
 
-                # Properties with a match are within a heat zone
-                tier_2_indices = joined[joined.index_right.notna()].index.unique()
+                log_memory("After Tier 2 classification")
+
                 tier_2_count = len(tier_2_indices)
 
                 # Update properties
-                properties.loc[tier_2_indices, 'heat_network_tier'] = 'Tier 2: Within planned HNZ'
+                properties.loc[tier_2_indices, 'heat_network_tier'] = label_tier_2
                 properties.loc[tier_2_indices, 'tier_number'] = 2
 
                 logger.info(f"  ✓ Tier 2: {tier_2_count:,} properties ({tier_2_count/len(properties)*100:.1f}%)")
@@ -672,26 +712,56 @@ class HeatNetworkAnalyzer:
             classified['distance_to_network_m'] = classified_27700.geometry.distance(network_union)
             log_memory("After distance calculation")
 
-        # Flag whether property sits inside a heat network zone polygon
-        # Using bounding box pre-filtering for better performance
+        # Flag whether property sits inside a heat network zone polygon.
+        #
+        # If the "zones" layer is point-based (HNPD planned schemes), we use the
+        # same proximity proxy as Tier 2 and set `in_heat_zone=True` when within
+        # the configured buffer distance.
         classified['in_heat_zone'] = False
         if heat_zones is not None and len(heat_zones) > 0:
             log_memory("Before zone classification")
             zones_27700 = heat_zones.to_crs('EPSG:27700') if heat_zones.crs != 'EPSG:27700' else heat_zones
             classified_27700 = classified.to_crs('EPSG:27700')
 
-            # Pre-filter using bounding box to reduce spatial join workload
-            zones_bounds = zones_27700.total_bounds  # [minx, miny, maxx, maxy]
-            props_in_bbox = classified_27700.cx[zones_bounds[0]:zones_bounds[2], zones_bounds[1]:zones_bounds[3]]
+            zone_geom_types = set(zones_27700.geometry.geom_type.unique())
+            has_polygons = any(t in zone_geom_types for t in ("Polygon", "MultiPolygon"))
 
-            if len(props_in_bbox) > 0:
-                zone_join = gpd.sjoin(
-                    props_in_bbox[['geometry']],
-                    zones_27700[['geometry']],
-                    how='left',
-                    predicate='within'
+            zones_bounds = zones_27700.total_bounds  # [minx, miny, maxx, maxy]
+
+            if has_polygons:
+                # Pre-filter using bounding box to reduce spatial join workload
+                props_in_bbox = classified_27700.cx[zones_bounds[0]:zones_bounds[2], zones_bounds[1]:zones_bounds[3]]
+
+                if len(props_in_bbox) > 0:
+                    zone_join = gpd.sjoin(
+                        props_in_bbox[['geometry']],
+                        zones_27700[['geometry']],
+                        how='left',
+                        predicate='within'
+                    )
+                    classified.loc[zone_join.index, 'in_heat_zone'] = zone_join.index_right.notna().values
+            else:
+                tier_2_distance = (
+                    self.heat_network_tiers.get('tier_2', {}).get('distance_meters')
+                    or self.heat_network_tiers.get('tier_1', {}).get('distance_meters', 250)
                 )
-                classified.loc[zone_join.index, 'in_heat_zone'] = zone_join.index_right.notna().values
+
+                expanded_bounds = [
+                    zones_bounds[0] - tier_2_distance,
+                    zones_bounds[1] - tier_2_distance,
+                    zones_bounds[2] + tier_2_distance,
+                    zones_bounds[3] + tier_2_distance,
+                ]
+                props_in_bbox = classified_27700.cx[
+                    expanded_bounds[0]:expanded_bounds[2],
+                    expanded_bounds[1]:expanded_bounds[3],
+                ]
+
+                if len(props_in_bbox) > 0:
+                    planned_union = zones_27700.unary_union
+                    distances = props_in_bbox.geometry.distance(planned_union)
+                    in_proxy_zone = distances <= tier_2_distance
+                    classified.loc[in_proxy_zone[in_proxy_zone].index, 'in_heat_zone'] = True
 
             log_memory("After zone classification")
 
@@ -1238,6 +1308,10 @@ class HeatNetworkAnalyzer:
         # This ensures all tiers appear in output even if count is 0
         tier_3_threshold = self.heat_network_tiers['tier_3']['min_heat_density_gwh_km2']
         tier_4_threshold = self.heat_network_tiers['tier_4']['min_heat_density_gwh_km2']
+        tier_2_distance = (
+            self.heat_network_tiers.get('tier_2', {}).get('distance_meters')
+            or self.heat_network_tiers.get('tier_1', {}).get('distance_meters', 250)
+        )
 
         tier_definitions = {
             'Tier 1: Adjacent to existing network': {
@@ -1245,10 +1319,13 @@ class HeatNetworkAnalyzer:
                 'recommendation': 'District Heating (existing network connection)',
                 'note': 'Within 250m of existing network infrastructure'
             },
-            'Tier 2: Within planned HNZ': {
+            'Tier 2: Near planned network (proxy)': {
                 'tier_number': 2,
                 'recommendation': 'District Heating (planned network)',
-                'note': 'Inside borough-designated heat priority areas'
+                'note': (
+                    "Planned network indicator (polygon zone layer if available; "
+                    f"otherwise within {tier_2_distance}m of HNPD planning-granted scheme)"
+                )
             },
             'Tier 3: High heat density': {
                 'tier_number': 3,
@@ -1468,7 +1545,7 @@ class HeatNetworkAnalyzer:
                             padding: 10px">
                 <p><strong>Heat Network Tiers</strong></p>
                 <p><i class="fa fa-circle" style="color:darkred"></i> Tier 1: Adjacent to existing network</p>
-                <p><i class="fa fa-circle" style="color:red"></i> Tier 2: Within planned HNZ</p>
+                <p><i class="fa fa-circle" style="color:red"></i> Tier 2: Near planned network (proxy)</p>
                 <p><i class="fa fa-circle" style="color:orange"></i> Tier 3: High heat density</p>
                 <p><i class="fa fa-circle" style="color:yellow"></i> Tier 4: Moderate heat density</p>
                 <p><i class="fa fa-circle" style="color:lightgreen"></i> Tier 5: Low heat density</p>
