@@ -292,7 +292,7 @@ step | measure_id           | cumulative_capex | cumulative_kwh_saved | marginal
 7    | triple_glazing       | 20000            | 9500                 | 4.28                  | True
 ```
 
-**Integration:** Added to main pipeline in `main.py` (line 190-197)
+**Integration:** Integrated into the interactive pipeline (`run_analysis.py`).
 
 ---
 
@@ -327,7 +327,7 @@ step | measure_id           | cumulative_capex | cumulative_kwh_saved | marginal
 - `outputs/pathway_load_profile_timeseries.csv` - Hourly/daily profiles
 - `outputs/pathway_load_profile_summary.csv` - Peak/average metrics
 
-**Integration:** Added to main pipeline in `main.py` (line 208-214)
+**Integration:** Integrated into the interactive pipeline (`run_analysis.py`).
 
 ---
 
@@ -361,7 +361,7 @@ step | measure_id           | cumulative_capex | cumulative_kwh_saved | marginal
 **Output:**
 - `outputs/hn_penetration_sensitivity.csv` - Grid with all combinations
 
-**Integration:** Added to main pipeline in `main.py` (line 216-222)
+**Integration:** Integrated into the interactive pipeline (`run_analysis.py`).
 
 ---
 
@@ -484,14 +484,7 @@ The analysis pipeline now produces the following outputs in `data/outputs/`:
 To generate all outputs:
 
 ```bash
-# Run the complete pipeline
-python main.py --phase all
-
-# Or run specific phases
-python main.py --phase clean    # Data cleaning & validation
-python main.py --phase model    # Comprehensive modeling (all 12 sections)
-python main.py --phase spatial  # Spatial/heat network analysis
-python main.py --phase report   # Visualizations
+python run_analysis.py
 ```
 
 To run individual modules:
@@ -525,7 +518,7 @@ python src/analysis/penetration_sensitivity.py
    - Identifies cost-effectiveness threshold
    - Provides marginal cost analysis
 
-2. **Enhanced Main Pipeline** (`main.py`)
+2. **Enhanced Main Pipeline** (`run_analysis.py`)
    - Integrated all 12 client question modules
    - Clear phase structure with progress indicators
    - Comprehensive outputs in single run

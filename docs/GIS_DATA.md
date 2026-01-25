@@ -178,8 +178,8 @@ Properties are classified into 5 tiers:
 
 1. **Tier 1** - Within 250m of existing heat network
 2. **Tier 2** - Within planned Heat Network Zone
-3. **Tier 3** - High heat density area (>15 GWh/km²)
-4. **Tier 4** - Medium heat density area (5-15 GWh/km²)
+3. **Tier 3** - High heat density area (≥20 GWh/km²; configurable in `config/config.yaml`)
+4. **Tier 4** - Moderate heat density area (5-20 GWh/km²)
 5. **Tier 5** - Low heat density area (<5 GWh/km²)
 
 This classification helps determine:
@@ -204,7 +204,7 @@ This includes:
 - geopandas
 - shapely
 - fiona
-- GDAL (see [WINDOWS_INSTALLATION.md](WINDOWS_INSTALLATION.md) for Windows setup)
+- GDAL (see [SPATIAL_SETUP.md](SPATIAL_SETUP.md) for Windows setup)
 
 ## Data Fields
 
@@ -237,7 +237,10 @@ Key fields in network shapefiles:
 
 The download script automatically handles SSL certificate issues by using `wget --no-check-certificate`. If you encounter issues:
 
-1. Try the standalone script: `.\download-gis-data.ps1`
+1. Try running the built-in downloader:
+   ```powershell
+   python -c "from src.acquisition.london_gis_downloader import LondonGISDownloader; LondonGISDownloader().download_and_prepare(force_redownload=True)"
+   ```
 2. Manual download: Visit the URL directly and place `GIS_All_Data.zip` in `data/external/`
 
 ### Cannot Read Shapefiles
@@ -254,7 +257,7 @@ If you get errors reading shapefiles:
    pip install -r requirements-spatial.txt
    ```
 
-3. **Windows users**: See [WINDOWS_INSTALLATION.md](WINDOWS_INSTALLATION.md) for GDAL setup
+3. **Windows users**: See [SPATIAL_SETUP.md](SPATIAL_SETUP.md) for GDAL setup
 
 ### Data Already Downloaded
 
@@ -287,5 +290,5 @@ For the most current data, visit:
 
 - [Interactive Mode Guide](INTERACTIVE_MODE.md) - Using the interactive CLI
 - [API Usage](API_USAGE.md) - EPC API data download
-- [Windows Installation](WINDOWS_INSTALLATION.md) - Installing spatial dependencies on Windows
-- [Quickstart Guide](QUICKSTART.md) - Getting started
+- [Spatial Setup](SPATIAL_SETUP.md) - Installing spatial dependencies on Windows
+- [Quickstart Guide](../QUICKSTART.md) - Getting started

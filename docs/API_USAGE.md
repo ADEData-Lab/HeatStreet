@@ -212,8 +212,8 @@ df, next_search_after = downloader._make_api_request(query_params)
 Downloaded data is saved to:
 - `data/raw/epc_london_raw.csv` - All downloaded data
 - `data/raw/epc_london_raw.parquet` - Same data in Parquet format (faster)
-- `data/raw/epc_london_edwardian_filtered.csv` - Filtered for Edwardian terraced
-- `data/raw/epc_london_edwardian_filtered.parquet` - Filtered data in Parquet
+- `data/raw/epc_london_filtered.csv` - Filtered for Edwardian terraced
+- `data/raw/epc_london_filtered.parquet` - Filtered data in Parquet
 
 ## Troubleshooting
 
@@ -254,8 +254,7 @@ The API downloader integrates with the main pipeline:
 python src/acquisition/epc_api_downloader.py
 
 # Then continue with the pipeline
-python main.py --phase clean
-python main.py --phase analyze
+python run_analysis.py
 ```
 
 Or integrate directly:

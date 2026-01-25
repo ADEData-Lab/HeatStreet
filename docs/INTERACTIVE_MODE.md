@@ -6,14 +6,19 @@ Run the complete EPC analysis from start to finish in one window with interactiv
 
 ### Windows
 
-**PowerShell**:
-```powershell
-.\run.ps1
+**Command Prompt (recommended for spatial analysis)**:
+```cmd
+run-conda.bat
 ```
 
-**Command Prompt**:
-```cmd
-run.bat
+**PowerShell (recommended for spatial analysis)**:
+```powershell
+.\run-conda.ps1
+```
+
+If you already have an environment with dependencies installed, you can also run:
+```powershell
+python run_analysis.py
 ```
 
 ### Linux/Mac

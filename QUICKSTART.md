@@ -36,11 +36,11 @@
 
 ---
 
-### Method 2: Standard (Quick Setup, Core Features)
+### Method 2: Python (Core Features)
 
-**✅ Best for**: Quick testing, core analysis without spatial features
+**✅ Best for**: Quick testing and core analysis without spatial features
 
-**What you get**: EPC analysis, scenarios, charts, Excel reports (85% of features)
+**What you get**: EPC analysis, scenarios, charts, Excel reports (most features)
 
 **Prerequisites**: Python 3.11+
 
@@ -52,23 +52,23 @@
    cd HeatStreet
    ```
 
-2. **Run standard launcher**
+2. **Create environment + install dependencies**
    ```bash
-   # Windows Command Prompt
-   run.bat
+   python -m venv venv
+   # Activate venv (platform-specific)
+   # Windows PowerShell: .\venv\Scripts\Activate.ps1
+   # Windows Cmd:       venv\Scripts\activate.bat
+   # Linux/Mac:         source venv/bin/activate
 
-   # OR Windows PowerShell
-   .\run.ps1
-
-   # OR Linux/Mac
-   chmod +x run.sh
-   ./run.sh
+   pip install -r requirements.txt
    ```
 
-3. **When prompted about spatial dependencies**:
-   - Choose **N** (No) to skip and continue with core analysis
-   - Choose **Y** (Yes) to attempt GDAL install (may fail on Windows)
-   - Choose **S** (Show guide) to see GDAL installation instructions
+3. **Run**
+   ```bash
+   python run_analysis.py
+   ```
+
+For spatial analysis on Windows, use Method 1 (Conda) or see `docs/SPATIAL_SETUP.md`.
 
 ---
 
@@ -125,8 +125,8 @@ The interactive CLI guides you through:
 **Classifies properties into tiers**:
 - **Tier 1**: Within 250m of existing heat network
 - **Tier 2**: Within designated Heat Network Zone
-- **Tier 3**: High heat density (>15 GWh/km²)
-- **Tier 4**: Medium density (5-15 GWh/km²)
+- **Tier 3**: High heat density (≥20 GWh/km²; configurable in `config/config.yaml`)
+- **Tier 4**: Moderate density (5-20 GWh/km²)
 - **Tier 5**: Low density (<5 GWh/km²)
 
 **Recommends pathways by tier**:
@@ -356,12 +356,12 @@ energy_prices:
 ### "Conda is not recognized"
 → Install Miniconda: https://docs.conda.io/en/latest/miniconda.html
 → Restart terminal
-→ Use `run-conda.bat` (not `run.bat`)
+→ Use `run-conda.bat` or `.\run-conda.ps1`
 
 ### "No module named 'osgeo'" or GDAL errors
-→ Use `run-conda.bat` instead of `run.bat`
 → Conda auto-installs GDAL correctly
-→ Or skip spatial analysis (choose N when prompted)
+→ Use `run-conda.bat` / `.\run-conda.ps1`
+→ Or run without spatial analysis (the pipeline will skip spatial steps if GIS libs are missing)
 
 ### "Cannot be loaded because running scripts is disabled"
 → PowerShell security policy issue
@@ -384,7 +384,7 @@ energy_prices:
 - **[README.md](README.md)** - Full project documentation
 - **[docs/SPATIAL_SETUP.md](docs/SPATIAL_SETUP.md)** - Detailed GDAL installation guide
 - **[docs/GIS_DATA.md](docs/GIS_DATA.md)** - London GIS data documentation
-- **[docs/QUICKSTART_WINDOWS.md](docs/QUICKSTART_WINDOWS.md)** - Windows-specific guide
+- **[docs/INTERACTIVE_MODE.md](docs/INTERACTIVE_MODE.md)** - Interactive CLI guide
 
 ---
 
@@ -396,8 +396,8 @@ energy_prices:
 |------|-------------|---------------------|----------------|
 | 1 | Any | Within 250m | **Connect now** - lowest cost |
 | 2 | Any | Within HN Zone | **Connect planned** - wait for rollout |
-| 3 | >15 GWh/km² | Outside zone | **DH viable** - extension worth considering |
-| 4 | 5-15 GWh/km² | Outside zone | **Marginal** - consider heat pumps |
+| 3 | ≥20 GWh/km² | Outside zone | **DH viable** - extension worth considering |
+| 4 | 5-20 GWh/km² | Outside zone | **Marginal** - consider heat pumps |
 | 5 | <5 GWh/km² | Outside zone | **HP recommended** - DH not economical |
 
 ### Decarbonization Pathways
