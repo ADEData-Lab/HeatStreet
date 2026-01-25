@@ -196,6 +196,11 @@ print('  python run_analysis.py')
 
 Once GDAL is installed, you'll get these additional features:
 
+### Data sources used for tiering (evidence layers)
+- **HNPD (DESNZ/BEIS Heat Network Planning Database, Jan 2024)**: the primary source of up-to-date heat network scheme locations (downloaded automatically to `data/external/hnpd-january-2024.csv`).
+- **London Heat Map GIS package (legacy)**: optional/fallback; provides zone / “potential network” geometries used by the Tier 2 overlay (downloaded as `data/external/GIS_All_Data.zip`).
+- **EPC-derived demand**: used to compute local heat density (GWh/km²) for Tier 3–5.
+
 ### Heat Network Tier Classification
 - **Tier 1**: Properties within 250m of existing heat networks
 - **Tier 2**: Properties within planned Heat Network Zones

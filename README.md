@@ -229,10 +229,13 @@ Register for API access at [https://epc.opendatacommunities.org/](https://epc.op
 
 ### Supplementary Data
 
-**London Heat Map** (optional but recommended):
-- Heat network locations: Download from [London Datastore](https://data.london.gov.uk/)
-- Heat Network Zones: [GLA Heat Network Zones](https://www.london.gov.uk/programmes-strategies/environment-and-climate-change/energy/london-heat-map)
-- Place GeoJSON/Shapefile in `data/supplementary/`
+**Heat Network Planning Database (HNPD) (recommended for Tiering)**:
+- DESNZ/BEIS Heat Network Planning Database (January 2024) is used as the primary source of up-to-date heat network scheme locations.
+- The pipeline auto-downloads it to `data/external/hnpd-january-2024.csv` (see `data_sources.heat_networks` in `config/config.yaml`).
+
+**London Heat Map GIS package (legacy; optional/fallback)**:
+- Used as a fallback evidence layer if HNPD is unavailable, and to provide zone/“potential network” geometries used by the Tier 2 overlay.
+- The pipeline can auto-download this from the London Datastore as `data/external/GIS_All_Data.zip` and extract it under `data/external/`.
 
 **Boundary Files**:
 - London borough boundaries
@@ -275,9 +278,9 @@ The interactive CLI will guide you through:
    - Performs subsidy sensitivity analysis
 
 4. **Spatial Analysis** (if GDAL available)
-   - Auto-downloads London GIS data
-   - Classifies properties into heat network tiers
-   - Calculates heat density (GWh/km²)
+   - Uses HNPD (2024) and optional London Heat Map GIS (legacy) as evidence layers
+   - Classifies properties into heat network tiers (Tier 1–5)
+   - Calculates local heat density (GWh/km²) from EPC-derived demand
    - Generates interactive HTML maps
    - Exports GeoJSON with tier classifications
 
@@ -431,15 +434,19 @@ The project models five scenarios:
 
 ## Heat Network Tier Classification
 
+HeatStreet’s heat network tiering is a **screening tool** that combines (a) evidence of nearby network infrastructure / planned zones and (b) EPC-derived local heat density.
+
 Properties are classified into five tiers:
 
-| Tier | Definition | Recommended Pathway |
+| Tier | Definition (screening) | Main evidence input | Recommended Pathway |
 |------|------------|---------------------|
-| **Tier 1** | Within 250m of existing heat network | District heating connection |
-| **Tier 2** | Within designated Heat Network Zone | District heating (planned) |
-| **Tier 3** | High heat density (>3,000 kWh/m/year) | District heating (extension viable) |
-| **Tier 4** | Moderate heat density (1,500-3,000) | Heat pump (network marginal) |
-| **Tier 5** | Low heat density (<1,500) | Heat pump (network not viable) |
+| **Tier 1** | Within 250m of existing heat network | HNPD (Operational / Under Construction) or London Heat Map fallback | District heating connection |
+| **Tier 2** | Within a planned heat network zone / “potential network” geometry | London Heat Map GIS zone layer (if available) | District heating (planned) |
+| **Tier 3** | High local heat density (default ≥20 GWh/km²) | EPC-derived heat density (postcode centroids) | District heating (extension potentially viable) |
+| **Tier 4** | Moderate density (default 5–20 GWh/km²) | EPC-derived heat density | Heat pump (network marginal) |
+| **Tier 5** | Low density (default <5 GWh/km²) | EPC-derived heat density | Heat pump (network not viable) |
+
+Thresholds are configured in `config/config.yaml` (see `eligibility.heat_network_tiers` and `heat_network.readiness`).
 
 ### Spatial Analysis Method: Grid-Based Aggregation
 

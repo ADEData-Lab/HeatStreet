@@ -282,6 +282,11 @@ downloader.download_and_prepare(force_redownload=True)
 - New networks may have been built
 - Some heat sources may have changed
 
+### How this relates to HNPD (and why both can be used)
+HeatStreet’s tiering uses **DESNZ/BEIS Heat Network Planning Database (HNPD, Jan 2024)** as the primary, up-to-date source of scheme locations. This London Heat Map GIS package is still useful because it provides:
+- A **fallback** evidence layer if HNPD is unavailable
+- Zone / “potential network” geometries used by the Tier 2 overlay in the current tiering approach
+
 For the most current data, visit:
 - [London Heat Map](https://www.london.gov.uk/programmes-strategies/environment-and-climate-change/energy/london-heat-map)
 - [London Datastore](https://data.london.gov.uk/)
