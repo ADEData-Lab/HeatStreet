@@ -607,6 +607,33 @@ def model_scenarios(df, analysis_logger: AnalysisLogger = None):
     if save_paths.get('summary_path'):
         console.print(f"    • Scenario summary: {save_paths['summary_path']}")
 
+    # Generate the fabric tipping point figure (PNG + editable SVG).
+    try:
+        from src.reporting.visualizations import ReportGenerator
+
+        viz = ReportGenerator()
+        viz.plot_fabric_tipping_point_analysis()
+        console.print("[green]✓[/green] Tipping point chart saved to data/outputs/figures/")
+
+        if analysis_logger:
+            tipping_png = DATA_OUTPUTS_DIR / "figures" / "tipping_point.png"
+            tipping_svg = DATA_OUTPUTS_DIR / "figures" / "tipping_point.svg"
+            if tipping_png.exists():
+                analysis_logger.add_output(
+                    "data/outputs/figures/tipping_point.png",
+                    "png",
+                    "Fabric tipping point analysis (chart)",
+                )
+            if tipping_svg.exists():
+                analysis_logger.add_output(
+                    "data/outputs/figures/tipping_point.svg",
+                    "svg",
+                    "Fabric tipping point analysis (vector)",
+                )
+    except Exception as e:
+        console.print(f"[yellow]⚠ Could not generate tipping point chart: {e}[/yellow]")
+        logger.exception("Tipping point chart generation failed")
+
     # Generate pathway-level outputs and HP vs HN comparisons (aligns with main pipeline)
     console.print()
     if not one_stop_only:
@@ -711,22 +738,56 @@ def analyze_retrofit_readiness(df, analysis_logger: AnalysisLogger = None, one_s
             for tier in range(1, 6):
                 count = summary['tier_distribution'].get(tier, 0)
                 pct = summary['tier_percentages'].get(tier, 0)
-                analysis_logger.add_metric(f"retrofit_tier_{tier}", count, f"{pct:.1f}% of properties")
+            analysis_logger.add_metric(f"retrofit_tier_{tier}", count, f"{pct:.1f}% of properties")
             analysis_logger.add_metric("mean_fabric_cost", summary['mean_fabric_cost'], "Average fabric improvement cost per property")
             analysis_logger.add_metric("total_retrofit_cost", summary['total_retrofit_cost'], "Total retrofit investment needed")
 
-        if not one_stop_only:
-            # Generate visualizations
-            console.print("[cyan]Creating retrofit readiness visualizations...[/cyan]")
-
+        viz = None
+        try:
             from src.reporting.visualizations import ReportGenerator
+
             viz = ReportGenerator()
+        except Exception as e:
+            console.print(f"[yellow]⚠ Could not initialise visualizations: {e}[/yellow]")
+            logger.exception("Visualization initialization failed")
 
-            viz.plot_retrofit_readiness_dashboard(df_readiness, summary)
-            viz.plot_fabric_cost_distribution(df_readiness)
-            viz.plot_heat_demand_scatter(df_readiness)
+        if viz is not None:
+            # Always generate the EPC lodgements-by-year figure (used in the report).
+            try:
+                console.print("[cyan]Creating EPC lodgement visualizations...[/cyan]")
+                viz.plot_epc_lodgements_by_year_band(df)
+                console.print("[green]✓[/green] EPC lodgement charts saved to data/outputs/figures/")
 
-            console.print(f"[green]✓[/green] Visualizations saved to data/outputs/figures/")
+                if analysis_logger:
+                    counts_png = DATA_OUTPUTS_DIR / "figures" / "epc_lodgement_year_band_stacked_counts.png"
+                    share_png = DATA_OUTPUTS_DIR / "figures" / "epc_lodgement_year_band_stacked_share.png"
+                    if counts_png.exists():
+                        analysis_logger.add_output(
+                            "data/outputs/figures/epc_lodgement_year_band_stacked_counts.png",
+                            "png",
+                            "EPC lodgements by year (counts; bands stacked)",
+                        )
+                    if share_png.exists():
+                        analysis_logger.add_output(
+                            "data/outputs/figures/epc_lodgement_year_band_stacked_share.png",
+                            "png",
+                            "EPC lodgements by year (share; bands stacked)",
+                        )
+            except Exception as e:
+                console.print(f"[yellow]⚠ Could not generate EPC lodgement charts: {e}[/yellow]")
+                logger.exception("EPC lodgement chart generation failed")
+
+        if not one_stop_only and viz is not None:
+            # Generate retrofit readiness visualizations (heavier charts).
+            console.print("[cyan]Creating retrofit readiness visualizations...[/cyan]")
+            try:
+                viz.plot_retrofit_readiness_dashboard(df_readiness, summary)
+                viz.plot_fabric_cost_distribution(df_readiness)
+                viz.plot_heat_demand_scatter(df_readiness)
+                console.print("[green]✓[/green] Visualizations saved to data/outputs/figures/")
+            except Exception as e:
+                console.print(f"[yellow]⚠ Could not generate retrofit readiness charts: {e}[/yellow]")
+                logger.exception("Retrofit readiness chart generation failed")
 
         if analysis_logger:
             analysis_logger.add_output("data/outputs/retrofit_readiness_analysis.csv", "csv", "Property-level retrofit readiness")
@@ -1116,6 +1177,17 @@ def cleanup_reporting_outputs():
     if outputs_dir.exists():
         for path in outputs_dir.iterdir():
             if path.name in preserved_files or path.name == "bin":
+                continue
+            if path.name == "figures" and path.is_dir():
+                # Keep figures in place for easy access, but also copy to the archive for auditability.
+                try:
+                    dest = archive_dir / path.name
+                    if dest.exists():
+                        shutil.rmtree(dest)
+                    shutil.copytree(path, dest)
+                    moved.append({"from": str(path), "to": str(dest), "mode": "copy"})
+                except Exception as exc:
+                    logger.warning(f"Could not copy figures directory {path} to archive: {exc}")
                 continue
             try:
                 dest = archive_dir / path.name
