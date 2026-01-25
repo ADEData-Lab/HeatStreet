@@ -1,0 +1,1769 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Heat Street Dashboard — London's Edwardian Terraced Housing</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-primary: #0f172a;
+            --bg-secondary: #1e293b;
+            --bg-card: linear-gradient(135deg, rgba(30, 41, 59, 0.8), rgba(15, 23, 42, 0.9));
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --border-color: rgba(148, 163, 184, 0.1);
+            --accent-blue: #3b82f6;
+            --accent-green: #22c55e;
+            --accent-orange: #f97316;
+            --accent-purple: #a855f7;
+            --accent-red: #ef4444;
+        }
+
+        body {
+            font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: linear-gradient(180deg, var(--bg-primary) 0%, var(--bg-secondary) 50%, var(--bg-primary) 100%);
+            color: var(--text-primary);
+            min-height: 100vh;
+            line-height: 1.5;
+        }
+
+        /* Header */
+        .header {
+            background: linear-gradient(90deg, rgba(59, 130, 246, 0.1), rgba(139, 92, 246, 0.1));
+            border-bottom: 1px solid var(--border-color);
+            padding: 32px 48px;
+        }
+
+        .header-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .logo {
+            background: linear-gradient(135deg, #f97316, #ef4444);
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 24px;
+        }
+
+        .header h1 {
+            font-size: 36px;
+            font-weight: 700;
+            background: linear-gradient(135deg, #f8fafc, #94a3b8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+            letter-spacing: -0.5px;
+        }
+
+        .header-subtitle {
+            color: var(--text-secondary);
+            font-size: 16px;
+            margin-top: 4px;
+        }
+
+        .header-right {
+            text-align: right;
+        }
+
+        .header-right .label {
+            color: var(--text-muted);
+            font-size: 13px;
+        }
+
+        .header-right .value {
+            color: var(--text-primary);
+            font-size: 16px;
+            font-weight: 600;
+        }
+
+        /* Navigation */
+        .nav {
+            background: rgba(15, 23, 42, 0.7);
+            border-bottom: 1px solid var(--border-color);
+            padding: 16px 48px;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+            backdrop-filter: blur(12px);
+        }
+
+        .nav-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            gap: 12px;
+        }
+
+        .nav-btn {
+            background: rgba(30, 41, 59, 0.6);
+            color: var(--text-secondary);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            border-radius: 8px;
+            padding: 10px 20px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-family: inherit;
+        }
+
+        .nav-btn:hover {
+            background: rgba(59, 130, 246, 0.2);
+            border-color: var(--accent-blue);
+        }
+
+        .nav-btn.active {
+            background: linear-gradient(135deg, #3b82f6, #2563eb);
+            color: white;
+            border: none;
+        }
+
+        /* Main Content */
+        .main {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 32px 48px;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* Cards */
+        .card {
+            background: var(--bg-card);
+            border-radius: 16px;
+            padding: 24px;
+            border: 1px solid var(--border-color);
+            margin-bottom: 24px;
+        }
+
+        .card-header {
+            margin-bottom: 20px;
+        }
+
+        .card-title {
+            color: var(--text-primary);
+            font-size: 20px;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .card-subtitle {
+            color: var(--text-muted);
+            font-size: 14px;
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+            margin-bottom: 32px;
+        }
+
+        @media (max-width: 1024px) {
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        @media (max-width: 600px) {
+            .stats-grid {
+                grid-template-columns: 1fr;
+            }
+            .header, .nav, .main {
+                padding-left: 20px;
+                padding-right: 20px;
+            }
+        }
+
+        .stat-card {
+            background: var(--bg-card);
+            border-radius: 16px;
+            padding: 24px;
+            border: 1px solid var(--border-color);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .stat-card::before {
+            content: '';
+            position: absolute;
+            top: -20px;
+            right: -20px;
+            width: 100px;
+            height: 100px;
+            background: radial-gradient(circle, var(--glow-color, rgba(59, 130, 246, 0.2)), transparent 70%);
+            border-radius: 50%;
+        }
+
+        .stat-card.blue::before { --glow-color: rgba(59, 130, 246, 0.2); }
+        .stat-card.orange::before { --glow-color: rgba(249, 115, 22, 0.2); }
+        .stat-card.green::before { --glow-color: rgba(34, 197, 94, 0.2); }
+        .stat-card.purple::before { --glow-color: rgba(168, 85, 247, 0.2); }
+
+        .stat-label {
+            color: var(--text-secondary);
+            font-size: 13px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+            font-weight: 500;
+        }
+
+        .stat-value {
+            color: var(--text-primary);
+            font-size: 32px;
+            font-weight: 700;
+            line-height: 1.1;
+        }
+
+        .stat-subvalue {
+            color: var(--text-muted);
+            font-size: 13px;
+            margin-top: 8px;
+        }
+
+        /* Grid Layouts */
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 24px;
+        }
+
+        .grid-2-equal {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 24px;
+        }
+
+        @media (max-width: 900px) {
+            .grid-2, .grid-2-equal {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Insights List */
+        .insights-list {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+
+        .insight-item {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 16px;
+            background: rgba(15, 23, 42, 0.5);
+            border-radius: 10px;
+            border-left: 3px solid var(--accent-color);
+        }
+
+        .insight-item.blue { --accent-color: var(--accent-blue); }
+        .insight-item.orange { --accent-color: var(--accent-orange); }
+        .insight-item.green { --accent-color: var(--accent-green); }
+        .insight-item.purple { --accent-color: var(--accent-purple); }
+
+        .insight-label {
+            color: var(--text-primary);
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .insight-desc {
+            color: var(--text-muted);
+            font-size: 12px;
+        }
+
+        .insight-value {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--accent-color);
+        }
+
+        /* Chart Container */
+        .chart-container {
+            position: relative;
+            height: 280px;
+            width: 100%;
+        }
+
+        .chart-container-lg {
+            height: 320px;
+        }
+
+        /* HP Readiness Tiers */
+        .tiers-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 16px;
+            margin-bottom: 24px;
+        }
+
+        @media (max-width: 1100px) {
+            .tiers-grid {
+                grid-template-columns: repeat(3, 1fr);
+            }
+        }
+
+        @media (max-width: 700px) {
+            .tiers-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        .tier-card {
+            background: linear-gradient(135deg, var(--tier-color-light), var(--tier-color-dark));
+            border-radius: 12px;
+            padding: 20px;
+            border: 1px solid var(--tier-border);
+        }
+
+        .tier-card.t1 { --tier-color-light: rgba(34, 197, 94, 0.15); --tier-color-dark: rgba(34, 197, 94, 0.05); --tier-border: rgba(34, 197, 94, 0.4); --tier-accent: #22c55e; }
+        .tier-card.t2 { --tier-color-light: rgba(132, 204, 22, 0.15); --tier-color-dark: rgba(132, 204, 22, 0.05); --tier-border: rgba(132, 204, 22, 0.4); --tier-accent: #84cc16; }
+        .tier-card.t3 { --tier-color-light: rgba(249, 115, 22, 0.15); --tier-color-dark: rgba(249, 115, 22, 0.05); --tier-border: rgba(249, 115, 22, 0.4); --tier-accent: #f97316; }
+        .tier-card.t4 { --tier-color-light: rgba(239, 68, 68, 0.15); --tier-color-dark: rgba(239, 68, 68, 0.05); --tier-border: rgba(239, 68, 68, 0.4); --tier-accent: #ef4444; }
+        .tier-card.t5 { --tier-color-light: rgba(124, 45, 18, 0.15); --tier-color-dark: rgba(124, 45, 18, 0.05); --tier-border: rgba(124, 45, 18, 0.4); --tier-accent: #9a3412; }
+
+        .tier-label {
+            color: var(--tier-accent);
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 12px;
+        }
+
+        .tier-value {
+            color: var(--text-primary);
+            font-size: 32px;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .tier-count {
+            color: var(--text-secondary);
+            font-size: 12px;
+            margin-bottom: 12px;
+        }
+
+        .tier-cost {
+            border-top: 1px solid var(--tier-border);
+            padding-top: 12px;
+        }
+
+        .tier-cost-label {
+            color: var(--text-muted);
+            font-size: 11px;
+        }
+
+        .tier-cost-value {
+            color: var(--text-primary);
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        /* Tables */
+        .data-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .data-table th {
+            text-align: left;
+            padding: 12px 16px;
+            color: var(--text-secondary);
+            font-size: 12px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+            font-weight: 500;
+        }
+
+        .data-table td {
+            padding: 16px;
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-secondary);
+        }
+
+        .data-table td:first-child {
+            color: var(--text-primary);
+            font-weight: 500;
+        }
+
+        .data-table tr.selected {
+            background: rgba(59, 130, 246, 0.1);
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+
+        .badge.green {
+            background: rgba(34, 197, 94, 0.2);
+            color: var(--accent-green);
+        }
+
+        .badge.blue {
+            background: rgba(59, 130, 246, 0.2);
+            color: var(--accent-blue);
+        }
+
+        /* Scenario Selector */
+        .scenario-selector {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-top: 16px;
+        }
+
+        .scenario-btn {
+            background: rgba(15, 23, 42, 0.6);
+            color: var(--text-secondary);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            border-radius: 10px;
+            padding: 12px 20px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-family: inherit;
+        }
+
+        .scenario-btn:hover {
+            background: rgba(59, 130, 246, 0.15);
+            border-color: var(--accent-blue);
+        }
+
+        .scenario-btn.active {
+            background: linear-gradient(135deg, #3b82f6, #2563eb);
+            color: white;
+            border: none;
+        }
+
+        /* Scenario Metrics */
+        .scenario-metrics {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 20px;
+            margin-bottom: 32px;
+        }
+
+        @media (max-width: 900px) {
+            .scenario-metrics {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        .metric-card {
+            border-radius: 12px;
+            padding: 20px;
+            border-left: 3px solid var(--metric-color);
+        }
+
+        .metric-card.blue { background: rgba(59, 130, 246, 0.1); --metric-color: var(--accent-blue); }
+        .metric-card.green { background: rgba(34, 197, 94, 0.1); --metric-color: var(--accent-green); }
+        .metric-card.orange { background: rgba(249, 115, 22, 0.1); --metric-color: var(--accent-orange); }
+        .metric-card.purple { background: rgba(168, 85, 247, 0.1); --metric-color: var(--accent-purple); }
+
+        .metric-label {
+            color: var(--text-muted);
+            font-size: 12px;
+            margin-bottom: 8px;
+        }
+
+        .metric-value {
+            color: var(--text-primary);
+            font-size: 24px;
+            font-weight: 700;
+        }
+
+        .metric-sub {
+            color: var(--metric-color);
+            font-size: 14px;
+            margin-top: 4px;
+        }
+
+        /* EPC Progress */
+        .epc-progress {
+            background: rgba(15, 23, 42, 0.5);
+            border-radius: 12px;
+            padding: 20px;
+        }
+
+        .epc-progress-title {
+            color: var(--text-secondary);
+            font-size: 14px;
+            margin-bottom: 16px;
+        }
+
+        .epc-comparison {
+            display: flex;
+            align-items: center;
+            gap: 24px;
+        }
+
+        .epc-bar-container {
+            flex: 1;
+        }
+
+        .epc-bar-header {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 8px;
+        }
+
+        .epc-bar-label {
+            color: var(--text-muted);
+            font-size: 13px;
+        }
+
+        .epc-bar-value {
+            color: var(--text-primary);
+            font-weight: 600;
+        }
+
+        .epc-bar {
+            height: 8px;
+            background: rgba(148, 163, 184, 0.2);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .epc-bar-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.5s ease;
+        }
+
+        .epc-bar-fill.before {
+            background: var(--accent-red);
+        }
+
+        .epc-bar-fill.after {
+            background: var(--accent-green);
+        }
+
+        .epc-arrow {
+            color: var(--accent-green);
+            font-size: 24px;
+            padding: 0 12px;
+        }
+
+        /* Glazing Grid */
+        .glazing-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+        }
+
+        @media (max-width: 800px) {
+            .glazing-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        .glazing-card {
+            background: rgba(15, 23, 42, 0.5);
+            border-radius: 12px;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .glazing-label {
+            color: var(--text-muted);
+            font-size: 13px;
+            margin-bottom: 8px;
+        }
+
+        .glazing-value {
+            color: var(--text-primary);
+            font-size: 28px;
+            font-weight: 700;
+        }
+
+        .glazing-count {
+            color: var(--text-secondary);
+            font-size: 12px;
+            margin-top: 4px;
+        }
+
+        /* Footer */
+        .footer {
+            border-top: 1px solid var(--border-color);
+            padding: 24px 48px;
+            margin-top: 32px;
+        }
+
+        .footer-content {
+            max-width: 1400px;
+            margin: 0 auto;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            color: var(--text-muted);
+            font-size: 13px;
+        }
+
+        @media (max-width: 700px) {
+            .footer-content {
+                flex-direction: column;
+                gap: 8px;
+                text-align: center;
+            }
+        }
+
+        /* Color utilities */
+        .text-green { color: var(--accent-green) !important; }
+        .text-orange { color: var(--accent-orange) !important; }
+        .text-blue { color: var(--accent-blue) !important; }
+        .text-purple { color: var(--accent-purple) !important; }
+
+        /* Data load banner */
+        .data-status {
+            max-width: 1400px;
+            margin: 0 auto 16px;
+            padding: 12px 16px;
+            border: 1px solid var(--border-color);
+            border-radius: 14px;
+            background: rgba(15, 23, 42, 0.6);
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .data-status.error {
+            border-color: rgba(239, 68, 68, 0.35);
+            background: rgba(239, 68, 68, 0.08);
+        }
+
+        .data-status .message {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+
+        .data-status .actions {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .btn {
+            appearance: none;
+            border: 1px solid rgba(148, 163, 184, 0.18);
+            background: rgba(30, 41, 59, 0.7);
+            color: var(--text-primary);
+            padding: 10px 12px;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: 600;
+            font-size: 13px;
+        }
+
+        .btn:hover { background: rgba(30, 41, 59, 0.9); }
+    </style>
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-content">
+            <div>
+                <div class="header-left">
+                    <div class="logo">🏠</div>
+                    <h1>Heat Street</h1>
+                </div>
+                <p class="header-subtitle">Low-Carbon Heating Potential for London's Edwardian Terraced Housing</p>
+            </div>
+            <div class="header-right">
+                <p class="label">Analysis Date</p>
+                <p class="value" id="analysisDate">—</p>
+                <p class="label" style="margin-top: 10px;">Data Source</p>
+                <p class="value" id="dataSource">—</p>
+            </div>
+        </div>
+    </header>
+
+    <!-- Navigation -->
+    <nav class="nav">
+        <div class="nav-content">
+            <button class="nav-btn active" data-tab="overview">Overview</button>
+            <button class="nav-btn" data-tab="stock">Housing Stock</button>
+            <button class="nav-btn" data-tab="readiness">Retrofit Readiness</button>
+            <button class="nav-btn" data-tab="scenarios">Scenario Comparison</button>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main class="main">
+        <div id="dataLoadStatus" class="data-status" style="display:none;">
+            <div class="message" id="dataLoadMessage"></div>
+            <div class="actions">
+                <button class="btn" id="loadJsonBtn" type="button">Load JSON</button>
+            </div>
+        </div>
+        <!-- Overview Tab -->
+        <div id="overview" class="tab-content active">
+            <div class="stats-grid">
+                <div class="stat-card blue">
+                    <p class="stat-label">Properties Analysed</p>
+                    <p class="stat-value" id="kpiProperties">—</p>
+                    <p class="stat-subvalue">Edwardian terraced homes</p>
+                </div>
+                <div class="stat-card orange">
+                    <p class="stat-label">Gas Boiler Reliance</p>
+                    <p class="stat-value" id="kpiGasPct">—</p>
+                    <p class="stat-subvalue">of properties use gas</p>
+                </div>
+                <div class="stat-card green">
+                    <p class="stat-label">HP Ready or Near-Ready</p>
+                    <p class="stat-value" id="kpiHpReadyPct">—</p>
+                    <p class="stat-subvalue">Tiers 1-2 combined</p>
+                </div>
+                <div class="stat-card purple">
+                    <p class="stat-label">Mean SAP Score</p>
+                    <p class="stat-value" id="kpiSapMean">—</p>
+                    <p class="stat-subvalue">Mid-Band D average</p>
+                </div>
+            </div>
+
+            <div class="grid-2">
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">EPC Band Distribution</h2>
+                        <p class="card-subtitle">Current energy performance across the stock</p>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="epcChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">Key Insights</h2>
+                    </div>
+                    <div class="insights-list">
+                        <div class="insight-item orange">
+                            <div>
+                                <p class="insight-label">Below EPC C</p>
+                                <p class="insight-desc">Require improvement</p>
+                            </div>
+                            <p class="insight-value text-orange" id="insightBelowEpcC">—</p>
+                        </div>
+                        <div class="insight-item blue">
+                            <div>
+                                <p class="insight-label">Wall Insulation</p>
+                                <p class="insight-desc">Currently insulated</p>
+                            </div>
+                            <p class="insight-value text-blue" id="insightWallInsulation">—</p>
+                        </div>
+                        <div class="insight-item green">
+                            <div>
+                                <p class="insight-label">Double Glazing</p>
+                                <p class="insight-desc">Already installed</p>
+                            </div>
+                            <p class="insight-value text-green" id="insightDoubleGlazing">—</p>
+                        </div>
+                        <div class="insight-item purple">
+                            <div>
+                                <p class="insight-label">Heat Pumps</p>
+                                <p class="insight-desc">Current penetration</p>
+                            </div>
+                            <p class="insight-value text-purple" id="insightHeatPumps">—</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Decarbonisation Pathways at a Glance</h2>
+                    <p class="card-subtitle">Comparing capital costs and CO₂ outcomes across scenarios</p>
+                </div>
+                <div class="chart-container chart-container-lg">
+                    <canvas id="scenarioOverviewChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Housing Stock Tab -->
+        <div id="stock" class="tab-content">
+            <div class="grid-2-equal">
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">Wall Construction Types</h2>
+                        <p class="card-subtitle">Distribution across the housing stock</p>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="wallChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">Heating Systems</h2>
+                        <p class="card-subtitle">Current heating technology mix</p>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="heatingChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Glazing Status</h2>
+                    <p class="card-subtitle">Window types across the stock</p>
+                </div>
+                <div class="glazing-grid">
+                    <div class="glazing-card">
+                        <p class="glazing-label">Double Glazing</p>
+                        <p class="glazing-value" id="glazingDoublePct">—</p>
+                        <p class="glazing-count" id="glazingDoubleCount">—</p>
+                    </div>
+                    <div class="glazing-card">
+                        <p class="glazing-label">Unknown</p>
+                        <p class="glazing-value" id="glazingUnknownPct">—</p>
+                        <p class="glazing-count" id="glazingUnknownCount">—</p>
+                    </div>
+                    <div class="glazing-card">
+                        <p class="glazing-label">Single Glazing</p>
+                        <p class="glazing-value" id="glazingSinglePct">—</p>
+                        <p class="glazing-count" id="glazingSingleCount">—</p>
+                    </div>
+                    <div class="glazing-card">
+                        <p class="glazing-label">Triple Glazing</p>
+                        <p class="glazing-value" id="glazingTriplePct">—</p>
+                        <p class="glazing-count" id="glazingTripleCount">—</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Loft Insulation Status</h2>
+                    <p class="card-subtitle">Roof insulation levels</p>
+                </div>
+                <div class="chart-container chart-container-lg">
+                    <canvas id="loftChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <!-- Retrofit Readiness Tab -->
+        <div id="readiness" class="tab-content">
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Heat Pump Readiness Tiers</h2>
+                    <p class="card-subtitle">Classification by retrofit complexity and cost</p>
+                </div>
+
+                <div class="tiers-grid">
+                    <div class="tier-card t1">
+                        <p class="tier-label">Tier 1: Ready Now</p>
+                        <p class="tier-value" id="hpTier1Pct">—</p>
+                        <p class="tier-count" id="hpTier1Count">—</p>
+                    </div>
+                    <div class="tier-card t2">
+                        <p class="tier-label">Tier 2: Minor Work</p>
+                        <p class="tier-value" id="hpTier2Pct">—</p>
+                        <p class="tier-count" id="hpTier2Count">—</p>
+                    </div>
+                    <div class="tier-card t3">
+                        <p class="tier-label">Tier 3: Major Work</p>
+                        <p class="tier-value" id="hpTier3Pct">—</p>
+                        <p class="tier-count" id="hpTier3Count">—</p>
+                    </div>
+                    <div class="tier-card t4">
+                        <p class="tier-label">Tier 4: Challenging</p>
+                        <p class="tier-value" id="hpTier4Pct">—</p>
+                        <p class="tier-count" id="hpTier4Count">—</p>
+                    </div>
+                    <div class="tier-card t5">
+                        <p class="tier-label">Tier 5: Not Suitable</p>
+                        <p class="tier-value" id="hpTier5Pct">—</p>
+                        <p class="tier-count" id="hpTier5Count">—</p>
+                    </div>
+                </div>
+
+                <div class="chart-container">
+                    <canvas id="readinessChart"></canvas>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Heat Network Suitability Tiers</h2>
+                    <p class="card-subtitle">Based on heat demand density analysis</p>
+                </div>
+                <table class="data-table">
+                    <thead>
+                        <tr>
+                            <th>Tier</th>
+                            <th>Properties</th>
+                            <th>Share</th>
+                            <th>Recommended Pathway</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td colspan="4" style="color: var(--text-muted);">Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Scenario Comparison Tab -->
+        <div id="scenarios" class="tab-content">
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Select Scenario</h2>
+                    <p class="card-subtitle">Compare different decarbonisation pathways</p>
+                </div>
+                <div class="scenario-selector">
+                    <button class="scenario-btn" data-scenario="fabric_only">Fabric Only</button>
+                    <button class="scenario-btn" data-scenario="fabric_to_tipping_point">Fabric Tipping</button>
+                    <button class="scenario-btn" data-scenario="minimum_fabric_hp_ready">Min Fabric+HP</button>
+                    <button class="scenario-btn" data-scenario="heat_pump">Heat Pump</button>
+                    <button class="scenario-btn" data-scenario="heat_network">Heat Network</button>
+                    <button class="scenario-btn active" data-scenario="hybrid">Hybrid</button>
+                </div>
+            </div>
+
+            <div class="card" id="scenarioDetails">
+                <div class="card-header">
+                    <h2 class="card-title" id="scenarioTitle">Hybrid (HP + HN)</h2>
+                    <p class="card-subtitle">Detailed scenario metrics</p>
+                </div>
+
+                <div class="scenario-metrics">
+                    <div class="metric-card blue">
+                        <p class="metric-label">Total Capital Cost</p>
+                        <p class="metric-value" id="metricCapital">—</p>
+                        <p class="metric-sub" id="metricCapitalPer">—</p>
+                    </div>
+                    <div class="metric-card green">
+                        <p class="metric-label">Annual CO₂ Reduction</p>
+                        <p class="metric-value" id="metricCO2">—</p>
+                        <p class="metric-sub">per year</p>
+                    </div>
+                    <div class="metric-card orange">
+                        <p class="metric-label">Annual Bill Savings</p>
+                        <p class="metric-value" id="metricBills">—</p>
+                        <p class="metric-sub">per year</p>
+                    </div>
+                    <div class="metric-card purple">
+                        <p class="metric-label">Simple Payback</p>
+                        <p class="metric-value" id="metricPayback">—</p>
+                        <p class="metric-sub">average</p>
+                    </div>
+                </div>
+
+                <div class="epc-progress">
+                    <p class="epc-progress-title">EPC Band C+ Improvement</p>
+                    <div class="epc-comparison">
+                        <div class="epc-bar-container">
+                            <div class="epc-bar-header">
+                                <span class="epc-bar-label">Before</span>
+                                <span class="epc-bar-value" id="epcBefore">—</span>
+                            </div>
+                            <div class="epc-bar">
+                                <div class="epc-bar-fill before" id="epcBarBefore" style="width: 0%"></div>
+                            </div>
+                        </div>
+                        <span class="epc-arrow">→</span>
+                        <div class="epc-bar-container">
+                            <div class="epc-bar-header">
+                                <span class="epc-bar-label">After</span>
+                                <span class="epc-bar-value" id="epcAfter">—</span>
+                            </div>
+                            <div class="epc-bar">
+                                <div class="epc-bar-fill after" id="epcBarAfter" style="width: 0%"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Full Scenario Comparison</h2>
+                </div>
+                <table class="data-table" id="scenarioTable">
+                    <thead>
+                        <tr>
+                            <th>Scenario</th>
+                            <th>Capital Cost</th>
+                            <th>£/Property</th>
+                            <th>CO₂ Saved</th>
+                            <th>Bill Savings</th>
+                            <th>Payback</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td colspan="6" style="color: var(--text-muted);">Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="footer-content">
+            <p>Heat Street Project • Danish Energy Agency • Danish Embassy • ADE Research</p>
+            <p>Data: UK EPC Register • <span id="footerPropertiesCount">—</span> properties analysed</p>
+        </div>
+    </footer>
+
+    <script>
+        // Scenario Data (overwritten after loading one_stop_output.json)
+        let scenarioData = {
+            fabric_only: {
+                name: 'Fabric Improvements Only',
+                capitalTotal: '£15.6bn',
+                capitalPer: '£22,100/property',
+                co2: '0.89 Mt',
+                bills: '£381m',
+                payback: '41 years',
+                epcBefore: 32.3,
+                epcAfter: 88.1
+            },
+            fabric_to_tipping_point: {
+                name: 'Fabric to Tipping Point',
+                capitalTotal: '£3.0bn',
+                capitalPer: '£4,193/property',
+                co2: '0.32 Mt',
+                bills: '£141m',
+                payback: '21 years',
+                epcBefore: 32.3,
+                epcAfter: 84.8
+            },
+            minimum_fabric_hp_ready: {
+                name: 'Minimum Fabric + ASHP',
+                capitalTotal: '£14.1bn',
+                capitalPer: '£19,958/property',
+                co2: '1.27 Mt',
+                bills: '£362m',
+                payback: '39 years',
+                epcBefore: 32.3,
+                epcAfter: 84.8
+            },
+            heat_pump: {
+                name: 'Heat Pump (Full Deployment)',
+                capitalTotal: '£18.7bn',
+                capitalPer: '£26,394/property',
+                co2: '1.37 Mt',
+                bills: '£401m',
+                payback: '47 years',
+                epcBefore: 32.3,
+                epcAfter: 84.8
+            },
+            heat_network: {
+                name: 'Heat Network (Full Deployment)',
+                capitalTotal: '£14.4bn',
+                capitalPer: '£20,326/property',
+                co2: '1.77 Mt',
+                bills: '£197m',
+                payback: '73 years',
+                epcBefore: 32.3,
+                epcAfter: 84.8
+            },
+            hybrid: {
+                name: 'Hybrid (HP + HN)',
+                capitalTotal: '£14.4bn',
+                capitalPer: '£20,409/property',
+                co2: '1.54 Mt',
+                bills: '£276m',
+                payback: '52 years',
+                epcBefore: 32.3,
+                epcAfter: 84.8
+            }
+        };
+
+        const STATE = {
+            oneStop: null,
+            source: null,
+            charts: {}
+        };
+
+        // Chart.js defaults
+        Chart.defaults.color = '#94a3b8';
+        Chart.defaults.borderColor = 'rgba(148, 163, 184, 0.1)';
+        Chart.defaults.font.family = "'DM Sans', sans-serif";
+
+        const tooltipStyle = {
+            backgroundColor: 'rgba(15, 23, 42, 0.95)',
+            titleColor: '#f8fafc',
+            bodyColor: '#94a3b8',
+            borderColor: 'rgba(148, 163, 184, 0.2)',
+            borderWidth: 1,
+            padding: 12,
+            cornerRadius: 8
+        };
+
+        function setDataStatus({ message, error = false } = {}) {
+            const wrapper = document.getElementById('dataLoadStatus');
+            const msg = document.getElementById('dataLoadMessage');
+            if (!message) {
+                wrapper.style.display = 'none';
+                wrapper.classList.remove('error');
+                msg.textContent = '';
+                return;
+            }
+            wrapper.style.display = 'flex';
+            wrapper.classList.toggle('error', Boolean(error));
+            msg.textContent = message;
+        }
+
+        function formatInt(v) {
+            if (v === null || v === undefined || Number.isNaN(v)) return '—';
+            return Math.round(Number(v)).toLocaleString();
+        }
+
+        function formatPercent(v, decimals = 1) {
+            if (v === null || v === undefined || Number.isNaN(v)) return '—';
+            return Number(v).toFixed(decimals) + '%';
+        }
+
+        function formatGbp(v, decimals = 0) {
+            if (v === null || v === undefined || Number.isNaN(v)) return '—';
+            return '£' + Number(v).toLocaleString(undefined, { maximumFractionDigits: decimals, minimumFractionDigits: decimals });
+        }
+
+        function formatGbpCompact(v) {
+            if (v === null || v === undefined || Number.isNaN(v)) return '—';
+            const n = Number(v);
+            if (n >= 1e9) return '£' + (n / 1e9).toFixed(1) + 'bn';
+            if (n >= 1e6) return '£' + Math.round(n / 1e6).toLocaleString() + 'm';
+            return formatGbp(n, 0);
+        }
+
+        function formatMtFromKg(kg) {
+            if (kg === null || kg === undefined || Number.isNaN(kg)) return '—';
+            return (Number(kg) / 1e9).toFixed(2) + ' Mt';
+        }
+
+        function formatYears(y) {
+            if (y === null || y === undefined || Number.isNaN(y)) return '—';
+            return Math.round(Number(y)) + ' years';
+        }
+
+        function getDatapointMap(section) {
+            const out = {};
+            (section?.datapoints || []).forEach(dp => { out[dp.key] = dp.value; });
+            return out;
+        }
+
+        async function tryFetchJson(path) {
+            const res = await fetch(path, { cache: 'no-store' });
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return await res.json();
+        }
+
+        async function loadOneStopData() {
+            const candidates = [
+                'HeatStreet/data/outputs/one_stop_output.json',
+                'data/outputs/one_stop_output.json',
+                'one_stop_output.json'
+            ];
+            for (const path of candidates) {
+                try {
+                    const d = await tryFetchJson(path);
+                    d.__source = path;
+                    return d;
+                } catch (_) {}
+            }
+            throw new Error('Unable to auto-load one_stop_output.json. If you opened this file directly, start a local web server (recommended) or use “Load JSON”.');
+        }
+
+        function destroyCharts() {
+            Object.values(STATE.charts).forEach(ch => { try { ch.destroy(); } catch (_) {} });
+            STATE.charts = {};
+        }
+
+        function renderCharts(chartsData) {
+            destroyCharts();
+
+            const {
+                epcCounts,
+                scenarioLabels,
+                scenarioCostK,
+                scenarioCo2Mt,
+                wallLabels,
+                wallCounts,
+                heatingLabels,
+                heatingCounts,
+                loftLabels,
+                loftCounts,
+                readinessCounts
+            } = chartsData;
+
+            // EPC Distribution Chart
+            STATE.charts.epcChart = new Chart(document.getElementById('epcChart'), {
+                type: 'bar',
+                data: {
+                    labels: ['A', 'B', 'C', 'D', 'E', 'F', 'G'],
+                    datasets: [{
+                        data: epcCounts,
+                        backgroundColor: ['#1a5f2a', '#2d8f3e', '#5cb85c', '#f0ad4e', '#d9534f', '#a94442', '#7a2a2a'],
+                        borderRadius: 6,
+                        borderSkipped: false
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            ...tooltipStyle,
+                            callbacks: {
+                                label: ctx => ctx.raw.toLocaleString() + ' properties'
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            ticks: { callback: v => (v / 1000) + 'k' },
+                            grid: { color: 'rgba(148, 163, 184, 0.1)' }
+                        },
+                        x: { grid: { display: false } }
+                    }
+                }
+            });
+
+            // Scenario Overview Chart
+            STATE.charts.scenarioOverviewChart = new Chart(document.getElementById('scenarioOverviewChart'), {
+                type: 'bar',
+                data: {
+                    labels: scenarioLabels,
+                    datasets: [
+                        {
+                            label: 'Capital Cost (£k/property)',
+                            data: scenarioCostK,
+                            backgroundColor: '#3b82f6',
+                            borderRadius: 4,
+                            yAxisID: 'y'
+                        },
+                        {
+                            label: 'CO₂ Reduction (Mt/yr)',
+                            data: scenarioCo2Mt,
+                            backgroundColor: '#22c55e',
+                            borderRadius: 4,
+                            yAxisID: 'y1'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'top',
+                            labels: { padding: 20, usePointStyle: true, pointStyle: 'rectRounded' }
+                        },
+                        tooltip: tooltipStyle
+                    },
+                    scales: {
+                        y: {
+                            type: 'linear',
+                            position: 'left',
+                            title: { display: true, text: '£k/property', color: '#3b82f6' },
+                            grid: { color: 'rgba(148, 163, 184, 0.1)' }
+                        },
+                        y1: {
+                            type: 'linear',
+                            position: 'right',
+                            title: { display: true, text: 'Mt CO₂/yr', color: '#22c55e' },
+                            grid: { display: false }
+                        },
+                        x: { grid: { display: false } }
+                    }
+                }
+            });
+
+            // Wall Chart
+            STATE.charts.wallChart = new Chart(document.getElementById('wallChart'), {
+                type: 'doughnut',
+                data: {
+                    labels: wallLabels,
+                    datasets: [{
+                        data: wallCounts,
+                        backgroundColor: ['#3b82f6', '#8b5cf6', '#06b6d4', '#f97316', '#ef4444', '#22c55e'],
+                        borderWidth: 0,
+                        hoverOffset: 8
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    cutout: '55%',
+                    plugins: {
+                        legend: {
+                            position: 'right',
+                            labels: { padding: 16, usePointStyle: true, pointStyle: 'circle' }
+                        },
+                        tooltip: {
+                            ...tooltipStyle,
+                            callbacks: {
+                                label: ctx => {
+                                    const total = ctx.dataset.data.reduce((a, b) => a + b, 0);
+                                    const pct = ((ctx.raw / total) * 100).toFixed(1);
+                                    return ctx.label + ': ' + ctx.raw.toLocaleString() + ' (' + pct + '%)';
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            // Heating Chart
+            STATE.charts.heatingChart = new Chart(document.getElementById('heatingChart'), {
+                type: 'bar',
+                data: {
+                    labels: heatingLabels,
+                    datasets: [{
+                        data: heatingCounts,
+                        backgroundColor: ['#4a90d9', '#f5a623', '#9b9b9b', '#7ed321', '#50e3c2'],
+                        borderRadius: 6
+                    }]
+                },
+                options: {
+                    indexAxis: 'y',
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            ...tooltipStyle,
+                            callbacks: {
+                                label: ctx => ctx.raw.toLocaleString() + ' properties'
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            ticks: { callback: v => (v / 1000) + 'k' },
+                            grid: { color: 'rgba(148, 163, 184, 0.1)' }
+                        },
+                        y: { grid: { display: false } }
+                    }
+                }
+            });
+
+            // Loft Chart
+            STATE.charts.loftChart = new Chart(document.getElementById('loftChart'), {
+                type: 'bar',
+                data: {
+                    labels: loftLabels,
+                    datasets: [{
+                        data: loftCounts,
+                        backgroundColor: '#8b5cf6',
+                        borderRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            ...tooltipStyle,
+                            callbacks: {
+                                label: ctx => ctx.raw.toLocaleString() + ' properties'
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            ticks: { callback: v => (v / 1000) + 'k' },
+                            grid: { color: 'rgba(148, 163, 184, 0.1)' }
+                        },
+                        x: {
+                            grid: { display: false },
+                            ticks: { maxRotation: 45, minRotation: 45 }
+                        }
+                    }
+                }
+            });
+
+            // Readiness Chart
+            STATE.charts.readinessChart = new Chart(document.getElementById('readinessChart'), {
+                type: 'bar',
+                data: {
+                    labels: ['Tier 1: Ready Now', 'Tier 2: Minor Work', 'Tier 3: Major Work', 'Tier 4: Challenging', 'Tier 5: Not Suitable'],
+                    datasets: [{
+                        data: readinessCounts,
+                        backgroundColor: ['#22c55e', '#84cc16', '#f97316', '#ef4444', '#7c2d12'],
+                        borderRadius: 6
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            ...tooltipStyle,
+                            callbacks: {
+                                label: ctx => ctx.raw.toLocaleString() + ' properties'
+                            }
+                        }
+                    },
+                    scales: {
+                        y: {
+                            ticks: { callback: v => (v / 1000) + 'k' },
+                            grid: { color: 'rgba(148, 163, 184, 0.1)' }
+                        },
+                        x: { grid: { display: false } }
+                    }
+                }
+            });
+        }
+
+        function buildScenarioDataFromOneStop(oneStop) {
+            const rows = oneStop?.sections?.section_6?.tables?.[0]?.data || [];
+            const shortLabels = {
+                fabric_only: 'Fabric Only',
+                fabric_to_tipping_point: 'Fabric Tipping',
+                minimum_fabric_hp_ready: 'Min Fabric+HP',
+                heat_pump: 'Heat Pump',
+                heat_network: 'Heat Network',
+                hybrid: 'Hybrid'
+            };
+
+            const out = {};
+            rows
+                .filter(r => r?.scenario_id && r.scenario_id !== 'baseline')
+                .forEach(r => {
+                    const paybackYears = r.average_payback_years ?? null;
+                    out[r.scenario_id] = {
+                        name: r.scenario || r.scenario_id,
+                        shortLabel: shortLabels[r.scenario_id] || r.scenario_id,
+
+                        capitalCostTotalValue: r.capital_cost_total ?? null,
+                        capitalCostPerPropertyValue: r.capital_cost_per_property ?? null,
+                        annualCo2ReductionKgValue: r.annual_co2_reduction_kg ?? null,
+                        annualBillSavingsValue: r.annual_bill_savings ?? null,
+                        paybackYearsValue: paybackYears,
+
+                        capitalTotal: formatGbpCompact(r.capital_cost_total),
+                        capitalPer: formatGbp(r.capital_cost_per_property, 0) + '/property',
+                        co2: formatMtFromKg(r.annual_co2_reduction_kg),
+                        bills: formatGbpCompact(r.annual_bill_savings),
+                        payback: formatYears(paybackYears),
+                        epcBefore: r.band_c_or_better_before_pct ?? null,
+                        epcAfter: r.band_c_or_better_after_pct ?? null
+                    };
+                });
+
+            return out;
+        }
+
+        function formatMaybePercent(v, decimals = 1) {
+            if (typeof v === 'string' && v.trim().endsWith('%')) return v.trim();
+            return formatPercent(v, decimals);
+        }
+
+        function renderHeatNetworkTierTable(oneStop) {
+            const tbody = document.querySelector('#readiness .data-table tbody');
+            const rows = oneStop?.sections?.section_5?.tables?.[0]?.data || [];
+            tbody.innerHTML = '';
+
+            if (!rows.length) {
+                tbody.innerHTML = '<tr><td colspan=\"4\" style=\"color: var(--text-muted);\">No heat network tier table found in one-stop output.</td></tr>';
+                return;
+            }
+
+            rows.forEach(r => {
+                const tierLabel = r['Tier'] || r['tier'] || '—';
+                const count = r['Property Count'] ?? r['property_count'];
+                const share = r['Percentage'] ?? r['percentage'];
+                const pathway = r['Recommended Pathway'] || r['recommended_pathway'] || '—';
+                const badgeClass = /district/i.test(pathway) ? 'green' : 'blue';
+
+                const tr = document.createElement('tr');
+                tr.innerHTML = `\n                    <td>${tierLabel}</td>\n                    <td>${formatInt(count)}</td>\n                    <td>${formatMaybePercent(share, 1)}</td>\n                    <td><span class=\"badge ${badgeClass}\">${pathway}</span></td>\n                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function renderScenarioTable() {
+            const tbody = document.querySelector('#scenarioTable tbody');
+            tbody.innerHTML = '';
+
+            const order = [
+                'fabric_only',
+                'fabric_to_tipping_point',
+                'minimum_fabric_hp_ready',
+                'heat_pump',
+                'heat_network',
+                'hybrid'
+            ];
+
+            order.forEach(id => {
+                const s = scenarioData[id];
+                if (!s) return;
+
+                const tr = document.createElement('tr');
+                tr.dataset.row = id;
+                if (id === 'hybrid') tr.classList.add('selected');
+
+                tr.innerHTML = `\n                    <td>${s.shortLabel}</td>\n                    <td>${formatGbpCompact(s.capitalCostTotalValue)}</td>\n                    <td>${formatGbp(s.capitalCostPerPropertyValue, 0)}</td>\n                    <td class=\"text-green\">${formatMtFromKg(s.annualCo2ReductionKgValue)}</td>\n                    <td class=\"text-orange\">${formatGbpCompact(s.annualBillSavingsValue)}</td>\n                    <td class=\"text-purple\">${Math.round(Number(s.paybackYearsValue || 0))} yrs</td>\n                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function selectScenario(scenarioId) {
+            const data = scenarioData[scenarioId];
+            if (!data) return;
+
+            document.querySelectorAll('.scenario-btn').forEach(b => b.classList.toggle('active', b.dataset.scenario === scenarioId));
+
+            document.querySelectorAll('#scenarioTable tbody tr').forEach(row => {
+                row.classList.toggle('selected', row.dataset.row === scenarioId);
+            });
+
+            document.getElementById('scenarioTitle').textContent = data.name;
+            document.getElementById('metricCapital').textContent = data.capitalTotal;
+            document.getElementById('metricCapitalPer').textContent = data.capitalPer;
+            document.getElementById('metricCO2').textContent = data.co2;
+            document.getElementById('metricBills').textContent = data.bills;
+            document.getElementById('metricPayback').textContent = data.payback;
+
+            document.getElementById('epcBefore').textContent = formatPercent(data.epcBefore, 1);
+            document.getElementById('epcAfter').textContent = formatPercent(data.epcAfter, 1);
+            document.getElementById('epcBarBefore').style.width = `${Math.max(0, Math.min(100, Number(data.epcBefore || 0)))}%`;
+            document.getElementById('epcBarAfter').style.width = `${Math.max(0, Math.min(100, Number(data.epcAfter || 0)))}%`;
+        }
+
+        function renderDashboard(oneStop) {
+            STATE.oneStop = oneStop;
+            STATE.source = oneStop.__source || 'one_stop_output.json';
+
+            const meta = oneStop.metadata || {};
+            const generated = meta.generated ? new Date(meta.generated) : null;
+            document.getElementById('analysisDate').textContent = generated
+                ? generated.toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })
+                : '—';
+            document.getElementById('dataSource').textContent = STATE.source;
+
+            const sec2 = getDatapointMap(oneStop.sections?.section_2);
+            const sec3 = getDatapointMap(oneStop.sections?.section_3);
+            const sec4 = getDatapointMap(oneStop.sections?.section_4);
+
+            const totalProps = sec2.records_passing_validation ?? sec4.readiness_total_properties ?? null;
+            document.getElementById('kpiProperties').textContent = formatInt(totalProps);
+            document.getElementById('footerPropertiesCount').textContent = formatInt(totalProps);
+
+            const heating = sec3.heating_system_distribution || {};
+            const heatTotal = Object.values(heating).reduce((a, b) => a + (Number(b) || 0), 0);
+            const gasPct = heatTotal ? 100 * (heating['Gas Boiler'] || 0) / heatTotal : null;
+            const hpPct = heatTotal ? 100 * (heating['Heat Pump'] || 0) / heatTotal : null;
+            document.getElementById('kpiGasPct').textContent = formatPercent(gasPct, 1);
+            document.getElementById('insightHeatPumps').textContent = formatPercent(hpPct, 1);
+
+            const hpReadyPct = (Number(sec4.tier_1_pct) || 0) + (Number(sec4.tier_2_pct) || 0);
+            document.getElementById('kpiHpReadyPct').textContent = formatPercent(hpReadyPct, 1);
+            document.getElementById('kpiSapMean').textContent = sec3.sap_score_mean ? Number(sec3.sap_score_mean).toFixed(1) : '—';
+
+            const epcPct = sec3.epc_band_percentages || {};
+            const belowEpcC = 100 - ((epcPct.A || 0) + (epcPct.B || 0) + (epcPct.C || 0));
+            document.getElementById('insightBelowEpcC').textContent = formatPercent(belowEpcC, 1);
+            document.getElementById('insightWallInsulation').textContent = formatPercent(sec3.wall_insulation_rate_pct, 1);
+
+            const glazing = sec3.glazing_distribution || {};
+            const glazingTotal = Object.values(glazing).reduce((a, b) => a + (Number(b) || 0), 0);
+            const glazingPct = key => (glazingTotal ? 100 * (glazing[key] || 0) / glazingTotal : null);
+
+            document.getElementById('insightDoubleGlazing').textContent = formatPercent(glazingPct('Double'), 1);
+
+            document.getElementById('glazingDoublePct').textContent = formatPercent(glazingPct('Double'), 1);
+            document.getElementById('glazingDoubleCount').textContent = formatInt(glazing.Double) + ' properties';
+            document.getElementById('glazingUnknownPct').textContent = formatPercent(glazingPct('Unknown'), 1);
+            document.getElementById('glazingUnknownCount').textContent = formatInt(glazing.Unknown) + ' properties';
+            document.getElementById('glazingSinglePct').textContent = formatPercent(glazingPct('Single'), 1);
+            document.getElementById('glazingSingleCount').textContent = formatInt(glazing.Single) + ' properties';
+            document.getElementById('glazingTriplePct').textContent = formatPercent(glazingPct('Triple'), 1);
+            document.getElementById('glazingTripleCount').textContent = formatInt(glazing.Triple) + ' properties';
+
+            document.getElementById('hpTier1Pct').textContent = formatPercent(sec4.tier_1_pct, 1);
+            document.getElementById('hpTier1Count').textContent = formatInt(sec4.tier_1_count) + ' properties';
+            document.getElementById('hpTier2Pct').textContent = formatPercent(sec4.tier_2_pct, 1);
+            document.getElementById('hpTier2Count').textContent = formatInt(sec4.tier_2_count) + ' properties';
+            document.getElementById('hpTier3Pct').textContent = formatPercent(sec4.tier_3_pct, 1);
+            document.getElementById('hpTier3Count').textContent = formatInt(sec4.tier_3_count) + ' properties';
+            document.getElementById('hpTier4Pct').textContent = formatPercent(sec4.tier_4_pct, 1);
+            document.getElementById('hpTier4Count').textContent = formatInt(sec4.tier_4_count) + ' properties';
+            document.getElementById('hpTier5Pct').textContent = formatPercent(sec4.tier_5_pct, 1);
+            document.getElementById('hpTier5Count').textContent = formatInt(sec4.tier_5_count) + ' properties';
+
+            scenarioData = buildScenarioDataFromOneStop(oneStop);
+            renderScenarioTable();
+            renderHeatNetworkTierTable(oneStop);
+
+            const epcDist = sec3.epc_band_distribution || {};
+            const epcLabels = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
+            const epcCounts = epcLabels.map(l => epcDist[l] || 0);
+
+            const scenarioOrder = [
+                'fabric_only',
+                'fabric_to_tipping_point',
+                'minimum_fabric_hp_ready',
+                'heat_pump',
+                'heat_network',
+                'hybrid'
+            ];
+            const scenarioLabels = scenarioOrder.map(id => scenarioData[id]).filter(Boolean).map(s => s.shortLabel);
+            const scenarioCostK = scenarioOrder.map(id => scenarioData[id]).filter(Boolean).map(s => Number(s.capitalCostPerPropertyValue || 0) / 1000);
+            const scenarioCo2Mt = scenarioOrder.map(id => scenarioData[id]).filter(Boolean).map(s => Number(s.annualCo2ReductionKgValue || 0) / 1e9);
+
+            const wallDist = sec3.wall_type_distribution || {};
+            const wallLabelMap = {
+                solid_brick: 'Solid Brick',
+                cavity: 'Cavity',
+                other: 'Other',
+                timber_frame: 'Timber Frame',
+                system_built: 'System Built',
+                stone: 'Stone'
+            };
+            const wallKeys = Object.keys(wallLabelMap);
+            const wallLabels = wallKeys.map(k => wallLabelMap[k]);
+            const wallCounts = wallKeys.map(k => wallDist[k] || 0);
+
+            const heatingLabels = ['Gas Boiler', 'Electric', 'Other', 'Heat Network', 'Heat Pump'];
+            const heatingCounts = [
+                heating['Gas Boiler'] || 0,
+                heating['Electric'] || 0,
+                heating['Other'] || 0,
+                heating['District/Communal/Heat Network'] || 0,
+                heating['Heat Pump'] || 0
+            ];
+
+            const loftDist = sec3.loft_status_distribution || {};
+            const loftOrder = [
+                { key: 'Partial (100-200mm)', label: 'Partial (100-200mm)' },
+                { key: 'None', label: 'None' },
+                { key: 'Good (200-269mm)', label: 'Good (200-269mm)' },
+                { key: 'Good/Very Good (efficiency rating)', label: 'Good/Very Good' },
+                { key: 'Full (≥270mm)', label: 'Full (≥270mm)' },
+                { key: 'Low (<100mm)', label: 'Low (<100mm)' },
+                { key: 'Average (efficiency rating)', label: 'Average' },
+                { key: 'Very Poor (efficiency rating)', label: 'Very Poor' },
+                { key: 'Poor (efficiency rating)', label: 'Poor' },
+                { key: 'Unknown', label: 'Unknown' }
+            ];
+            const loftLabels = loftOrder.map(o => o.label);
+            const loftCounts = loftOrder.map(o => loftDist[o.key] || 0);
+
+            const readinessCounts = [
+                sec4.tier_1_count || 0,
+                sec4.tier_2_count || 0,
+                sec4.tier_3_count || 0,
+                sec4.tier_4_count || 0,
+                sec4.tier_5_count || 0
+            ];
+
+            renderCharts({
+                epcCounts,
+                scenarioLabels,
+                scenarioCostK,
+                scenarioCo2Mt,
+                wallLabels,
+                wallCounts,
+                heatingLabels,
+                heatingCounts,
+                loftLabels,
+                loftCounts,
+                readinessCounts
+            });
+
+            selectScenario('hybrid');
+        }
+
+        // Tab Navigation
+        document.querySelectorAll('.nav-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active'));
+                document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+                this.classList.add('active');
+                document.getElementById(this.dataset.tab).classList.add('active');
+            });
+        });
+
+        // Scenario Selection
+        document.querySelectorAll('.scenario-btn').forEach(btn => {
+            btn.addEventListener('click', function() {
+                selectScenario(this.dataset.scenario);
+            });
+        });
+
+        // Data loading and file picker fallback
+        const jsonPicker = document.createElement('input');
+        jsonPicker.type = 'file';
+        jsonPicker.accept = 'application/json';
+        jsonPicker.style.display = 'none';
+        document.body.appendChild(jsonPicker);
+
+        document.getElementById('loadJsonBtn').addEventListener('click', () => jsonPicker.click());
+
+        jsonPicker.addEventListener('change', async (e) => {
+            const file = e.target.files?.[0];
+            if (!file) return;
+            try {
+                const text = await file.text();
+                const data = JSON.parse(text);
+                data.__source = file.name;
+                setDataStatus();
+                renderDashboard(data);
+            } catch (err) {
+                setDataStatus({ message: `Could not parse JSON: ${err.message}`, error: true });
+            } finally {
+                jsonPicker.value = '';
+            }
+        });
+
+        (async () => {
+            setDataStatus({ message: 'Loading latest one-stop output…' });
+            try {
+                const data = await loadOneStopData();
+                setDataStatus();
+                renderDashboard(data);
+            } catch (err) {
+                setDataStatus({ message: err.message, error: true });
+            }
+        })();
+    </script>
+</body>
+</html>
