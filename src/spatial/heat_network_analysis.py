@@ -59,7 +59,7 @@ class HeatNetworkAnalyzer:
     - Infrastructure: Planned but not yet built
     - Confidence: MEDIUM (depends on network actually being built)
 
-    Tier 3 - High Heat Density (≥15 GWh/km²)
+    Tier 3 - High Heat Density (configurable; default ≥20 GWh/km²)
     ----------------------------------------
     Properties in areas with sufficient heat load density to economically
     justify network extension.
@@ -67,7 +67,7 @@ class HeatNetworkAnalyzer:
     - Infrastructure: Would require new network construction
     - Confidence: MEDIUM (economic viability depends on uptake rate)
 
-    Tier 4 - Moderate Heat Density (5-15 GWh/km²)
+    Tier 4 - Moderate Heat Density (configurable; default 5-20 GWh/km²)
     ---------------------------------------------
     Properties in areas with marginal heat density. Network extension may
     be viable with public subsidy or high uptake rates.
@@ -730,10 +730,10 @@ class HeatNetworkAnalyzer:
         Classify properties by heat density (Tiers 3-5).
 
         Calculates heat density using spatial aggregation on a grid.
-        Tiers based on GWh/km² thresholds:
-        - Tier 3: >15 GWh/km² (High density)
-        - Tier 4: 5-15 GWh/km² (Medium density)
-        - Tier 5: <5 GWh/km² (Low density)
+        Tiers based on configurable GWh/km² thresholds (see `eligibility.heat_network_tiers`):
+        - Tier 3: ≥ tier_3.min_heat_density_gwh_km2 (default 20)
+        - Tier 4: ≥ tier_4.min_heat_density_gwh_km2 and < tier_3 threshold (default 5-20)
+        - Tier 5: < tier_4 threshold (default <5)
 
         Args:
             properties: GeoDataFrame with properties
@@ -1163,9 +1163,11 @@ class HeatNetworkAnalyzer:
             tier_4_count = (properties['tier_number'] == 4).sum()
             tier_5_count = (properties['tier_number'] == 5).sum()
 
-            logger.info(f"  Tier 3 (High density >15 GWh/km²): {tier_3_count:,}")
-            logger.info(f"  Tier 4 (Medium density 5-15 GWh/km²): {tier_4_count:,}")
-            logger.info(f"  Tier 5 (Low density <5 GWh/km²): {tier_5_count:,}")
+            tier_3_threshold = self.heat_network_tiers['tier_3']['min_heat_density_gwh_km2']
+            tier_4_threshold = self.heat_network_tiers['tier_4']['min_heat_density_gwh_km2']
+            logger.info(f"  Tier 3 (High density ≥{tier_3_threshold} GWh/km²): {tier_3_count:,}")
+            logger.info(f"  Tier 4 (Medium density {tier_4_threshold}-{tier_3_threshold} GWh/km²): {tier_4_count:,}")
+            logger.info(f"  Tier 5 (Low density <{tier_4_threshold} GWh/km²): {tier_5_count:,}")
 
         except Exception as e:
             logger.warning(f"Grid-based calculation failed: {e}. Falling back to tertile method.")
@@ -1234,6 +1236,9 @@ class HeatNetworkAnalyzer:
 
         # AUDIT FIX: Define all tiers with their full labels and recommendations
         # This ensures all tiers appear in output even if count is 0
+        tier_3_threshold = self.heat_network_tiers['tier_3']['min_heat_density_gwh_km2']
+        tier_4_threshold = self.heat_network_tiers['tier_4']['min_heat_density_gwh_km2']
+
         tier_definitions = {
             'Tier 1: Adjacent to existing network': {
                 'tier_number': 1,
@@ -1248,17 +1253,17 @@ class HeatNetworkAnalyzer:
             'Tier 3: High heat density': {
                 'tier_number': 3,
                 'recommendation': 'District Heating (high density justifies extension)',
-                'note': 'Heat density ≥15 GWh/km²'
+                'note': f'Heat density ≥{tier_3_threshold} GWh/km²'
             },
             'Tier 4: Medium heat density': {
                 'tier_number': 4,
                 'recommendation': 'Heat Pump (moderate density, network extension marginal)',
-                'note': 'Heat density 5-15 GWh/km²'
+                'note': f'Heat density {tier_4_threshold}-{tier_3_threshold} GWh/km²'
             },
             'Tier 5: Low heat density': {
                 'tier_number': 5,
                 'recommendation': 'Heat Pump (low density, network not viable)',
-                'note': 'Heat density <5 GWh/km²'
+                'note': f'Heat density <{tier_4_threshold} GWh/km²'
             }
         }
 
