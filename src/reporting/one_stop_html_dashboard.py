@@ -459,7 +459,7 @@ def _render_html(data: Dict[str, Any]) -> str:
           h.textContent = caption;
           const p = document.createElement('span');
           p.className = 'pill';
-          p.textContent = `${rows.length.toLocaleString()} rows`;
+          p.textContent = rows.length.toLocaleString() + ' rows';
           cap.appendChild(h);
           cap.appendChild(p);
           wrap.appendChild(cap);
@@ -556,7 +556,7 @@ def _render_html(data: Dict[str, Any]) -> str:
         const {{ wrap, tbody }} = makeTable({{
           columns,
           rows,
-          caption: `Datapoints (${rows.length.toLocaleString()})`
+          caption: 'Datapoints (' + rows.length.toLocaleString() + ')'
         }});
         return {{ element: wrap, tbody }};
       }}
@@ -597,7 +597,7 @@ def _render_html(data: Dict[str, Any]) -> str:
         const dpCount = (section.datapoints || []).length;
         const tableCount = (section.tables || []).length;
         sectionHint.textContent = sectionId;
-        sectionCounts.textContent = `${dpCount.toLocaleString()} datapoints · ${tableCount.toLocaleString()} tables`;
+        sectionCounts.textContent = dpCount.toLocaleString() + ' datapoints · ' + tableCount.toLocaleString() + ' tables';
 
         sectionBody.innerHTML = '';
         sectionFilter.value = '';
@@ -642,7 +642,7 @@ def _render_html(data: Dict[str, Any]) -> str:
             r.hidden = !hit;
             if (hit) shown += 1;
           }});
-          matchCount.textContent = `${shown.toLocaleString()} matching rows`;
+          matchCount.textContent = shown.toLocaleString() + ' matching rows';
         }}
 
         sectionFilter.addEventListener('input', applyFilter, {{ passive: true }});
@@ -655,13 +655,13 @@ def _render_html(data: Dict[str, Any]) -> str:
 
         sections.forEach(([sectionId, section]) => {{
           const title = section.title || sectionId;
-          const hay = `${sectionId} ${title}`.toLowerCase();
+          const hay = (sectionId + ' ' + title).toLowerCase();
           if (q && !hay.includes(q)) return;
 
           const li = document.createElement('li');
           const btn = document.createElement('button');
           btn.dataset.sectionId = sectionId;
-          btn.innerHTML = `${escapeHtml(title)}<span class="small">${escapeHtml(sectionId)}</span>`;
+          btn.innerHTML = escapeHtml(title) + '<span class=\"small\">' + escapeHtml(sectionId) + '</span>';
           btn.addEventListener('click', () => setActive(sectionId));
           li.appendChild(btn);
           navList.appendChild(li);
@@ -694,4 +694,3 @@ if __name__ == "__main__":
     project_root = Path(__file__).resolve().parent.parent.parent
     out_dir = project_root / "data" / "outputs"
     build_one_stop_html_dashboard(out_dir)
-
