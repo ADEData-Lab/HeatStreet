@@ -245,6 +245,102 @@ def _patch_cost_effectiveness_marginal_bucket(sections: Dict[str, Any]) -> bool:
     return patched_any
 
 
+def _patch_epc_lodgements_by_year_band_table(sections: Dict[str, Any], processed_dir: Path) -> bool:
+    """
+    Ensure the one-stop output includes a lodgements-by-year table in Section 3.
+
+    This supports the interactive HTML dashboard without requiring extra CSV exports.
+    """
+    section = sections.get("section_3")
+    if not isinstance(section, dict):
+        return False
+
+    tables = section.get("tables")
+    if tables is None:
+        section["tables"] = []
+        tables = section["tables"]
+    if not isinstance(tables, list):
+        return False
+
+    if any(isinstance(t, dict) and "lodgements by year" in str(t.get("caption", "")).lower() for t in tables):
+        return False
+
+    try:
+        import pandas as pd
+    except Exception as exc:
+        logger.warning(f"Could not import pandas to build lodgements-by-year table: {exc}")
+        return False
+
+    parquet_path = Path(processed_dir) / "epc_london_validated.parquet"
+    csv_path = Path(processed_dir) / "epc_london_validated.csv"
+    cols = ["LODGEMENT_DATE", "INSPECTION_DATE", "CURRENT_ENERGY_RATING"]
+
+    df = None
+    try:
+        if parquet_path.exists():
+            df = pd.read_parquet(parquet_path, columns=cols)
+        elif csv_path.exists():
+            df = pd.read_csv(csv_path, usecols=cols)
+    except Exception as exc:
+        logger.warning(f"Could not load validated EPC data for lodgements-by-year table: {exc}")
+        return False
+
+    if df is None or df.empty:
+        return False
+
+    lodgement = pd.to_datetime(df.get("LODGEMENT_DATE"), errors="coerce")
+    inspection = pd.to_datetime(df.get("INSPECTION_DATE"), errors="coerce")
+    effective = lodgement.fillna(inspection)
+    years = effective.dt.year
+
+    band = df.get("CURRENT_ENERGY_RATING")
+    if band is None:
+        return False
+    band = band.astype("string").fillna("Unknown").str.strip().str.upper()
+    band = band.replace({"": "Unknown"})
+    band = band.where(band.isin(list("ABCDEFG")), other="Unknown")
+
+    tmp = pd.DataFrame({"year": years, "band": band}).dropna(subset=["year"])
+    if tmp.empty:
+        return False
+
+    tmp["year"] = tmp["year"].astype(int)
+    wide = (
+        tmp.groupby(["year", "band"])
+        .size()
+        .unstack(fill_value=0)
+        .sort_index()
+    )
+    wide.index.name = "year"
+
+    ordered_cols = list("ABCDEFG") + ["Unknown"]
+    for c in ordered_cols:
+        if c not in wide.columns:
+            wide[c] = 0
+
+    wide = wide[ordered_cols].reset_index()
+
+    # Convert to JSON-friendly primitive types
+    rows = []
+    for rec in wide.to_dict(orient="records"):
+        clean = {}
+        for k, v in rec.items():
+            try:
+                clean[k] = int(v)
+            except Exception:
+                clean[k] = v
+        rows.append(clean)
+
+    tables.append({
+        "caption": "EPC lodgements by year and EPC band (counts; year from LODGEMENT_DATE, fallback INSPECTION_DATE)",
+        "columns": ["year"] + ordered_cols,
+        "data": rows,
+    })
+    section["tables"] = tables
+    sections["section_3"] = section
+    return True
+
+
 def patch_one_stop_output(
     output_dir: Path,
     one_stop_filename: str = "one_stop_output.json",
@@ -343,6 +439,14 @@ def patch_one_stop_output(
             logger.info("Patched Section 6 cost-effectiveness buckets with marginal_count/marginal_pct")
     except Exception as exc:
         logger.warning(f"Could not patch Section 6 cost-effectiveness buckets: {exc}")
+
+    # Section 3: add EPC lodgements-by-year breakdown for dashboard charts.
+    try:
+        processed_dir = output_dir.parent / "processed"
+        if _patch_epc_lodgements_by_year_band_table(sections, processed_dir):
+            logger.info("Patched Section 3 with EPC lodgements-by-year table")
+    except Exception as exc:
+        logger.warning(f"Could not patch Section 3 lodgements-by-year table: {exc}")
 
     # Persist patched output
     one_stop["sections"] = sections

@@ -16,6 +16,9 @@ import csv
 from pathlib import Path
 from typing import Optional, List, Dict
 import subprocess
+import sys
+import urllib.request
+import ssl
 from loguru import logger
 
 # Optional imports for GeoDataFrame support
@@ -78,23 +81,71 @@ class HNPDDownloader:
         logger.info(f"URL: {self.HNPD_URL}")
 
         try:
-            cmd = [
-                'wget',
-                '--no-check-certificate',
-                '--progress=bar:force',
-                '-O', str(csv_path),
-                self.HNPD_URL
-            ]
+            # Prefer a pure-Python download for cross-platform reliability.
+            # Some environments (e.g., Windows/conda) may not have `wget` installed.
+            def download_with_urllib() -> None:
+                context = ssl.create_default_context()
+                try:
+                    import certifi  # type: ignore
+                    context = ssl.create_default_context(cafile=certifi.where())
+                except Exception:
+                    pass
 
-            result = subprocess.run(cmd, capture_output=False, text=True)
+                with urllib.request.urlopen(self.HNPD_URL, context=context) as response:
+                    # Stream to disk to avoid holding full CSV in memory
+                    csv_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(csv_path, "wb") as f:
+                        while True:
+                            chunk = response.read(1024 * 1024)
+                            if not chunk:
+                                break
+                            f.write(chunk)
 
-            if result.returncode == 0:
-                size_kb = csv_path.stat().st_size / 1024
-                logger.info(f"✓ Downloaded HNPD: {size_kb:.0f} KB")
-                return True
-            else:
-                logger.error(f"Download failed with exit code {result.returncode}")
-                return False
+            try:
+                download_with_urllib()
+            except Exception as exc:
+                logger.warning(f"Python download failed ({exc}). Falling back to system downloaders...")
+
+                # Fallback 1: curl (common on Windows + Linux)
+                curl_cmd = [
+                    "curl",
+                    "-L",
+                    "-o", str(csv_path),
+                    self.HNPD_URL
+                ]
+                curl_result = subprocess.run(curl_cmd, capture_output=True, text=True)
+                if curl_result.returncode != 0:
+                    # Fallback 2: wget (legacy)
+                    wget_cmd = [
+                        "wget",
+                        "--no-check-certificate",
+                        "--progress=bar:force",
+                        "-O", str(csv_path),
+                        self.HNPD_URL
+                    ]
+                    wget_result = subprocess.run(wget_cmd, capture_output=True, text=True)
+
+                    if wget_result.returncode != 0 and sys.platform.startswith("win"):
+                        # Fallback 3: PowerShell Invoke-WebRequest (Windows)
+                        ps_cmd = [
+                            "powershell",
+                            "-NoProfile",
+                            "-Command",
+                            f"Invoke-WebRequest -Uri '{self.HNPD_URL}' -OutFile '{csv_path}'"
+                        ]
+                        ps_result = subprocess.run(ps_cmd, capture_output=True, text=True)
+                        if ps_result.returncode != 0:
+                            logger.error("HNPD download failed via urllib, curl, wget, and Invoke-WebRequest.")
+                            logger.error(ps_result.stderr.strip() or ps_result.stdout.strip())
+                            return False
+                    elif wget_result.returncode != 0:
+                        logger.error("HNPD download failed via urllib, curl, and wget.")
+                        logger.error(wget_result.stderr.strip() or wget_result.stdout.strip())
+                        return False
+
+            size_kb = csv_path.stat().st_size / 1024
+            logger.info(f"✓ Downloaded HNPD: {size_kb:.0f} KB")
+            return True
 
         except Exception as e:
             logger.error(f"Error downloading HNPD: {e}")

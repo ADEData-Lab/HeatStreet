@@ -598,7 +598,12 @@ def model_scenarios(df, analysis_logger: AnalysisLogger = None):
     # Subsidy analysis
     console.print()
     console.print("[cyan]Running subsidy sensitivity analysis...[/cyan]")
-    subsidy_results = modeler.model_subsidy_sensitivity(df, 'heat_pump')
+    subsidy_results_by_scenario = modeler.model_subsidy_sensitivity_multi(
+        df,
+        scenario_names=["heat_pump", "hybrid", "heat_network"],
+    )
+    # Keep legacy single-scenario dict for downstream plotting/report functions.
+    subsidy_results = subsidy_results_by_scenario.get("heat_pump", {})
 
     save_paths = modeler.save_results()
     console.print(f"[green]✓[/green] Results saved")
@@ -1291,7 +1296,7 @@ def generate_additional_reports(df_raw, df_validated, validation_report, archety
     # 4. Subsidy Sensitivity Analysis
     try:
         console.print("[cyan]Running subsidy sensitivity analysis...[/cyan]")
-        subsidy_path = output_dir / "subsidy_sensitivity_analysis.csv"
+        subsidy_path = output_dir / "subsidy_sensitivity_analysis_simple_gbp.csv"
         sensitivity_df = reporter.subsidy_sensitivity_analysis(
             df_validated,
             scenario_results,
@@ -1332,7 +1337,7 @@ def generate_additional_reports(df_raw, df_validated, validation_report, archety
     if analysis_logger:
         analysis_logger.add_metric("additional_reports", len(reports_created), f"{len(reports_created)} specialized reports")
         analysis_logger.add_output("data/outputs/borough_breakdown.csv", "csv", "Borough-level breakdown")
-        analysis_logger.add_output("data/outputs/subsidy_sensitivity_analysis.csv", "csv", "Subsidy sensitivity analysis")
+        analysis_logger.add_output("data/outputs/subsidy_sensitivity_analysis_simple_gbp.csv", "csv", "Subsidy sensitivity analysis (simple, GBP levels)")
         analysis_logger.add_output("data/outputs/data_quality_report.txt", "report", "Data quality assessment")
         analysis_logger.complete_phase(success=True, message=f"{len(reports_created)} additional specialized reports generated")
 

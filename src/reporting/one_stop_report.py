@@ -217,11 +217,12 @@ class OneStopReportGenerator:
         subsidy_df = _read_csv(self.output_dir / "subsidy_sensitivity_analysis.csv")
         borough_df = _read_csv(self.output_dir / "borough_breakdown.csv")
         case_street_df = _read_csv(self.output_dir / "shakespeare_crescent_extract.csv")
+        lodgements_by_year_band_df = self._build_epc_lodgements_by_year_band()
 
         # Build all 13 sections
         self._sections["section_1"] = self._build_section_1(run_metadata)
         self._sections["section_2"] = self._build_section_2(validation_report, adjustment_summary)
-        self._sections["section_3"] = self._build_section_3(archetype_json)
+        self._sections["section_3"] = self._build_section_3(archetype_json, lodgements_by_year_band_df)
         self._sections["section_4"] = self._build_section_4(readiness_df)
         self._sections["section_5"] = self._build_section_5(spatial_tier_df)
         self._sections["section_6"] = self._build_section_6(scenario_df)
@@ -255,6 +256,63 @@ class OneStopReportGenerator:
         logger.info(f"One-stop JSON report written to {self.output_path}")
         logger.info(f"Total datapoints: {total_datapoints}")
         return self.output_path
+
+    def _build_epc_lodgements_by_year_band(self) -> Optional[pd.DataFrame]:
+        """
+        Build a wide-format table of EPC lodgements by year and EPC band.
+
+        This is used by the HTML dashboard to render a stacked bar chart without
+        relying on additional output files.
+        """
+        parquet_path = self.processed_dir / "epc_london_validated.parquet"
+        csv_path = self.processed_dir / "epc_london_validated.csv"
+        cols = ["LODGEMENT_DATE", "INSPECTION_DATE", "CURRENT_ENERGY_RATING"]
+
+        df: Optional[pd.DataFrame] = None
+        try:
+            if parquet_path.exists():
+                df = pd.read_parquet(parquet_path, columns=cols)
+            elif csv_path.exists():
+                df = pd.read_csv(csv_path, usecols=cols)
+        except Exception as exc:
+            logger.warning(f"Could not load validated EPC data for lodgement table: {exc}")
+            return None
+
+        if df is None or df.empty:
+            return None
+
+        lodgement = pd.to_datetime(df.get("LODGEMENT_DATE"), errors="coerce")
+        inspection = pd.to_datetime(df.get("INSPECTION_DATE"), errors="coerce")
+        effective = lodgement.fillna(inspection)
+        years = effective.dt.year
+
+        band = df.get("CURRENT_ENERGY_RATING")
+        if band is None:
+            return None
+        band = band.astype("string").fillna("Unknown").str.strip().str.upper()
+        band = band.replace({"": "Unknown"})
+        band = band.where(band.isin(list("ABCDEFG")), other="Unknown")
+
+        tmp = pd.DataFrame({"year": years, "band": band}).dropna(subset=["year"])
+        if tmp.empty:
+            return None
+
+        tmp["year"] = tmp["year"].astype(int)
+        wide = (
+            tmp.groupby(["year", "band"])
+            .size()
+            .unstack(fill_value=0)
+            .sort_index()
+        )
+        wide.index.name = "year"
+
+        ordered_cols = list("ABCDEFG") + ["Unknown"]
+        for c in ordered_cols:
+            if c not in wide.columns:
+                wide[c] = 0
+
+        wide = wide[ordered_cols].reset_index()
+        return wide
 
     def _render_section(
         self,
@@ -483,7 +541,7 @@ class OneStopReportGenerator:
         ]
         return self._render_section(self.SECTION_TITLES[1], datapoints)
 
-    def _build_section_3(self, archetype_json: Dict[str, Any]) -> Dict[str, Any]:
+    def _build_section_3(self, archetype_json: Dict[str, Any], lodgements_by_year_band_df: Optional[pd.DataFrame]) -> Dict[str, Any]:
         """Section 3: Housing stock archetype characteristics."""
         epc_bands = archetype_json.get("epc_bands", {})
         sap_scores = archetype_json.get("sap_scores", {})
@@ -611,7 +669,14 @@ class OneStopReportGenerator:
                 usage="Existing heat network baseline",
             ),
         ]
-        return self._render_section(self.SECTION_TITLES[2], datapoints)
+        tables: List[Tuple[pd.DataFrame, str]] = []
+        if lodgements_by_year_band_df is not None and not lodgements_by_year_band_df.empty:
+            tables.append((
+                lodgements_by_year_band_df,
+                "EPC lodgements by year and EPC band (counts; year from LODGEMENT_DATE, fallback INSPECTION_DATE)",
+            ))
+
+        return self._render_section(self.SECTION_TITLES[2], datapoints, tables=tables)
 
     def _build_section_4(self, readiness_df: Optional[pd.DataFrame]) -> Dict[str, Any]:
         """Section 4: Retrofit readiness (heat pump readiness and prerequisites)."""
@@ -1157,38 +1222,174 @@ class OneStopReportGenerator:
             ]
             return self._render_section(self.SECTION_TITLES[8], datapoints)
 
-        datapoints = []
+        df = subsidy_df.copy()
 
-        # Process each subsidy level
-        for _, row in subsidy_df.iterrows():
-            subsidy_pct = row.get("subsidy_pct", row.get("subsidy_level_pct", "unknown"))
-            subsidy_suffix = _snake_case(f"subsidy_{subsidy_pct}pct")
+        # Normalise historical/alternate column names so Section 9 remains robust.
+        rename_map = {
+            "subsidy_pct": "subsidy_percentage",
+            "subsidy_level_pct": "subsidy_percentage",
+            "uptake_rate": "estimated_uptake_rate",
+            "uptake_rate_pct": "estimated_uptake_rate",
+        }
+        df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
 
-            fields = {
-                "subsidy_amount_gbp": ("Subsidy amount", "Subsidy amount per property (GBP).", "Per property"),
-                "resulting_payback_years": ("Resulting payback", "Payback period after subsidy (years).", "Cost-effective properties"),
-                "uptake_rate_pct": ("Uptake rate", "Assumed uptake rate at this subsidy level (percent).", "All properties"),
-                "properties_upgraded": ("Properties upgraded", "Count of properties upgraded at this uptake (count).", "All properties"),
-                "total_public_expenditure": ("Total public expenditure", "Total subsidy cost (GBP).", "All properties upgraded"),
-                "co2_reduction_achieved": ("CO2 reduction achieved", "Total CO₂ reduction achieved (tonnes).", "All properties upgraded"),
-                "cost_per_tonne_co2": ("Cost per tonne CO2", "Public expenditure per tonne CO₂ abated (GBP/tCO₂).", "Total CO₂ reduction"),
-            }
+        scenario_col = "scenario" if "scenario" in df.columns else "scenario_id"
+        if scenario_col not in df.columns:
+            # No scenario column -> treat as single scenario for backwards compatibility.
+            scenario_col = "scenario"
+            df[scenario_col] = "unknown"
 
-            for field, (label, definition, denominator) in fields.items():
-                value = row.get(field)
-                if value is not None and not (isinstance(value, float) and pd.isna(value)):
-                    datapoints.append(AnnotatedDatapoint(
-                        name=f"{label} (subsidy {subsidy_pct}%)",
-                        key=f"{field}_{subsidy_suffix}",
-                        value=value,
-                        definition=definition,
-                        denominator=denominator,
-                        source=f"data/outputs/subsidy_sensitivity_analysis.csv -> {field} at subsidy {subsidy_pct}%",
-                        usage=f"Subsidy sensitivity {subsidy_pct}%",
-                    ))
+        scenarios = sorted(str(s) for s in df[scenario_col].dropna().unique().tolist() if s)
+        subsidy_levels = sorted(
+            float(s) for s in df.get("subsidy_percentage", pd.Series(dtype=float)).dropna().unique().tolist()
+        )
+        uptake_models = sorted(
+            str(s) for s in df.get("uptake_model", pd.Series(dtype=str)).dropna().unique().tolist() if s
+        )
+        cost_uplift_values = sorted(
+            float(s) for s in df.get("cost_uplift_pct", pd.Series(dtype=float)).dropna().unique().tolist()
+        )
+
+        datapoints = [
+            AnnotatedDatapoint(
+                name="Subsidy sensitivity scenarios modeled",
+                key="subsidy_sensitivity_scenarios",
+                value=scenarios,
+                definition="Scenario IDs included in the subsidy sensitivity table (list of strings).",
+                denominator="N/A",
+                source="data/outputs/subsidy_sensitivity_analysis.csv -> scenario unique values",
+                usage="Subsidy sensitivity coverage",
+            ),
+            AnnotatedDatapoint(
+                name="Subsidy levels modeled (%)",
+                key="subsidy_levels_modeled_pct",
+                value=subsidy_levels,
+                definition="Subsidy levels modeled (percent of capital cost, list).",
+                denominator="N/A",
+                source="data/outputs/subsidy_sensitivity_analysis.csv -> subsidy_percentage unique values",
+                usage="Subsidy sensitivity parameters",
+            ),
+        ]
+
+        if uptake_models:
+            datapoints.append(AnnotatedDatapoint(
+                name="Uptake model(s) used",
+                key="subsidy_uptake_models",
+                value=uptake_models,
+                definition="Uptake model identifier(s) used to map payback to adoption (list of strings).",
+                denominator="N/A",
+                source="data/outputs/subsidy_sensitivity_analysis.csv -> uptake_model unique values",
+                usage="Subsidy sensitivity methodology",
+            ))
+
+        if cost_uplift_values:
+            datapoints.append(AnnotatedDatapoint(
+                name="Cost uplift applied for subsidy sensitivity (%)",
+                key="subsidy_cost_uplift_pct",
+                value=cost_uplift_values[0] if len(cost_uplift_values) == 1 else cost_uplift_values,
+                definition="Temporary cost uplift applied during subsidy sensitivity (percent).",
+                denominator="N/A",
+                source="data/outputs/subsidy_sensitivity_analysis.csv -> cost_uplift_pct",
+                usage="Subsidy sensitivity assumptions",
+            ))
+
+        # Per-scenario headline datapoints (policy-facing shortcuts)
+        for scenario_id in scenarios:
+            sdf = df[df[scenario_col].astype(str) == str(scenario_id)].copy()
+            if sdf.empty:
+                continue
+
+            scenario_label = None
+            if "scenario_label" in sdf.columns:
+                labels = sdf["scenario_label"].dropna().astype(str).unique().tolist()
+                if labels:
+                    scenario_label = labels[0]
+            scenario_label = scenario_label or str(scenario_id)
+            suffix = _snake_case(str(scenario_id))
+
+            # Max uptake (fraction 0-1 in the CSV)
+            if "estimated_uptake_rate" in sdf.columns:
+                uptake_series = pd.to_numeric(sdf["estimated_uptake_rate"], errors="coerce")
+                if uptake_series.notna().any():
+                    idx = int(uptake_series.idxmax())
+                    row = sdf.loc[idx]
+                    datapoints.extend([
+                        AnnotatedDatapoint(
+                            name=f"Max uptake rate ({scenario_label})",
+                            key=f"subsidy_max_uptake_rate_{suffix}",
+                            value=row.get("estimated_uptake_rate"),
+                            definition="Maximum modeled uptake rate across subsidy levels (fraction 0-1).",
+                            denominator="All properties",
+                            source="data/outputs/subsidy_sensitivity_analysis.csv -> max(estimated_uptake_rate)",
+                            usage="Subsidy sensitivity summary",
+                        ),
+                        AnnotatedDatapoint(
+                            name=f"Subsidy level for max uptake ({scenario_label})",
+                            key=f"subsidy_level_for_max_uptake_pct_{suffix}",
+                            value=row.get("subsidy_percentage"),
+                            definition="Subsidy percentage associated with maximum modeled uptake (percent).",
+                            denominator="N/A",
+                            source="data/outputs/subsidy_sensitivity_analysis.csv -> subsidy_percentage at max uptake",
+                            usage="Subsidy sensitivity summary",
+                        ),
+                    ])
+
+            # Minimum payback
+            if "payback_years" in sdf.columns:
+                payback_series = pd.to_numeric(sdf["payback_years"], errors="coerce")
+                if payback_series.notna().any():
+                    idx = int(payback_series.idxmin())
+                    row = sdf.loc[idx]
+                    datapoints.extend([
+                        AnnotatedDatapoint(
+                            name=f"Minimum payback ({scenario_label})",
+                            key=f"subsidy_min_payback_years_{suffix}",
+                            value=row.get("payback_years"),
+                            definition="Minimum modeled payback across subsidy levels (years).",
+                            denominator="N/A",
+                            source="data/outputs/subsidy_sensitivity_analysis.csv -> min(payback_years)",
+                            usage="Subsidy sensitivity summary",
+                        ),
+                        AnnotatedDatapoint(
+                            name=f"Subsidy level for minimum payback ({scenario_label})",
+                            key=f"subsidy_level_for_min_payback_pct_{suffix}",
+                            value=row.get("subsidy_percentage"),
+                            definition="Subsidy percentage associated with minimum modeled payback (percent).",
+                            denominator="N/A",
+                            source="data/outputs/subsidy_sensitivity_analysis.csv -> subsidy_percentage at min payback",
+                            usage="Subsidy sensitivity summary",
+                        ),
+                    ])
+
+            # Maximum public expenditure
+            if "public_expenditure_total" in sdf.columns:
+                spend_series = pd.to_numeric(sdf["public_expenditure_total"], errors="coerce")
+                if spend_series.notna().any():
+                    idx = int(spend_series.idxmax())
+                    row = sdf.loc[idx]
+                    datapoints.extend([
+                        AnnotatedDatapoint(
+                            name=f"Maximum public expenditure ({scenario_label})",
+                            key=f"subsidy_max_public_expenditure_total_{suffix}",
+                            value=row.get("public_expenditure_total"),
+                            definition="Maximum total public expenditure across subsidy levels (GBP).",
+                            denominator="All upgraded properties",
+                            source="data/outputs/subsidy_sensitivity_analysis.csv -> max(public_expenditure_total)",
+                            usage="Subsidy sensitivity summary",
+                        ),
+                        AnnotatedDatapoint(
+                            name=f"Subsidy level for maximum public expenditure ({scenario_label})",
+                            key=f"subsidy_level_for_max_public_expenditure_pct_{suffix}",
+                            value=row.get("subsidy_percentage"),
+                            definition="Subsidy percentage associated with maximum public expenditure (percent).",
+                            denominator="N/A",
+                            source="data/outputs/subsidy_sensitivity_analysis.csv -> subsidy_percentage at max public expenditure",
+                            usage="Subsidy sensitivity summary",
+                        ),
+                    ])
 
         # Include full subsidy sensitivity table
-        tables = [(subsidy_df, "Subsidy Sensitivity Analysis - Full Results")]
+        tables = [(df, "Subsidy Sensitivity Analysis - Full Results")]
 
         return self._render_section(self.SECTION_TITLES[8], datapoints, tables=tables)
 

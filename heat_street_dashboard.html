@@ -3,8 +3,9 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Heat Street Dashboard — London's Edwardian Terraced Housing</title>
+    <title>Heat Street Dashboard &mdash; London's Edwardian Terraced Housing</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.2.0"></script>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <style>
         * {
@@ -472,6 +473,38 @@
             border: none;
         }
 
+        /* Subsidy Selector */
+        .subsidy-selector {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-top: 16px;
+        }
+
+        .subsidy-btn {
+            background: rgba(15, 23, 42, 0.6);
+            color: var(--text-secondary);
+            border: 1px solid rgba(148, 163, 184, 0.2);
+            border-radius: 10px;
+            padding: 12px 20px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            font-family: inherit;
+        }
+
+        .subsidy-btn:hover {
+            background: rgba(59, 130, 246, 0.15);
+            border-color: var(--accent-blue);
+        }
+
+        .subsidy-btn.active {
+            background: linear-gradient(135deg, #3b82f6, #2563eb);
+            color: white;
+            border: none;
+        }
+
         /* Scenario Metrics */
         .scenario-metrics {
             display: grid;
@@ -693,6 +726,17 @@
         }
 
         .btn:hover { background: rgba(30, 41, 59, 0.9); }
+
+        .narrative {
+            color: var(--text-secondary);
+            font-size: 14px;
+            line-height: 1.7;
+        }
+
+        .narrative p + p { margin-top: 10px; }
+        .narrative strong { color: var(--text-primary); font-weight: 700; }
+        .narrative a { color: var(--accent-blue); text-decoration: none; }
+        .narrative a:hover { text-decoration: underline; }
     </style>
 </head>
 <body>
@@ -722,6 +766,7 @@
             <button class="nav-btn" data-tab="stock">Housing Stock</button>
             <button class="nav-btn" data-tab="readiness">Retrofit Readiness</button>
             <button class="nav-btn" data-tab="scenarios">Scenario Comparison</button>
+            <button class="nav-btn" data-tab="subsidy">Subsidy Sensitivity</button>
         </div>
     </nav>
 
@@ -755,6 +800,33 @@
                     <p class="stat-label">Mean SAP Score</p>
                     <p class="stat-value" id="kpiSapMean">—</p>
                     <p class="stat-subvalue">Mid-Band D average</p>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">How to read this dashboard</h2>
+                    <p class="card-subtitle">A guided narrative for a policy audience</p>
+                </div>
+                <div class="narrative">
+                    <p>
+                        This dashboard summarises the Heat Street case study for London&rsquo;s Edwardian terraced housing.
+                        It is generated from the latest one-stop pipeline output and is intended to support policy and programme
+                        design discussions. It is a screening-level analysis: it supports stock-level comparisons, but it does
+                        <strong>not</strong> replace detailed surveys, design work, or network feasibility studies for individual streets.
+                    </p>
+                    <p>
+                        The story runs left-to-right across the tabs. We start with what the EPC Register records about the stock
+                        (energy ratings, heating systems, and key fabric indicators). We then translate these signals into <strong>readiness tiers</strong>
+                        for heat pumps and a separate set of <strong>heat network suitability tiers</strong> derived from spatial context. Finally, we compare
+                        pathway scenarios (fabric-only, heat pumps, heat networks, and a Hybrid allocation) using a consistent set of published
+                        cost and performance assumptions to estimate indicative investment, bill impacts and CO&#8322; outcomes.
+                    </p>
+                    <p>
+                        Two interpretation notes: (1) EPCs are an administrative dataset and some fields are missing or recorded as
+                        &ldquo;unknown&rdquo; for a material share of properties; and (2) the analysis is designed for <em>comparisons</em> under a common
+                        baseline, so absolute totals should be read as indicative and sense-checked against local delivery intelligence.
+                    </p>
                 </div>
             </div>
 
@@ -811,6 +883,14 @@
                     <h2 class="card-title">Decarbonisation Pathways at a Glance</h2>
                     <p class="card-subtitle">Comparing capital costs and CO₂ outcomes across scenarios</p>
                 </div>
+                <div class="narrative">
+                    <p>
+                        This chart provides a high-level comparison of pathways on two axes: <strong>capital cost per property</strong> and
+                        <strong>annual CO&#8322; reduction</strong>. It is a useful starting point for policy conversations about scale and ambition,
+                        but it does not capture deliverability constraints (supply chain, disruption, planning) or wider system costs
+                        (e.g., heat network backbone investment).
+                    </p>
+                </div>
                 <div class="chart-container chart-container-lg">
                     <canvas id="scenarioOverviewChart"></canvas>
                 </div>
@@ -819,6 +899,32 @@
 
         <!-- Housing Stock Tab -->
         <div id="stock" class="tab-content">
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Housing stock context</h2>
+                    <p class="card-subtitle">What these distributions tell us (and why they matter)</p>
+                </div>
+                <div class="narrative">
+                    <p>
+                        This tab summarises the physical characteristics that shape low-carbon heating choices.
+                        Wall construction affects insulation feasibility and cost; the current heating system shows
+                        today&rsquo;s fuel reliance; and glazing/loft indicators help explain baseline heat demand and the
+                        practical scale of fabric upgrades.
+                    </p>
+                    <p>
+                        The lodgements chart below adds a time dimension. It shows how the mix of EPC ratings for newly
+                        lodged certificates has shifted year-by-year. The y-axis is the count of lodgements; each bar segment
+                        is labelled with its within-year percentage so the chart highlights the growth in higher-rated (A&ndash;C)
+                        lodgements even when total volumes change.
+                    </p>
+                    <p>
+                        Data note: where EPC fields are missing or ambiguous, we retain an &ldquo;Unknown&rdquo; category rather than
+                        imputing values. This keeps the charts transparent about data coverage, but it also means that shares can reflect
+                        both real stock characteristics and recording completeness.
+                    </p>
+                </div>
+            </div>
+
             <div class="grid-2-equal">
                 <div class="card">
                     <div class="card-header">
@@ -839,6 +945,28 @@
                         <canvas id="heatingChart"></canvas>
                     </div>
                 </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">EPC lodgements over time</h2>
+                    <p class="card-subtitle">Counts by year, stacked by EPC band (segment labels show % share)</p>
+                </div>
+                <div class="narrative">
+                    <p>
+                        This chart is useful for sense-checking whether newer certificates are skewing toward higher EPC bands.
+                        If A&ndash;C segments grow as a share of annual lodgements, it suggests improving performance among properties
+                        getting certified (for example through upgrades at sale/let, compliance activity, or targeted programmes).
+                    </p>
+                    <p>
+                        Important caveat: lodgements are not a random sample of the entire stock. This is a trend in the
+                        <em>certified</em> subset, so we interpret it alongside the stock-wide baseline shown elsewhere in the dashboard.
+                    </p>
+                </div>
+                <div class="chart-container chart-container-lg" style="margin-top: 14px;">
+                    <canvas id="lodgementYearBandChart"></canvas>
+                </div>
+                <div class="narrative" id="lodgementYearBandFallback" style="display:none; margin-top: 12px;"></div>
             </div>
 
             <div class="card">
@@ -885,6 +1013,32 @@
         <div id="readiness" class="tab-content">
             <div class="card">
                 <div class="card-header">
+                    <h2 class="card-title">Retrofit readiness logic</h2>
+                    <p class="card-subtitle">How tiering supports pathway decisions</p>
+                </div>
+                <div class="narrative">
+                    <p>
+                        Readiness tiers translate EPC signals into practical groups that help prioritise action.
+                        Tier&nbsp;1 homes are modelled as ready for low-carbon heat with minimal prerequisite work; higher tiers
+                        reflect increasing fabric requirements, system constraints, and cost barriers; Tier&nbsp;5 indicates homes
+                        that are currently unlikely to be suitable for heat pumps under the study assumptions.
+                    </p>
+                    <p>
+                        Heat network tiers provide the complementary picture: where district heat is more plausible because of local
+                        heat-demand density and proximity to existing (and planned) network areas. These tiers are used in the Hybrid
+                        scenario to guide whether homes are allocated to a heat network pathway or a heat pump pathway.
+                    </p>
+                    <p>
+                        Practical caveat: both tiering systems are screening tools built from available data. They do not capture every
+                        constraint that matters on the ground (e.g., outdoor unit space, internal distribution upgrades, electrical capacity,
+                        resident preferences, heritage constraints, or network deliverability). We treat them as a way to structure prioritisation
+                        and scenario design, not as a definitive classification for individual properties.
+                    </p>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
                     <h2 class="card-title">Heat Pump Readiness Tiers</h2>
                     <p class="card-subtitle">Classification by retrofit complexity and cost</p>
                 </div>
@@ -925,7 +1079,7 @@
             <div class="card">
                 <div class="card-header">
                     <h2 class="card-title">Heat Network Suitability Tiers</h2>
-                    <p class="card-subtitle">Based on heat demand density analysis</p>
+                    <p class="card-subtitle">Based on demand density and proximity to existing/planned networks</p>
                 </div>
                 <table class="data-table">
                     <thead>
@@ -945,6 +1099,32 @@
 
         <!-- Scenario Comparison Tab -->
         <div id="scenarios" class="tab-content">
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Scenario logic (plain language)</h2>
+                    <p class="card-subtitle">What changes between pathways and how to interpret the metrics</p>
+                </div>
+                <div class="narrative">
+                    <p>
+                        Scenarios compare alternative decarbonisation pathways using a common baseline for the same housing stock.
+                        The model applies consistent, published cost and performance assumptions to estimate indicative outcomes:
+                        capital investment, annual bill impacts, and annual CO&#8322; reductions at the stock level.
+                    </p>
+                    <p>
+                        Fabric scenarios apply sequential upgrade measures (e.g., loft, draught-proofing, insulation, glazing). The
+                        &ldquo;Fabric Tipping&rdquo; option stops when additional measures deliver sharply lower energy savings per pound
+                        invested. Heat pump and heat network scenarios then layer in low-carbon heating routes; the Hybrid pathway uses
+                        readiness and heat network suitability tiers to allocate homes to the most plausible option under the study assumptions.
+                    </p>
+                    <p>
+                        Metric note: &ldquo;Simple payback&rdquo; is shown as an intuitive ratio of capital cost to annual bill savings under
+                        the modeled tariffs and performance assumptions. It is not a discounted cashflow appraisal, and it does not include
+                        co-benefits (comfort, health), distributional impacts, or broader system costs. Policy decisions should interpret payback
+                        alongside strategic objectives, affordability and deliverability.
+                    </p>
+                </div>
+            </div>
+
             <div class="card">
                 <div class="card-header">
                     <h2 class="card-title">Select Scenario</h2>
@@ -1017,6 +1197,27 @@
 
             <div class="card">
                 <div class="card-header">
+                    <h2 class="card-title">Fabric investment tipping point</h2>
+                    <p class="card-subtitle">Diminishing returns from sequential retrofit measures</p>
+                </div>
+                <div class="narrative">
+                    <p>
+                        The bars show the <strong>marginal efficiency</strong> of each additional fabric measure: how many kWh of annual heat-demand
+                        reduction are delivered per &pound;1,000 invested (higher is better). The line shows <strong>cumulative</strong> investment as measures
+                        are added sequentially.
+                    </p>
+                    <p>
+                        This is a practical way to explain why some measures are prioritised early (high savings per pound) and why later measures can
+                        be harder to justify on cost-effectiveness alone (lower marginal returns), even if they still contribute to deeper demand reduction.
+                    </p>
+                </div>
+                <div class="chart-container chart-container-lg" style="margin-top: 14px;">
+                    <canvas id="tippingPointChart"></canvas>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
                     <h2 class="card-title">Full Scenario Comparison</h2>
                 </div>
                 <table class="data-table" id="scenarioTable">
@@ -1032,6 +1233,128 @@
                     </thead>
                     <tbody>
                         <tr><td colspan="6" style="color: var(--text-muted);">Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Subsidy Sensitivity Tab -->
+        <div id="subsidy" class="tab-content">
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Subsidy sensitivity (policy lever)</h2>
+                    <p class="card-subtitle">How capital subsidies can change payback, uptake and public spend under consistent assumptions</p>
+                </div>
+                <div class="narrative">
+                    <p>
+                        This module tests a set of subsidy levels (0&ndash;100%) applied to the scenario&rsquo;s modeled capital cost.
+                        Lower up-front costs improve simple payback; we then translate payback into an <strong>illustrative uptake rate</strong>
+                        using a smooth adoption curve (a logistic function). This is designed for sensitivity testing &mdash; not as a forecast of
+                        what will happen without complementary policy (delivery capacity, consumer confidence, installer supply, planning and
+                        infrastructure constraints).
+                    </p>
+                    <p>
+                        The charts below show how subsidy can shift: (i) the private up-front cost per property, (ii) the implied payback,
+                        (iii) the modeled uptake rate and upgraded property count, and (iv) total public expenditure and carbon abatement cost.
+                        All results are for this case-study stock and the assumptions used elsewhere in the pipeline.
+                    </p>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Select pathway</h2>
+                    <p class="card-subtitle">Choose which scenario receives the subsidy</p>
+                </div>
+                <div class="subsidy-selector" id="subsidyScenarioButtons"></div>
+                <div class="narrative" id="subsidyFallback" style="display:none; margin-top: 12px;"></div>
+            </div>
+
+            <div class="grid-2-equal">
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">Up-front cost after subsidy</h2>
+                        <p class="card-subtitle">Capital cost per upgraded property (after subsidy)</p>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="subsidyNetCostChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">Simple payback (stock-average)</h2>
+                        <p class="card-subtitle">Capital cost divided by annual bill savings under the scenario</p>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="subsidyPaybackChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid-2-equal">
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">Modeled uptake rate</h2>
+                        <p class="card-subtitle">Illustrative adoption response to payback (logistic curve)</p>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="subsidyUptakeChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">Properties upgraded</h2>
+                        <p class="card-subtitle">Upgraded properties = total properties &times; modeled uptake rate</p>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="subsidyPropertiesChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="grid-2-equal">
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">Public expenditure</h2>
+                        <p class="card-subtitle">Total public cost of the subsidy across upgraded properties</p>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="subsidySpendChart"></canvas>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">Carbon abatement cost</h2>
+                        <p class="card-subtitle">Public &pound; per tonne CO&#8322; saved (over the analysis horizon)</p>
+                    </div>
+                    <div class="chart-container">
+                        <canvas id="subsidyCarbonChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Subsidy sensitivity table</h2>
+                    <p class="card-subtitle">Full results for the selected pathway (from one-stop JSON)</p>
+                </div>
+                <table class="data-table" id="subsidyTable">
+                    <thead>
+                        <tr>
+                            <th>Subsidy</th>
+                            <th>Cost/property (after)</th>
+                            <th>Payback</th>
+                            <th>Uptake</th>
+                            <th>Upgraded</th>
+                            <th>Public spend</th>
+                            <th>&pound;/tCO&#8322;</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td colspan="7" style="color: var(--text-muted);">Loadingâ€¦</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -1114,13 +1437,22 @@
         const STATE = {
             oneStop: null,
             source: null,
-            charts: {}
+            charts: {},
+            subsidy: {
+                byScenario: {},
+                scenarioOrder: [],
+                selectedScenario: null
+            }
         };
 
         // Chart.js defaults
         Chart.defaults.color = '#94a3b8';
         Chart.defaults.borderColor = 'rgba(148, 163, 184, 0.1)';
         Chart.defaults.font.family = "'DM Sans', sans-serif";
+        if (window.ChartDataLabels) {
+            Chart.register(ChartDataLabels);
+            Chart.defaults.plugins.datalabels = { display: false };
+        }
 
         const tooltipStyle = {
             backgroundColor: 'rgba(15, 23, 42, 0.95)',
@@ -1192,6 +1524,11 @@
         }
 
         async function loadOneStopData() {
+            if (window.__HEATSTREET_ONE_STOP) {
+                const d = window.__HEATSTREET_ONE_STOP;
+                if (!d.__source) d.__source = 'embedded one_stop_output.json';
+                return d;
+            }
             const candidates = [
                 'HeatStreet/data/outputs/one_stop_output.json',
                 'data/outputs/one_stop_output.json',
@@ -1452,6 +1789,529 @@
             });
         }
 
+        function renderTippingPointChart(oneStop) {
+            const canvas = document.getElementById('tippingPointChart');
+            if (!canvas) return;
+
+            const rows = oneStop?.sections?.section_8?.tables?.[0]?.data || [];
+            const steps = rows.filter(r => Number(r?.step || 0) > 0);
+            if (!steps.length) return;
+
+            const labels = steps.map(r => r.measure_name || r.measure_id || `Step ${r.step}`);
+            const marginalCapex = steps.map(r => Number(r.marginal_capex || 0));
+            const marginalKwh = steps.map(r => Number(r.marginal_kwh_saved || 0));
+            const cumulativeCapex = steps.map(r => Number(r.cumulative_capex || 0));
+
+            const efficiency = marginalCapex.map((capex, i) => {
+                const kwh = marginalKwh[i];
+                if (!capex || !kwh) return 0;
+                return kwh / (capex / 1000);
+            });
+
+            const COST_EFFECTIVE = 2500;
+            const MODERATE = 1000;
+            const threshold = labels.map(() => COST_EFFECTIVE);
+
+            const barColors = efficiency.map(v => (v > COST_EFFECTIVE ? '#22c55e' : (v >= MODERATE ? '#f97316' : '#ef4444')));
+
+            STATE.charts.tippingPointChart = new Chart(canvas, {
+                type: 'bar',
+                data: {
+                    labels,
+                    datasets: [
+                        {
+                            type: 'bar',
+                            label: 'Marginal efficiency (kWh saved per £1,000 invested)',
+                            data: efficiency,
+                            backgroundColor: barColors,
+                            borderRadius: 6,
+                            borderSkipped: false,
+                            yAxisID: 'y'
+                        },
+                        {
+                            type: 'line',
+                            label: 'Cumulative investment (£)',
+                            data: cumulativeCapex,
+                            yAxisID: 'y1',
+                            borderColor: '#a16207',
+                            backgroundColor: 'rgba(161, 98, 7, 0.15)',
+                            tension: 0.25,
+                            pointRadius: 3,
+                            pointHoverRadius: 5
+                        },
+                        {
+                            type: 'line',
+                            label: 'Cost-effective threshold (2,500 kWh/£1k)',
+                            data: threshold,
+                            yAxisID: 'y',
+                            borderColor: '#3b82f6',
+                            borderDash: [6, 6],
+                            pointRadius: 0,
+                            borderWidth: 2
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        datalabels: { display: false },
+                        legend: {
+                            position: 'top',
+                            labels: { padding: 18, usePointStyle: true, pointStyle: 'rectRounded' }
+                        },
+                        tooltip: {
+                            ...tooltipStyle,
+                            callbacks: {
+                                label: (ctx) => {
+                                    const i = ctx.dataIndex;
+                                    if (ctx.dataset.type === 'bar') {
+                                        const eff = efficiency[i] || 0;
+                                        const cap = marginalCapex[i] || 0;
+                                        const kwh = marginalKwh[i] || 0;
+                                        return [
+                                            `Marginal efficiency: ${Math.round(eff).toLocaleString()} kWh/£1k`,
+                                            `Marginal capex: £${Math.round(cap).toLocaleString()}`,
+                                            `Marginal kWh saved: ${Math.round(kwh).toLocaleString()} kWh`
+                                        ];
+                                    }
+                                    if (ctx.dataset.yAxisID === 'y1') {
+                                        const cap = cumulativeCapex[i] || 0;
+                                        return `Cumulative investment: £${Math.round(cap).toLocaleString()}`;
+                                    }
+                                    return ctx.dataset.label + ': ' + ctx.raw;
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            grid: { display: false },
+                            ticks: { maxRotation: 35, minRotation: 35 }
+                        },
+                        y: {
+                            position: 'left',
+                            title: { display: true, text: 'kWh saved per £1,000 invested', color: '#94a3b8' },
+                            grid: { color: 'rgba(148, 163, 184, 0.1)' },
+                            ticks: { callback: v => Math.round(v).toLocaleString() }
+                        },
+                        y1: {
+                            position: 'right',
+                            title: { display: true, text: 'Cumulative investment (£)', color: '#94a3b8' },
+                            grid: { display: false },
+                            ticks: {
+                                callback: v => {
+                                    const n = Number(v) || 0;
+                                    if (n >= 1000) return '£' + Math.round(n / 1000).toLocaleString() + 'k';
+                                    return '£' + Math.round(n).toLocaleString();
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderLodgementYearBandChart(oneStop) {
+            const canvas = document.getElementById('lodgementYearBandChart');
+            const fallback = document.getElementById('lodgementYearBandFallback');
+            if (!canvas || !fallback) return;
+
+            fallback.style.display = 'none';
+            fallback.innerHTML = '';
+            canvas.style.display = 'block';
+
+            try {
+                const tables = oneStop?.sections?.section_3?.tables || [];
+                const table = tables.find(t => (t.caption || '').toLowerCase().includes('lodgements by year'));
+                const columns = table?.columns || [];
+                const rows = table?.data || [];
+                if (!columns.length || !rows.length) {
+                    throw new Error('No lodgements-by-year table found in one-stop output.');
+                }
+
+                const yearKey = columns.find(c => String(c).toLowerCase() === 'year') || 'year';
+                const bandKeys = columns.filter(c => c !== yearKey);
+                const years = rows.map(r => Number(r[yearKey])).filter(v => Number.isFinite(v));
+
+                const colorMap = {
+                    'A': '#1a5f2a',
+                    'B': '#2d8f3e',
+                    'C': '#5cb85c',
+                    'D': '#f0ad4e',
+                    'E': '#f97316',
+                    'F': '#ef4444',
+                    'G': '#7c2d12',
+                    'Unknown': '#9e9e9e'
+                };
+
+                const datasets = bandKeys.map(band => ({
+                    label: band,
+                    data: rows.map(r => Number(r[band] || 0)),
+                    backgroundColor: colorMap[band] || '#64748b',
+                    stack: 'lodgements',
+                    borderWidth: 0
+                }));
+
+                const totals = years.map((_, idx) => datasets.reduce((sum, ds) => sum + (Number(ds.data[idx]) || 0), 0));
+                const emphasise = new Set(['A', 'B', 'C', 'D']);
+
+                STATE.charts.lodgementYearBandChart = new Chart(canvas, {
+                    type: 'bar',
+                    data: { labels: years, datasets },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                position: 'top',
+                                labels: { padding: 18, usePointStyle: true, pointStyle: 'rectRounded' }
+                            },
+                            tooltip: {
+                                ...tooltipStyle,
+                                callbacks: {
+                                    label: (ctx) => {
+                                        const value = Number(ctx.raw || 0);
+                                        const total = totals[ctx.dataIndex] || 0;
+                                        const pct = total ? (value / total) * 100 : 0;
+                                        const pctLabel = pct > 0 && pct < 1 ? '<1%' : `${pct.toFixed(0)}%`;
+                                        return `${ctx.dataset.label}: ${value.toLocaleString()} (${pctLabel})`;
+                                    }
+                                }
+                            },
+                            datalabels: {
+                                display: (ctx) => {
+                                    const value = Number(ctx.raw || 0);
+                                    if (!value) return false;
+                                    const total = totals[ctx.dataIndex] || 0;
+                                    if (!total) return false;
+                                    const pct = (value / total) * 100;
+                                    const band = ctx.dataset.label;
+                                    if (!emphasise.has(band)) return false;
+                                    if (pct >= 1) return true;
+                                    return value >= 10;
+                                },
+                                formatter: (value, ctx) => {
+                                    const total = totals[ctx.dataIndex] || 0;
+                                    if (!total) return '';
+                                    const pct = (Number(value || 0) / total) * 100;
+                                    if (pct > 0 && pct < 1) return '<1%';
+                                    return `${Math.round(pct)}%`;
+                                },
+                                color: (ctx) => (ctx.dataset.label === 'A' || ctx.dataset.label === 'B' ? '#ffffff' : '#0f172a'),
+                                font: { weight: '700', size: 10 },
+                                align: 'center',
+                                anchor: 'center',
+                                clamp: true
+                            }
+                        },
+                        scales: {
+                            x: { stacked: true, grid: { display: false } },
+                            y: {
+                                stacked: true,
+                                grid: { color: 'rgba(148, 163, 184, 0.1)' },
+                                ticks: { callback: v => Math.round(v).toLocaleString() },
+                                title: { display: true, text: 'EPC lodgements (count)', color: '#94a3b8' }
+                            }
+                        }
+                    }
+                });
+            } catch (err) {
+                canvas.style.display = 'none';
+                fallback.style.display = 'block';
+                fallback.innerHTML = `
+                    <p><strong>Lodgement chart unavailable.</strong> ${err.message}</p>
+                    <p>
+                        Re-run the pipeline to regenerate <code>data/outputs/one_stop_output.json</code> (the lodgements-by-year table is embedded in the JSON),
+                        or open the latest static chart:
+                        <a href="data/outputs/figures/epc_lodgement_year_band_stacked_counts.png" target="_blank" rel="noopener">PNG</a>
+                        (or <a href="HeatStreet/data/outputs/figures/epc_lodgement_year_band_stacked_counts.png" target="_blank" rel="noopener">alt path</a>).
+                    </p>
+                `;
+            }
+        }
+
+        function buildSubsidyDataFromOneStop(oneStop) {
+            const tables = oneStop?.sections?.section_9?.tables || [];
+            const table = tables.find(t => (t.caption || '').toLowerCase().includes('subsidy sensitivity'));
+            const rows = table?.data || [];
+            if (!rows.length) return { byScenario: {}, scenarios: [] };
+
+            const toNum = (value) => {
+                const n = Number(value);
+                return Number.isFinite(n) ? n : null;
+            };
+
+            const clean = rows
+                .map(r => ({
+                    scenario: String(r.scenario ?? r.scenario_id ?? 'unknown'),
+                    scenarioLabel: String(r.scenario_label ?? r.scenarioLabel ?? r.scenario ?? r.scenario_id ?? 'Scenario'),
+                    subsidyPct: toNum(r.subsidy_percentage ?? r.subsidy_pct ?? r.subsidy_level_pct),
+                    uptakeRate: toNum(r.estimated_uptake_rate ?? r.uptake_rate ?? r.uptake_rate_pct),
+                    paybackYears: toNum(r.payback_years ?? r.payback ?? r.payback_period_years),
+                    propertiesUpgraded: toNum(r.properties_upgraded ?? r.upgraded_properties),
+                    publicSpend: toNum(r.public_expenditure_total ?? r.total_public_expenditure),
+                    carbonCost: toNum(r.carbon_abatement_cost_per_tonne ?? r.carbon_abatement_cost),
+                    netCostPerProperty: toNum(
+                        r.capital_cost_per_property_after_subsidy
+                        ?? r.capital_cost_per_property
+                        ?? r.cost_per_property_after_subsidy
+                    )
+                }))
+                .filter(r => Number.isFinite(r.subsidyPct));
+
+            const byScenario = {};
+            clean.forEach(row => {
+                if (!byScenario[row.scenario]) {
+                    byScenario[row.scenario] = { label: row.scenarioLabel, rows: [] };
+                }
+                byScenario[row.scenario].rows.push(row);
+            });
+
+            Object.values(byScenario).forEach(s => s.rows.sort((a, b) => a.subsidyPct - b.subsidyPct));
+
+            const preferredOrder = ['heat_pump', 'hybrid', 'heat_network'];
+            const scenarioIds = Object.keys(byScenario);
+            const ordered = [
+                ...preferredOrder.filter(id => scenarioIds.includes(id)),
+                ...scenarioIds.filter(id => !preferredOrder.includes(id)).sort()
+            ];
+
+            const scenarios = ordered.map(id => ({ id, label: byScenario[id].label || id }));
+            return { byScenario, scenarios };
+        }
+
+        function destroySubsidyCharts() {
+            const keys = [
+                'subsidyNetCostChart',
+                'subsidyPaybackChart',
+                'subsidyUptakeChart',
+                'subsidyPropertiesChart',
+                'subsidySpendChart',
+                'subsidyCarbonChart'
+            ];
+            keys.forEach(k => {
+                if (STATE.charts[k]) {
+                    try { STATE.charts[k].destroy(); } catch (_) {}
+                    delete STATE.charts[k];
+                }
+            });
+        }
+
+        function renderSubsidyChartsForScenario(scenarioId) {
+            const scenario = STATE.subsidy.byScenario?.[scenarioId];
+            if (!scenario || !Array.isArray(scenario.rows) || !scenario.rows.length) return;
+
+            destroySubsidyCharts();
+
+            const xs = scenario.rows.map(r => r.subsidyPct);
+            const netCost = scenario.rows.map(r => r.netCostPerProperty);
+            const payback = scenario.rows.map(r => r.paybackYears);
+            const uptakePct = scenario.rows.map(r => Number.isFinite(r.uptakeRate) ? r.uptakeRate * 100 : null);
+            const upgraded = scenario.rows.map(r => r.propertiesUpgraded);
+            const spendM = scenario.rows.map(r => Number.isFinite(r.publicSpend) ? r.publicSpend / 1e6 : null);
+            const carbonCost = scenario.rows.map(r => r.carbonCost);
+
+            const lineBase = {
+                type: 'line',
+                data: {
+                    labels: xs,
+                    datasets: [{
+                        label: scenario.label || scenarioId,
+                        data: [],
+                        borderColor: '#3b82f6',
+                        backgroundColor: 'rgba(59, 130, 246, 0.15)',
+                        tension: 0.25,
+                        pointRadius: 3,
+                        pointHoverRadius: 5
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: tooltipStyle
+                    },
+                    scales: {
+                        x: {
+                            grid: { display: false },
+                            title: { display: true, text: 'Subsidy level (%)', color: '#94a3b8' }
+                        },
+                        y: {
+                            grid: { color: 'rgba(148, 163, 184, 0.1)' }
+                        }
+                    }
+                }
+            };
+
+            // Net cost
+            {
+                const cfg = JSON.parse(JSON.stringify(lineBase));
+                cfg.data.datasets[0].data = netCost;
+                cfg.options.plugins.tooltip = {
+                    ...tooltipStyle,
+                    callbacks: { label: ctx => `Cost/property (after): ${formatGbp(ctx.raw, 0)}` }
+                };
+                cfg.options.scales.y.ticks = { callback: v => formatGbp(v, 0) };
+                STATE.charts.subsidyNetCostChart = new Chart(document.getElementById('subsidyNetCostChart'), cfg);
+            }
+
+            // Payback
+            {
+                const cfg = JSON.parse(JSON.stringify(lineBase));
+                cfg.data.datasets[0].data = payback;
+                cfg.data.datasets[0].borderColor = '#f97316';
+                cfg.data.datasets[0].backgroundColor = 'rgba(249, 115, 22, 0.15)';
+                cfg.options.plugins.tooltip = {
+                    ...tooltipStyle,
+                    callbacks: { label: ctx => `Payback: ${formatYears(ctx.raw)}` }
+                };
+                cfg.options.scales.y.ticks = { callback: v => Math.round(v).toLocaleString() };
+                cfg.options.scales.y.title = { display: true, text: 'Years', color: '#94a3b8' };
+                STATE.charts.subsidyPaybackChart = new Chart(document.getElementById('subsidyPaybackChart'), cfg);
+            }
+
+            // Uptake
+            {
+                const cfg = JSON.parse(JSON.stringify(lineBase));
+                cfg.data.datasets[0].data = uptakePct;
+                cfg.data.datasets[0].borderColor = '#22c55e';
+                cfg.data.datasets[0].backgroundColor = 'rgba(34, 197, 94, 0.15)';
+                cfg.options.plugins.tooltip = {
+                    ...tooltipStyle,
+                    callbacks: { label: ctx => `Uptake: ${formatPercent(ctx.raw, 1)}` }
+                };
+                cfg.options.scales.y.min = 0;
+                cfg.options.scales.y.max = 100;
+                cfg.options.scales.y.ticks = { callback: v => `${Math.round(v)}%` };
+                cfg.options.scales.y.title = { display: true, text: 'Uptake (%)', color: '#94a3b8' };
+                STATE.charts.subsidyUptakeChart = new Chart(document.getElementById('subsidyUptakeChart'), cfg);
+            }
+
+            // Properties upgraded
+            {
+                const cfg = JSON.parse(JSON.stringify(lineBase));
+                cfg.data.datasets[0].data = upgraded;
+                cfg.data.datasets[0].borderColor = '#a855f7';
+                cfg.data.datasets[0].backgroundColor = 'rgba(168, 85, 247, 0.15)';
+                cfg.options.plugins.tooltip = {
+                    ...tooltipStyle,
+                    callbacks: { label: ctx => `Upgraded: ${formatInt(ctx.raw)}` }
+                };
+                cfg.options.scales.y.ticks = { callback: v => Math.round(v).toLocaleString() };
+                cfg.options.scales.y.title = { display: true, text: 'Properties (count)', color: '#94a3b8' };
+                STATE.charts.subsidyPropertiesChart = new Chart(document.getElementById('subsidyPropertiesChart'), cfg);
+            }
+
+            // Public spend
+            {
+                const cfg = JSON.parse(JSON.stringify(lineBase));
+                cfg.data.datasets[0].data = spendM;
+                cfg.data.datasets[0].borderColor = '#eab308';
+                cfg.data.datasets[0].backgroundColor = 'rgba(234, 179, 8, 0.18)';
+                cfg.options.plugins.tooltip = {
+                    ...tooltipStyle,
+                    callbacks: {
+                        label: ctx => {
+                            const raw = ctx.raw;
+                            if (raw === null || raw === undefined || Number.isNaN(raw)) return 'Public spend: â€”';
+                            return `Public spend: £${Number(raw).toFixed(0)}m`;
+                        }
+                    }
+                };
+                cfg.options.scales.y.ticks = { callback: v => `£${Math.round(v).toLocaleString()}m` };
+                cfg.options.scales.y.title = { display: true, text: '£m', color: '#94a3b8' };
+                STATE.charts.subsidySpendChart = new Chart(document.getElementById('subsidySpendChart'), cfg);
+            }
+
+            // Carbon cost
+            {
+                const cfg = JSON.parse(JSON.stringify(lineBase));
+                cfg.data.datasets[0].data = carbonCost;
+                cfg.data.datasets[0].borderColor = '#14b8a6';
+                cfg.data.datasets[0].backgroundColor = 'rgba(20, 184, 166, 0.15)';
+                cfg.options.plugins.tooltip = {
+                    ...tooltipStyle,
+                    callbacks: { label: ctx => `£/tCO₂: ${formatGbp(ctx.raw, 0)}` }
+                };
+                cfg.options.scales.y.ticks = { callback: v => formatGbp(v, 0) };
+                cfg.options.scales.y.title = { display: true, text: '£/tCO₂', color: '#94a3b8' };
+                STATE.charts.subsidyCarbonChart = new Chart(document.getElementById('subsidyCarbonChart'), cfg);
+            }
+
+            // Table
+            try {
+                const table = document.getElementById('subsidyTable');
+                const body = table?.querySelector('tbody');
+                if (!body) return;
+
+                const rowsHtml = scenario.rows.map(r => {
+                    const paybackLabel = Number.isFinite(r.paybackYears) ? formatYears(r.paybackYears) : 'â€”';
+                    const uptakeLabel = Number.isFinite(r.uptakeRate) ? formatPercent(r.uptakeRate * 100, 1) : 'â€”';
+                    const spendLabel = Number.isFinite(r.publicSpend) ? formatGbpCompact(r.publicSpend) : 'â€”';
+                    const carbonLabel = Number.isFinite(r.carbonCost) ? formatGbp(r.carbonCost, 0) : 'â€”';
+                    return `
+                        <tr>
+                            <td>${Math.round(r.subsidyPct)}%</td>
+                            <td>${formatGbp(r.netCostPerProperty, 0)}</td>
+                            <td>${paybackLabel}</td>
+                            <td>${uptakeLabel}</td>
+                            <td>${formatInt(r.propertiesUpgraded)}</td>
+                            <td>${spendLabel}</td>
+                            <td>${carbonLabel}</td>
+                        </tr>
+                    `;
+                }).join('');
+
+                body.innerHTML = rowsHtml || '<tr><td colspan="7" style="color: var(--text-muted);">No subsidy rows available.</td></tr>';
+            } catch (_) {}
+        }
+
+        function selectSubsidyScenario(scenarioId) {
+            STATE.subsidy.selectedScenario = scenarioId;
+            document.querySelectorAll('.subsidy-btn').forEach(b => b.classList.toggle('active', b.dataset.subsidyScenario === scenarioId));
+            renderSubsidyChartsForScenario(scenarioId);
+        }
+
+        function renderSubsidyTab(oneStop) {
+            const buttons = document.getElementById('subsidyScenarioButtons');
+            const fallback = document.getElementById('subsidyFallback');
+            if (!buttons || !fallback) return;
+
+            const { byScenario, scenarios } = buildSubsidyDataFromOneStop(oneStop);
+            STATE.subsidy.byScenario = byScenario;
+            STATE.subsidy.scenarioOrder = scenarios.map(s => s.id);
+
+            if (!scenarios.length) {
+                buttons.innerHTML = '';
+                fallback.style.display = 'block';
+                fallback.innerHTML = `
+                    <p><strong>Subsidy sensitivity data unavailable.</strong> The one-stop output did not include Section 9 results.</p>
+                    <p>Re-run the pipeline to regenerate <code>data/outputs/one_stop_output.json</code> with subsidy sensitivity enabled.</p>
+                `;
+                return;
+            }
+
+            fallback.style.display = 'none';
+            fallback.innerHTML = '';
+
+            buttons.innerHTML = scenarios.map((s, idx) => `
+                <button class="subsidy-btn ${idx === 0 ? 'active' : ''}" type="button" data-subsidy-scenario="${s.id}">
+                    ${s.label}
+                </button>
+            `).join('');
+
+            buttons.querySelectorAll('.subsidy-btn').forEach(btn => {
+                btn.addEventListener('click', () => selectSubsidyScenario(btn.dataset.subsidyScenario));
+            });
+
+            const preferred = STATE.subsidy.selectedScenario && byScenario[STATE.subsidy.selectedScenario]
+                ? STATE.subsidy.selectedScenario
+                : (byScenario.heat_pump ? 'heat_pump' : scenarios[0].id);
+            selectSubsidyScenario(preferred);
+        }
+
         function buildScenarioDataFromOneStop(oneStop) {
             const rows = oneStop?.sections?.section_6?.tables?.[0]?.data || [];
             const shortLabels = {
@@ -1709,6 +2569,9 @@
                 readinessCounts
             });
 
+            renderTippingPointChart(oneStop);
+            renderLodgementYearBandChart(oneStop);
+            renderSubsidyTab(oneStop);
             selectScenario('hybrid');
         }
 
@@ -1719,6 +2582,11 @@
                 document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
                 this.classList.add('active');
                 document.getElementById(this.dataset.tab).classList.add('active');
+
+                // Charts created in hidden tabs can render at 0px; resize after the tab becomes visible.
+                requestAnimationFrame(() => {
+                    Object.values(STATE.charts).forEach(ch => { try { ch.resize(); } catch (_) {} });
+                });
             });
         });
 

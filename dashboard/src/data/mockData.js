@@ -253,11 +253,11 @@ export const heatNetworkTiers = [
     recommendation: 'District Heating (existing network connection)'
   },
   {
-    tier: 'Tier 2: Within planned HNZ',
+    tier: 'Tier 2: Near planned network (proxy)',
     properties: 0,  // May be 0 if no planned heat network zones in dataset
     percentage: 0.0,
     recommendation: 'District Heating (planned network)',
-    note: 'Zero properties indicates no planned heat network zone data available'
+    note: 'Planned network indicator uses a polygon zone layer if available; otherwise a proximity buffer around HNPD planned scheme points'
   },
   {
     tier: 'Tier 3: High heat density',

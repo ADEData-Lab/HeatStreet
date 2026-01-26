@@ -655,7 +655,7 @@ If SAP 40-55 (poor):
 | Tier | Name | Criteria | Recommended Pathway |
 |------|------|----------|---------------------|
 | 1 | Adjacent to existing network | Within 250m of existing DH network | District heating connection |
-| 2 | Within planned HNZ | Inside Heat Network Zone boundary | District heating (planned) |
+| 2 | Near planned network (proxy) | Planned-network indicator: within configured buffer of HNPD planned scheme point (or within zone polygon if available) | District heating (planned) |
 | 3 | High heat density | ≥15 GWh/km² | DH network extension viable |
 | 4 | Medium heat density | 5-15 GWh/km² | Heat pump preferred |
 | 5 | Low heat density | <5 GWh/km² | Heat pump only viable option |

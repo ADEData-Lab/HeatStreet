@@ -399,7 +399,7 @@ scenarios:
 - `data/outputs/figures/epc_band_distribution.png` - Current EPC ratings
 - `data/outputs/figures/sap_score_distribution.png` - SAP score histogram
 - `data/outputs/figures/scenario_comparison.png` - Scenario comparison charts
-- `data/outputs/figures/subsidy_sensitivity.png` - Subsidy impact analysis
+- `data/outputs/figures/subsidy_sensitivity.png` - Subsidy sensitivity (static chart; dashboard provides the full interactive view)
 - `data/outputs/figures/heat_network_tiers.png` - Tier distribution
 - `data/outputs/figures/hn_vs_hp_comparison.png` - Mean capex/bill/CO₂ savings for HP vs HN pathways
 - `data/outputs/maps/heat_network_tiers.html` - Interactive map
@@ -442,7 +442,7 @@ Properties are classified into five tiers:
 | Tier | Definition (screening) | Main evidence input | Recommended Pathway |
 |------|------------|---------------------|
 | **Tier 1** | Within 250m of existing heat network | HNPD (Operational / Under Construction) or London Heat Map fallback | District heating connection |
-| **Tier 2** | Within a planned heat network zone / “potential network” geometry | London Heat Map GIS zone layer (if available) | District heating (planned) |
+| **Tier 2** | Near planned heat network (proxy) | HNPD planned schemes (planning granted) buffered by the configured distance; polygon zone layer used if available | District heating (planned) |
 | **Tier 3** | High local heat density (default ≥20 GWh/km²) | EPC-derived heat density (postcode centroids) | District heating (extension potentially viable) |
 | **Tier 4** | Moderate density (default 5–20 GWh/km²) | EPC-derived heat density | Heat pump (network marginal) |
 | **Tier 5** | Low density (default <5 GWh/km²) | EPC-derived heat density | Heat pump (network not viable) |
@@ -589,13 +589,19 @@ Aggregate to stock level:
 
 ### Subsidy Sensitivity
 
-Model subsidy levels: 0%, 25%, 50%, 75%, 100%
+Model subsidy levels (default): 0%, 25%, 50%, 75%, 100%
 
-For each level:
-- Adjusted payback period
-- Estimated uptake rate (based on payback thresholds)
-- Public expenditure required
-- Carbon abatement cost (£/tCO₂)
+Run for multiple pathways (e.g., `heat_pump`, `hybrid`, `heat_network`).
+
+For each level and pathway:
+- Applies the subsidy to modeled capital cost
+- Recalculates simple payback (capex / annual bill savings)
+- Maps payback to an illustrative uptake rate using a smooth logistic adoption curve (rather than step-change thresholds)
+- Estimates upgraded properties, total public expenditure, and implied public cost per tonne CO2 abated (over the analysis horizon)
+
+Primary outputs:
+- `data/outputs/subsidy_sensitivity_analysis.csv` (may be archived to `data/outputs/bin/run_<timestamp>/` in one-stop-only mode)
+- Embedded results in `data/outputs/one_stop_output.json` (Section 9), visualised in the "Subsidy Sensitivity" tab of `data/outputs/one_stop_dashboard.html`
 
 ## Deliverables Mapping
 
@@ -614,7 +620,7 @@ This project delivers all contract requirements:
 | Costed decarbonization pathways | `scenario_modeling_results.txt` |
 | District heating analysis | `pathway_suitability_by_tier.csv` |
 | Heat pump pathway analysis | `scenario_modeling_results.txt` |
-| Subsidy impact analysis | `subsidy_sensitivity.png` |
+| Subsidy sensitivity (multi-pathway) | `subsidy_sensitivity_analysis.csv` (and Section 9 in `one_stop_output.json`) |
 | Policy implications | `executive_summary.txt` |
 
 ## Timeline & Milestones
