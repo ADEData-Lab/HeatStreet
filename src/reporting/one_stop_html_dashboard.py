@@ -53,12 +53,54 @@ def build_one_stop_html_dashboard(
         return None
 
     try:
-        html_path.write_text(_render_html(data), encoding="utf-8")
+        html = _render_heat_street_dashboard_html(data)
+        if html is None:
+            logger.warning("Falling back to minimal one-stop dashboard HTML (Heat Street template not found).")
+            html = _render_html(data)
+        html_path.write_text(html, encoding="utf-8")
         logger.info(f"Wrote one-stop HTML dashboard: {html_path}")
         return html_path
     except Exception as exc:
         logger.warning(f"Could not write one-stop HTML dashboard {html_path}: {exc}")
         return None
+
+
+def _render_heat_street_dashboard_html(data: Dict[str, Any]) -> Optional[str]:
+    """
+    Render the richer Heat Street dashboard template, embedding the one-stop JSON.
+
+    This produces a single HTML file that can be opened directly (file://) without
+    requiring the JSON to be fetched separately.
+    """
+    project_root = Path(__file__).resolve().parent.parent.parent
+    template_path = project_root / "heat_street_dashboard.html"
+    if not template_path.exists():
+        logger.warning(f"Heat Street dashboard template not found: {template_path}")
+        return None
+
+    template = template_path.read_text(encoding="utf-8")
+
+    # Embed the JSON so the HTML works when opened directly via file://
+    json_text = json.dumps(data, ensure_ascii=False)
+    # Prevent accidental </script> termination inside embedded JSON.
+    json_text = json_text.replace("</", "<\\/")
+
+    embed = (
+        "\n    <script>\n"
+        f"        window.__HEATSTREET_ONE_STOP = {json_text};\n"
+        "    </script>\n"
+    )
+
+    # Insert just before the dashboard's inline <script> block.
+    marker = "\n    <script>"
+    idx = template.rfind(marker)
+    if idx == -1:
+        idx = template.rfind("<script>")
+    if idx == -1:
+        logger.warning("Could not locate inline <script> tag in Heat Street dashboard template.")
+        return None
+
+    return template[:idx] + embed + template[idx:]
 
 
 def _render_html(data: Dict[str, Any]) -> str:

@@ -1664,8 +1664,18 @@ class ScenarioModeler:
 
         sensitivity_results = {}
 
-        # Model base scenario once to get baseline metrics
-        base_results = self.model_scenario(df, scenario_name, scenario_config)
+        # Model base scenario once to get baseline metrics.
+        #
+        # If `model_all_scenarios()` has already been run, reuse the cached results
+        # to avoid re-processing the full property dataset.
+        base_results = None
+        if isinstance(getattr(self, "results", None), dict):
+            cached = self.results.get(scenario_name)
+            if isinstance(cached, dict):
+                base_results = cached
+
+        if base_results is None:
+            base_results = self.model_scenario(df, scenario_name, scenario_config)
         capital_cost_total_base = base_results['capital_cost_total']
         capital_cost_per_property_base = base_results['capital_cost_per_property']
         capital_cost_total_uplifted = capital_cost_total_base * uplift_multiplier
@@ -1723,6 +1733,39 @@ class ScenarioModeler:
 
         return sensitivity_results
 
+    def model_subsidy_sensitivity_multi(
+        self,
+        df: pd.DataFrame,
+        scenario_names: Optional[List[str]] = None,
+    ) -> Dict[str, Dict]:
+        """
+        Model subsidy sensitivity for multiple scenarios and store results.
+
+        This writes a single consolidated CSV via `save_subsidy_sensitivity_results()`
+        so downstream reporting (including the one-stop JSON and HTML dashboard)
+        can visualise multiple pathways side-by-side.
+        """
+        if scenario_names is None:
+            scenario_names = ["heat_pump"]
+
+        results_by_scenario: Dict[str, Dict] = {}
+        for scenario_name in scenario_names:
+            if scenario_name not in self.scenarios:
+                logger.warning(f"Skipping subsidy sensitivity: unknown scenario '{scenario_name}'")
+                continue
+            results_by_scenario[scenario_name] = self.model_subsidy_sensitivity(df, scenario_name)
+
+        self.subsidy_sensitivity_results_by_scenario = results_by_scenario
+
+        # Backwards-compatible single-scenario attributes (used by legacy report generators):
+        # default to heat_pump when present, otherwise the first scenario in the set.
+        if results_by_scenario:
+            preferred = "heat_pump" if "heat_pump" in results_by_scenario else next(iter(results_by_scenario.keys()))
+            self.subsidy_sensitivity_results = results_by_scenario.get(preferred, {})
+            self.subsidy_sensitivity_scenario = preferred
+
+        return results_by_scenario
+
     def save_subsidy_sensitivity_results(
         self,
         output_path: Optional[Path] = None
@@ -1739,7 +1782,10 @@ class ScenarioModeler:
         Returns:
             Path to saved CSV file, or None if no results available
         """
-        if not hasattr(self, 'subsidy_sensitivity_results') or not self.subsidy_sensitivity_results:
+        results_by_scenario = getattr(self, "subsidy_sensitivity_results_by_scenario", None)
+        single_results = getattr(self, "subsidy_sensitivity_results", None)
+
+        if not results_by_scenario and not single_results:
             logger.warning("No subsidy sensitivity results to save. Run model_subsidy_sensitivity() first.")
             return None
 
@@ -1747,25 +1793,63 @@ class ScenarioModeler:
             output_path = DATA_OUTPUTS_DIR / "subsidy_sensitivity_analysis.csv"
 
         rows = []
-        for level_key, level_data in self.subsidy_sensitivity_results.items():
-            row = {
-                'scenario': getattr(self, 'subsidy_sensitivity_scenario', 'heat_pump'),
-                'analysis_type': 'Heat Pump Subsidy Sensitivity',
-                **level_data
-            }
-            rows.append(row)
+
+        def _analysis_type_for(scenario_id: str) -> str:
+            scenario_label = None
+            try:
+                scenario_label = self.results.get(scenario_id, {}).get("scenario_label") if isinstance(self.results, dict) else None
+            except Exception:
+                scenario_label = None
+            scenario_label = scenario_label or self._get_scenario_label(scenario_id)
+            return f"{scenario_label} Subsidy Sensitivity"
+
+        if results_by_scenario:
+            for scenario_id, scenario_results in results_by_scenario.items():
+                if not isinstance(scenario_results, dict) or not scenario_results:
+                    continue
+                scenario_label = None
+                try:
+                    scenario_label = self.results.get(scenario_id, {}).get("scenario_label") if isinstance(self.results, dict) else None
+                except Exception:
+                    scenario_label = None
+                scenario_label = scenario_label or self._get_scenario_label(scenario_id)
+
+                for _, level_data in scenario_results.items():
+                    row = {
+                        "scenario": scenario_id,
+                        "scenario_label": scenario_label,
+                        "analysis_type": _analysis_type_for(scenario_id),
+                        **level_data,
+                    }
+                    rows.append(row)
+        else:
+            scenario_id = getattr(self, "subsidy_sensitivity_scenario", "heat_pump")
+            scenario_label = None
+            try:
+                scenario_label = self.results.get(scenario_id, {}).get("scenario_label") if isinstance(self.results, dict) else None
+            except Exception:
+                scenario_label = None
+            scenario_label = scenario_label or self._get_scenario_label(scenario_id)
+
+            for _, level_data in single_results.items():
+                row = {
+                    "scenario": scenario_id,
+                    "scenario_label": scenario_label,
+                    "analysis_type": _analysis_type_for(scenario_id),
+                    **level_data,
+                }
+                rows.append(row)
 
         subsidy_df = pd.DataFrame(rows)
 
-        # Sort by subsidy percentage
-        subsidy_df = subsidy_df.sort_values('subsidy_percentage')
+        # Sort for stable reporting
+        sort_cols = [c for c in ["scenario", "subsidy_percentage"] if c in subsidy_df.columns]
+        if sort_cols:
+            subsidy_df = subsidy_df.sort_values(sort_cols)
 
         subsidy_df.to_csv(output_path, index=False)
         logger.info(f"Subsidy sensitivity results saved to: {output_path}")
-        logger.info(
-            f"  Analysis covers {len(rows)} subsidy levels for "
-            f"'{getattr(self, 'subsidy_sensitivity_scenario', 'heat_pump')}' scenario"
-        )
+        logger.info(f"  Wrote {len(rows)} rows across {len(set(subsidy_df.get('scenario', [])))} scenario(s)")
 
         return output_path
 

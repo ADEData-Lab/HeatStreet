@@ -263,6 +263,24 @@ Because policy rarely delivers 100% uptake instantly, the pipeline includes sens
 - Subsidy/uptake sensitivity (how uptake might respond to subsidy levels)
 - Heat network penetration and price sensitivity (how outcomes change under different assumed HN shares and energy price conditions)
 
+#### Subsidy sensitivity (Section 9)
+**Objective:** explore how capital subsidies can change payback, uptake, and public expenditure under consistent assumptions.
+
+The subsidy sensitivity module is run **per pathway** (e.g., `heat_pump`, `hybrid`, `heat_network`) and iterates over a configured set of subsidy levels
+(default 0%, 25%, 50%, 75%, 100% of modeled capital cost). For each pathway and subsidy level, the pipeline:
+1) Applies the subsidy to the pathway's modeled capital cost.
+2) Recalculates simple payback using the pathway's modeled annual bill savings.
+3) Maps payback to an *illustrative uptake rate* using a smooth logistic adoption curve (a floor captures early adopters; a ceiling captures practical saturation).
+4) Converts uptake into upgraded properties and public expenditure, and computes an implied public cost per tonne of CO2 abated over the analysis horizon.
+
+Interpretation guidance:
+- This is a sensitivity tool, not a forecast. It does not model delivery capacity, consumer confidence, finance availability, planning constraints, or installer supply.
+- Uptake is driven by a single payback value per pathway in this simplified model, so it should be treated as a policy-facing proxy for relative responsiveness.
+- Results are best used to compare pathways and to identify where subsidy changes materially affect outcomes (e.g., diminishing returns at higher subsidy levels).
+
+Outputs:
+- A consolidated table is exported to `data/outputs/subsidy_sensitivity_analysis.csv` and embedded in the one-stop JSON (Section 9) for the HTML dashboard.
+
 ### Phase 4.3 — Retrofit readiness analysis (heat pump readiness tiers)
 **Objective:** classify homes into **readiness tiers** and identify typical prerequisites and costs to reach “heat‑pump ready”.
 

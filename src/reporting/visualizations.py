@@ -175,6 +175,7 @@ class ReportGenerator:
             .unstack(fill_value=0)
             .sort_index()
         )
+        wide.index.name = "year"
 
         cols = [c for c in ["A/B", "C", "D", "E", "F", "G", "Unknown"] if c in wide.columns]
         label_cols = [c for c in ["A/B", "C", "D"] if c in cols]

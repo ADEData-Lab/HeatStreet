@@ -1,6 +1,15 @@
 # Changelog
 
-## [Unreleased] - 2026-01-15
+## [Unreleased] - 2026-01-25
+
+### Multi-pathway subsidy sensitivity + one-stop dashboard tab
+
+- **Extended** subsidy sensitivity to run for multiple scenarios (`heat_pump`, `hybrid`, `heat_network`) and export a consolidated table.
+- **Fixed** one-stop Section 9 so subsidy results are embedded cleanly (no duplicated/unknown% datapoints) and include a full results table.
+- **Added** a "Subsidy Sensitivity" tab to the one-stop HTML dashboard template (`heat_street_dashboard.html`), driven only from `one_stop_output.json`.
+- **Separated** the legacy simple-GBP subsidy analysis output to avoid overwriting the canonical `subsidy_sensitivity_analysis.csv`.
+
+### Property Count Reconciliation Audit Fix
 
 ### Property Count Reconciliation Audit Fix
 

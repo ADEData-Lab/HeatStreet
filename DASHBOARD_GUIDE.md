@@ -1,8 +1,44 @@
 # Heat Street Dashboard Guide
 
-## 📊 What Has Been Created
+## Recommended: one-stop HTML dashboard
 
-A comprehensive React dashboard that addresses **all 12 client requirements** from CLIENT_QUESTIONS_VERIFICATION.md. The dashboard now ingests results directly from the latest `run_analysis.py` run via a generated `dashboard-data.json` file.
+Heat Street now ships a lightweight, self-contained HTML dashboard generated directly from the one-stop output:
+
+- `data/outputs/one_stop_output.json` â€” authoritative consolidated output for reporting and QA
+- `data/outputs/one_stop_dashboard.html` â€” opens in a browser and embeds the one-stop JSON (no extra data files required)
+
+### Generate the dashboard
+
+Run the pipeline (Conda recommended if you need the spatial module):
+
+```bash
+python run_analysis.py
+```
+
+### View the dashboard
+
+- Open `data/outputs/one_stop_dashboard.html` (recommended)
+- If you are iterating on the template `heat_street_dashboard.html`, open it and use the **Load JSON** button to select
+  `data/outputs/one_stop_output.json`
+
+### Dashboard tabs (one-stop)
+
+- Overview
+- Housing Stock
+- Retrofit Readiness
+- Scenario Comparison
+- Subsidy Sensitivity
+
+Notes:
+- The one-stop dashboard intentionally avoids build tooling (no React/Vite) and uses Chart.js in-browser.
+- All dashboard charts read from `one_stop_output.json` (embedded into `one_stop_dashboard.html` at generation time).
+
+---
+
+## 📊 Legacy: React dashboard (deprecated)
+
+A legacy React dashboard exists in `dashboard/`. It is not required for the one-stop report outputs, and it is no longer the
+recommended way to review results for this repo.
 
 ### Key Directories
 

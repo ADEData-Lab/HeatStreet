@@ -110,15 +110,17 @@ The interactive CLI guides you through:
 - Payback period (years)
 - New EPC bands
 
-**Performs subsidy sensitivity**:
-- Tests 0%, 25%, 50%, 75%, 100% subsidy levels
-- Estimates uptake rates
-- Calculates carbon abatement costs (£/tCO₂)
+**Performs subsidy sensitivity (multi-pathway)**:
+- Tests subsidy levels (default: 0%, 25%, 50%, 75%, 100%) for multiple pathways (e.g., `heat_pump`, `hybrid`, `heat_network`)
+- Recalculates payback and maps payback to an illustrative uptake rate using a smooth logistic adoption curve (rather than step-change thresholds)
+- Calculates upgraded properties, total public expenditure, and implied public cost per tonne CO2 abated (over the analysis horizon)
 
 **Outputs**:
 - Console comparison tables
 - `scenario_comparison.png` (chart)
-- `subsidy_sensitivity.png` (chart)
+- `subsidy_sensitivity_analysis.csv` (table; may be archived to `data/outputs/bin/run_<timestamp>/` in one-stop-only mode)
+- Section 9 in `one_stop_output.json` and the "Subsidy Sensitivity" tab in `one_stop_dashboard.html`
+- `subsidy_sensitivity.png` (optional static chart)
 - `scenario_modeling_results.txt`
 
 ### Phase 4: Spatial Analysis (Conda method only)
