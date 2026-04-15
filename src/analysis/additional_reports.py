@@ -11,7 +11,7 @@ Provides specialized reports and extracts for client presentations:
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 from loguru import logger
 from datetime import datetime
 
@@ -197,6 +197,312 @@ class AdditionalReports:
             logger.info(f"Saved borough breakdown to {output_path}")
 
         return borough_breakdown
+
+    @staticmethod
+    def _first_available_column(df: pd.DataFrame, candidates: List[str]) -> str:
+        """Return the first available column from a list of candidates."""
+        for column in candidates:
+            if column in df.columns:
+                return column
+        raise KeyError(f"None of the required columns were found: {candidates}")
+
+    @staticmethod
+    def _minmax_normalize(series: pd.Series, invert: bool = False) -> pd.Series:
+        """Min-max normalize a numeric series to [0, 1]."""
+        numeric = pd.to_numeric(series, errors='coerce')
+        min_value = numeric.min()
+        max_value = numeric.max()
+
+        if pd.isna(min_value) or pd.isna(max_value) or np.isclose(max_value, min_value):
+            normalized = pd.Series(0.0, index=series.index)
+        else:
+            normalized = (numeric - min_value) / (max_value - min_value)
+
+        if invert:
+            normalized = 1 - normalized
+
+        return normalized.fillna(0.0)
+
+    def generate_borough_priority_ranking(
+        self,
+        df: pd.DataFrame,
+        output_path: Optional[Path] = None,
+        summary_path: Optional[Path] = None,
+        fabric_cost_per_property: float = 11207.0,
+        source_label: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """
+        Generate a borough-level priority ranking for report use.
+
+        Args:
+            df: Corrected validated dataset.
+            output_path: Optional CSV output path.
+            summary_path: Optional text summary output path.
+            fabric_cost_per_property: Mean fabric cost assumption for top-5 estimate.
+            source_label: Optional label describing the source dataset.
+
+        Returns:
+            Borough ranking DataFrame.
+        """
+        logger.info("Generating borough priority ranking...")
+
+        borough_col = self._first_available_column(
+            df,
+            ['BOROUGH', 'LOCAL_AUTHORITY_LABEL', 'LOCAL_AUTHORITY']
+        )
+        epc_col = self._first_available_column(df, ['CURRENT_ENERGY_EFFICIENCY'])
+        energy_col = self._first_available_column(
+            df,
+            ['energy_kwh_per_m2_year', 'ENERGY_CONSUMPTION_CURRENT']
+        )
+        id_col = self._first_available_column(df, ['LMK_KEY'])
+
+        borough_df = df.copy()
+        borough_df[borough_col] = borough_df[borough_col].fillna('Unknown').astype(str).str.strip()
+
+        grouped = borough_df.groupby(borough_col, dropna=False).agg({
+            id_col: 'count',
+            epc_col: 'mean',
+            energy_col: 'mean',
+        }).rename(columns={
+            id_col: 'property_count',
+            epc_col: 'mean_epc_score',
+            energy_col: 'mean_energy_intensity_kwh_m2_year',
+        })
+
+        grouped['property_count_norm'] = self._minmax_normalize(grouped['property_count'])
+        grouped['epc_priority_norm'] = self._minmax_normalize(grouped['mean_epc_score'], invert=True)
+        grouped['energy_intensity_norm'] = self._minmax_normalize(grouped['mean_energy_intensity_kwh_m2_year'])
+        grouped['composite_priority_score'] = grouped[
+            ['property_count_norm', 'epc_priority_norm', 'energy_intensity_norm']
+        ].mean(axis=1)
+
+        borough_ranking = (
+            grouped.reset_index()
+            .rename(columns={borough_col: 'borough'})
+            .sort_values(
+                ['composite_priority_score', 'property_count', 'borough'],
+                ascending=[False, False, True]
+            )
+            .reset_index(drop=True)
+        )
+        borough_ranking['rank'] = np.arange(1, len(borough_ranking) + 1)
+        borough_ranking = borough_ranking[
+            [
+                'borough',
+                'property_count',
+                'mean_epc_score',
+                'mean_energy_intensity_kwh_m2_year',
+                'composite_priority_score',
+                'rank',
+            ]
+        ]
+        borough_ranking['mean_epc_score'] = borough_ranking['mean_epc_score'].round(2)
+        borough_ranking['mean_energy_intensity_kwh_m2_year'] = borough_ranking[
+            'mean_energy_intensity_kwh_m2_year'
+        ].round(2)
+        borough_ranking['composite_priority_score'] = borough_ranking[
+            'composite_priority_score'
+        ].round(6)
+
+        if output_path:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            borough_ranking.to_csv(output_path, index=False)
+            logger.info(f"Saved borough priority ranking to {output_path}")
+
+        if summary_path:
+            summary_path.parent.mkdir(parents=True, exist_ok=True)
+            top_ten = borough_ranking.head(10)
+            top_five = borough_ranking.head(5)
+            top_five_count = int(top_five['property_count'].sum())
+            top_five_investment = top_five_count * fabric_cost_per_property
+            lines = [
+                "=" * 80,
+                "BOROUGH PRIORITY RANKING SUMMARY",
+                "=" * 80,
+                f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                f"Source dataset: {source_label or 'corrected validated pipeline dataset'}",
+                "",
+                "TOP 10 BOROUGHS",
+                "-" * 80,
+            ]
+
+            for row in top_ten.itertuples(index=False):
+                lines.append(
+                    f"{row.rank:>2}. {row.borough}: "
+                    f"{int(row.property_count):,} properties | "
+                    f"mean EPC {row.mean_epc_score:.2f} | "
+                    f"mean energy {row.mean_energy_intensity_kwh_m2_year:.2f} kWh/m²/year | "
+                    f"score {row.composite_priority_score:.4f}"
+                )
+
+            lines.extend([
+                "",
+                "TOP 5 COMBINED",
+                "-" * 80,
+                f"Property count: {top_five_count:,}",
+                f"Investment estimate (@ £{fabric_cost_per_property:,.0f}/property): £{top_five_investment:,.0f}",
+            ])
+
+            summary_path.write_text("\n".join(lines), encoding='utf-8')
+            logger.info(f"Saved borough priority summary to {summary_path}")
+
+        return borough_ranking
+
+    @staticmethod
+    def _map_tenure_group(value) -> str:
+        """Map EPC tenure values into report tenure groups."""
+        if pd.isna(value):
+            return 'unknown'
+
+        cleaned = str(value).strip().lower()
+        mapping = {
+            'owner_occupied': 'owner_occupied',
+            'owner occupied': 'owner_occupied',
+            'owner-occupied': 'owner_occupied',
+            'private_rented': 'private_rented_sector',
+            'private_rented_sector': 'private_rented_sector',
+            'rental (private)': 'private_rented_sector',
+            'private rented': 'private_rented_sector',
+            'social': 'social_affordable',
+            'social_affordable': 'social_affordable',
+            'rental (social)': 'social_affordable',
+            'social rented': 'social_affordable',
+            'unknown': 'unknown',
+            'not defined': 'unknown',
+            '': 'unknown',
+        }
+        return mapping.get(cleaned, 'unknown')
+
+    def generate_tenure_segmentation(
+        self,
+        df: pd.DataFrame,
+        output_path: Optional[Path] = None,
+        summary_path: Optional[Path] = None,
+        source_label: Optional[str] = None,
+    ) -> pd.DataFrame:
+        """
+        Generate tenure segmentation outputs for the corrected dataset.
+
+        Args:
+            df: Corrected validated dataset.
+            output_path: Optional CSV output path.
+            summary_path: Optional text summary path.
+            source_label: Optional label describing the source dataset.
+
+        Returns:
+            Tenure segmentation DataFrame.
+        """
+        logger.info("Generating tenure segmentation analysis...")
+
+        total_properties = len(df)
+        tenure_col = self._first_available_column(df, ['tenure', 'TENURE'])
+        sap_col = self._first_available_column(df, ['CURRENT_ENERGY_EFFICIENCY'])
+        energy_col = self._first_available_column(
+            df,
+            ['energy_kwh_per_m2_year', 'ENERGY_CONSUMPTION_CURRENT']
+        )
+        wall_col = self._first_available_column(df, ['wall_insulated'])
+        heating_col = self._first_available_column(df, ['heating_system_type'])
+
+        tenure_df = df.copy()
+        tenure_df['tenure_group'] = tenure_df[tenure_col].apply(self._map_tenure_group)
+        tenure_df[wall_col] = tenure_df[wall_col].fillna(False).astype(bool)
+        tenure_df[heating_col] = tenure_df[heating_col].fillna('Unknown')
+
+        grouped = tenure_df.groupby('tenure_group', dropna=False)
+        summary = grouped.agg(
+            property_count=(tenure_col, 'size'),
+            mean_sap_score=(sap_col, 'mean'),
+            mean_energy_intensity_kwh_m2_year=(energy_col, 'mean'),
+            wall_insulation_rate_pct=(wall_col, lambda s: s.mean() * 100),
+        ).reset_index()
+
+        summary['share_pct'] = summary['property_count'] / total_properties * 100
+
+        heating_shares = (
+            tenure_df.assign(
+                pct_gas_boiler=tenure_df[heating_col].eq('Gas Boiler'),
+                pct_heat_pump=tenure_df[heating_col].eq('Heat Pump'),
+                pct_district=tenure_df[heating_col].eq('District/Communal/Heat Network'),
+            )
+            .groupby('tenure_group')[['pct_gas_boiler', 'pct_heat_pump', 'pct_district']]
+            .mean()
+            .mul(100)
+            .reset_index()
+        )
+
+        segmentation = summary.merge(heating_shares, on='tenure_group', how='left')
+        order = ['owner_occupied', 'private_rented_sector', 'social_affordable', 'unknown']
+        segmentation['tenure_group'] = pd.Categorical(segmentation['tenure_group'], categories=order, ordered=True)
+        segmentation = segmentation.sort_values('tenure_group').reset_index(drop=True)
+        segmentation['tenure_group'] = segmentation['tenure_group'].astype(str)
+
+        numeric_cols = [
+            'share_pct',
+            'mean_sap_score',
+            'mean_energy_intensity_kwh_m2_year',
+            'wall_insulation_rate_pct',
+            'pct_gas_boiler',
+            'pct_heat_pump',
+            'pct_district',
+        ]
+        segmentation[numeric_cols] = segmentation[numeric_cols].round(2)
+
+        if output_path:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            segmentation.to_csv(output_path, index=False)
+            logger.info(f"Saved tenure segmentation to {output_path}")
+
+        if summary_path:
+            summary_path.parent.mkdir(parents=True, exist_ok=True)
+
+            largest_group = segmentation.loc[segmentation['property_count'].idxmax()]
+            worst_sap_group = segmentation.loc[segmentation['mean_sap_score'].idxmin()]
+            highest_energy_group = segmentation.loc[
+                segmentation['mean_energy_intensity_kwh_m2_year'].idxmax()
+            ]
+            lowest_wall_group = segmentation.loc[segmentation['wall_insulation_rate_pct'].idxmin()]
+
+            lines = [
+                "=" * 80,
+                "TENURE SEGMENTATION SUMMARY",
+                "=" * 80,
+                f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                f"Source dataset: {source_label or 'corrected validated pipeline dataset'}",
+                "Assumptions:",
+                "- Used cleaned 'tenure' field where available.",
+                "- Wall insulation rate = % of properties with wall_insulated == True.",
+                "- Heating shares are within-tenure percentages for Gas Boiler, Heat Pump, and District/Communal/Heat Network.",
+                "",
+                "SEGMENTATION TABLE",
+                "-" * 80,
+            ]
+
+            for row in segmentation.itertuples(index=False):
+                lines.append(
+                    f"{row.tenure_group}: "
+                    f"{int(row.property_count):,} properties ({row.share_pct:.2f}%) | "
+                    f"mean SAP {row.mean_sap_score:.2f} | "
+                    f"mean energy {row.mean_energy_intensity_kwh_m2_year:.2f} kWh/m²/year | "
+                    f"wall insulation {row.wall_insulation_rate_pct:.2f}% | "
+                    f"gas {row.pct_gas_boiler:.2f}% | HP {row.pct_heat_pump:.2f}% | district {row.pct_district:.2f}%"
+                )
+
+            lines.extend([
+                "",
+                "KEY FINDINGS",
+                "-" * 80,
+                f"- Largest tenure group: {largest_group.tenure_group} ({int(largest_group.property_count):,} properties; {largest_group.share_pct:.2f}%).",
+                f"- Lowest mean SAP score: {worst_sap_group.tenure_group} ({worst_sap_group.mean_sap_score:.2f}).",
+                f"- Highest mean energy intensity: {highest_energy_group.tenure_group} ({highest_energy_group.mean_energy_intensity_kwh_m2_year:.2f} kWh/m²/year).",
+                f"- Lowest wall insulation rate: {lowest_wall_group.tenure_group} ({lowest_wall_group.wall_insulation_rate_pct:.2f}%).",
+            ])
+
+            summary_path.write_text("\n".join(lines), encoding='utf-8')
+            logger.info(f"Saved tenure segmentation summary to {summary_path}")
+
+        return segmentation
 
     def generate_data_quality_report(
         self,

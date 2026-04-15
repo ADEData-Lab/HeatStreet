@@ -12,8 +12,8 @@ Author: Heat Street EPC Analysis
 Date: 2025-12-03
 """
 
-import os
-import subprocess
+import ssl
+import urllib.request
 import zipfile
 from pathlib import Path
 from typing import Optional, List
@@ -61,26 +61,26 @@ class LondonGISDownloader:
         logger.info(f"URL: {self.GIS_DATA_URL}")
 
         try:
-            # Use wget with --no-check-certificate to handle SSL issues
-            cmd = [
-                'wget',
-                '--no-check-certificate',
-                '--progress=bar:force',
-                '-O', str(zip_path),
-                self.GIS_DATA_URL
-            ]
+            ssl_context = ssl.create_default_context()
+            request = urllib.request.Request(
+                self.GIS_DATA_URL,
+                headers={"User-Agent": "HeatStreet/1.0"},
+            )
 
-            result = subprocess.run(cmd, capture_output=False, text=True)
+            with urllib.request.urlopen(request, context=ssl_context, timeout=300) as response, open(zip_path, "wb") as output_file:
+                while True:
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    output_file.write(chunk)
 
-            if result.returncode == 0:
-                logger.info(f"✓ Downloaded GIS data: {zip_path.stat().st_size / 1024 / 1024:.1f} MB")
-                return True
-            else:
-                logger.error(f"Download failed with exit code {result.returncode}")
-                return False
+            logger.info(f"✓ Downloaded GIS data: {zip_path.stat().st_size / 1024 / 1024:.1f} MB")
+            return True
 
         except Exception as e:
             logger.error(f"Error downloading GIS data: {e}")
+            if zip_path.exists():
+                zip_path.unlink()
             return False
 
     def extract_gis_data(self, force_extract: bool = False) -> bool:

@@ -16,7 +16,7 @@ The Heat Street pipeline is designed to answer policy‑relevant questions such 
 The core case is:
 - **Region:** London (33 local authorities)
 - **Stock filter (“Edwardian terraces”):** EPC construction age bands consistent with **pre‑1930** plus **terraced built forms** (mid‑terrace / end‑terrace variants). Flats are excluded.
-- **Certificate window:** the pipeline downloads certificates from a configurable start year (default used in the pipeline: **2015**), aiming to use comparatively recent EPCs.
+- **Certificate window:** the interactive pipeline prompts for a configurable sample start date and end date, then applies that exact inclusive window to the downloaded certificates.
 
 ### 1.3 What this analysis represents
 This is a **stock model** built from administrative EPC records and a set of transparent assumptions.
@@ -142,7 +142,7 @@ The pipeline is structured into phases. Each phase is designed to be auditable: 
 
 **Key assumptions / implications**
 - EPC age bands are treated as the authoritative indicator for build period; mis‑classification in EPCs can propagate into the stock definition.
-- Using a start year (default 2015) improves comparability but can bias toward more recently assessed homes.
+- Choosing a narrower sample window improves temporal comparability but can bias the stock toward more recently assessed homes.
 
 ### Phase 2 — Data validation and cleaning
 **Objective:** address known issues in EPC data quality so that subsequent calculations are mathematically sound and policy‑relevant.

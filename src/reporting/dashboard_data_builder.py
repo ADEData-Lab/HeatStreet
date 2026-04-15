@@ -104,7 +104,12 @@ class DashboardDataBuilder:
         readiness_summary: Optional[Dict],
         pathway_summary: Optional[pd.DataFrame] = None,
         borough_breakdown: Optional[pd.DataFrame] = None,
+        borough_priority_ranking: Optional[pd.DataFrame] = None,
+        tenure_segmentation: Optional[pd.DataFrame] = None,
         case_street_summary: Optional[Dict] = None,
+        case_street_df: Optional[pd.DataFrame] = None,
+        heat_network_thresholds: Optional[pd.DataFrame] = None,
+        hn_vs_hp_comparison: Optional[pd.DataFrame] = None,
         subsidy_results: Optional[Dict] = None,
         df_validated: Optional[pd.DataFrame] = None,
         load_profile_summary: Optional[pd.DataFrame] = None,
@@ -119,7 +124,12 @@ class DashboardDataBuilder:
             readiness_summary: Summary from RetrofitReadinessAnalyzer
             pathway_summary: Heat network tier summary DataFrame
             borough_breakdown: Borough-level breakdown DataFrame
+            borough_priority_ranking: Borough priority ranking DataFrame
+            tenure_segmentation: Tenure segmentation DataFrame
             case_street_summary: Case street (Shakespeare Crescent) summary
+            case_street_df: Case street extract DataFrame
+            heat_network_thresholds: Heat network threshold analysis DataFrame
+            hn_vs_hp_comparison: HP vs HN comparison DataFrame
             subsidy_results: Subsidy sensitivity analysis results
             df_validated: Validated property DataFrame
             load_profile_summary: Load profile summary from LoadProfileGenerator
@@ -150,6 +160,11 @@ class DashboardDataBuilder:
 
             # Geographic data
             "boroughData": self._format_boroughs(borough_breakdown),
+            "boroughPriorityData": self._format_borough_priority_ranking(borough_priority_ranking),
+            "tenureSegmentationData": self._format_tenure_segmentation(tenure_segmentation),
+            "caseStreetData": self._format_case_street(case_street_summary, case_street_df),
+            "heatNetworkThresholdData": self._format_heat_network_thresholds(heat_network_thresholds),
+            "hnVsHpComparisonData": self._format_hn_vs_hp_comparison(hn_vs_hp_comparison),
 
             # Uncertainty and sensitivity data (Section 7, 10)
             "confidenceBandsData": self._format_confidence_bands(readiness_summary),
@@ -169,6 +184,7 @@ class DashboardDataBuilder:
                 readiness_summary,
                 scenario_results,
                 pathway_summary,
+                hn_vs_hp_comparison,
                 df_validated,
             ),
         }
@@ -432,6 +448,139 @@ class DashboardDataBuilder:
             )
         return borough_data
 
+    def _format_borough_priority_ranking(
+        self, borough_priority_ranking: Optional[pd.DataFrame]
+    ) -> List[Dict]:
+        if borough_priority_ranking is None or len(borough_priority_ranking) == 0:
+            return []
+
+        ranking = []
+        for _, row in borough_priority_ranking.iterrows():
+            ranking.append(
+                {
+                    "borough": row.get("borough"),
+                    "rank": int(row.get("rank", 0)),
+                    "propertyCount": int(row.get("property_count", 0)),
+                    "meanEPC": round(float(row.get("mean_epc_score", 0)), 2),
+                    "energyIntensity": round(float(row.get("mean_energy_intensity_kwh_m2_year", 0)), 2),
+                    "priorityScore": round(float(row.get("composite_priority_score", 0)), 4),
+                }
+            )
+        return ranking
+
+    def _format_tenure_segmentation(
+        self, tenure_segmentation: Optional[pd.DataFrame]
+    ) -> List[Dict]:
+        if tenure_segmentation is None or len(tenure_segmentation) == 0:
+            return []
+
+        labels = {
+            "owner_occupied": "Owner occupied",
+            "private_rented_sector": "Private rented",
+            "social_affordable": "Social / affordable",
+            "unknown": "Unknown",
+        }
+
+        rows = []
+        for _, row in tenure_segmentation.iterrows():
+            tenure_group = str(row.get("tenure_group", "unknown"))
+            rows.append(
+                {
+                    "tenureGroup": tenure_group,
+                    "label": labels.get(tenure_group, tenure_group.replace("_", " ").title()),
+                    "propertyCount": int(row.get("property_count", 0)),
+                    "sharePct": round(float(row.get("share_pct", 0)), 2),
+                    "meanSAP": round(float(row.get("mean_sap_score", 0)), 2),
+                    "energyIntensity": round(float(row.get("mean_energy_intensity_kwh_m2_year", 0)), 2),
+                    "wallInsulationRatePct": round(float(row.get("wall_insulation_rate_pct", 0)), 2),
+                    "gasBoilerPct": round(float(row.get("pct_gas_boiler", 0)), 2),
+                    "heatPumpPct": round(float(row.get("pct_heat_pump", 0)), 2),
+                    "districtPct": round(float(row.get("pct_district", 0)), 2),
+                }
+            )
+        return rows
+
+    def _format_case_street(
+        self,
+        case_street_summary: Optional[Dict],
+        case_street_df: Optional[pd.DataFrame],
+    ) -> Dict:
+        summary = {}
+        if case_street_summary and case_street_summary.get("case_street"):
+            street_summary = case_street_summary["case_street"]
+            summary = {
+                "streetName": street_summary.get("street_name", "Shakespeare Crescent"),
+                "propertyCount": int(street_summary.get("property_count", 0)),
+                "meanSAP": round(float(street_summary.get("mean_sap_score", 0)), 2)
+                if street_summary.get("mean_sap_score") is not None
+                else None,
+                "modalEpcBand": street_summary.get("mode_epc_band"),
+                "epcBandDistribution": street_summary.get("epc_band_distribution", {}),
+            }
+
+        sample_rows = []
+        if case_street_df is not None and len(case_street_df) > 0:
+            preferred_columns = [
+                "LMK_KEY",
+                "ADDRESS1",
+                "POSTCODE",
+                "CURRENT_ENERGY_RATING",
+                "CURRENT_ENERGY_EFFICIENCY",
+                "energy_kwh_per_m2_year",
+                "heating_system_type",
+            ]
+            available_columns = [col for col in preferred_columns if col in case_street_df.columns]
+            sample = case_street_df[available_columns].head(12) if available_columns else case_street_df.head(12)
+            sample_rows = sample.to_dict(orient="records")
+
+        return {"summary": summary, "sample": sample_rows}
+
+    def _format_heat_network_thresholds(
+        self, heat_network_thresholds: Optional[pd.DataFrame]
+    ) -> List[Dict]:
+        if heat_network_thresholds is None or len(heat_network_thresholds) == 0:
+            return []
+
+        rows = heat_network_thresholds.copy()
+        rows = rows.sort_values(["tier", "connection_rate"]).reset_index(drop=True)
+
+        output = []
+        for _, row in rows.iterrows():
+            output.append(
+                {
+                    "tier": row.get("tier"),
+                    "propertiesInTier": int(row.get("properties_in_tier", 0)),
+                    "connectionRatePct": round(float(row.get("connection_rate", 0)) * 100, 1),
+                    "propertiesConnected": int(row.get("properties_connected", 0)),
+                    "totalInfrastructureCost": round(float(row.get("total_infrastructure_cost", 0)), 2),
+                    "annualRevenue": round(float(row.get("total_annual_revenue", 0)), 2),
+                    "networkPaybackYears": round(float(row.get("network_payback_years", 0)), 2),
+                    "viable25yrThreshold": bool(row.get("viable_25yr_threshold", False)),
+                }
+            )
+        return output
+
+    def _format_hn_vs_hp_comparison(
+        self, hn_vs_hp_comparison: Optional[pd.DataFrame]
+    ) -> List[Dict]:
+        if hn_vs_hp_comparison is None or len(hn_vs_hp_comparison) == 0:
+            return []
+
+        rows = []
+        for _, row in hn_vs_hp_comparison.iterrows():
+            rows.append(
+                {
+                    "pathwayId": row.get("pathway_id"),
+                    "pathwayName": row.get("pathway_name"),
+                    "homes": int(row.get("n_homes", 0)),
+                    "capexMean": round(float(row.get("capex_mean", 0)), 2),
+                    "billSavingMean": round(float(row.get("bill_saving_mean", 0)), 2),
+                    "co2SavingMean": round(float(row.get("co2_saving_mean", 0)), 4),
+                    "paybackMean": round(float(row.get("payback_mean", 0)), 2),
+                }
+            )
+        return rows
+
     def _format_confidence_bands(self, readiness_summary: Optional[Dict]) -> List[Dict]:
         if not readiness_summary:
             return []
@@ -513,6 +662,7 @@ class DashboardDataBuilder:
         readiness_summary: Optional[Dict],
         scenario_results: Optional[Dict],
         pathway_summary: Optional[pd.DataFrame],
+        hn_vs_hp_comparison: Optional[pd.DataFrame],
         df_validated: Optional[pd.DataFrame],
     ) -> Dict:
         summary = {}
@@ -567,6 +717,19 @@ class DashboardDataBuilder:
             summary["optimalInvestmentPoint"] = float(
                 first_scenario.get("capital_cost_per_property", 0)
             )
+
+        if hn_vs_hp_comparison is not None and len(hn_vs_hp_comparison) > 0:
+            by_id = {
+                str(row.get("pathway_id")): row
+                for _, row in hn_vs_hp_comparison.iterrows()
+            }
+            hp_row = by_id.get("fabric_plus_hp_only")
+            hn_row = by_id.get("fabric_plus_hn_only")
+            if hp_row is not None and hn_row is not None:
+                summary["costAdvantageDHvsHP"] = round(
+                    float(hp_row.get("capex_mean", 0)) - float(hn_row.get("capex_mean", 0)),
+                    2,
+                )
 
         if df_validated is not None and len(df_validated) > 0:
             summary.setdefault("totalProperties", int(len(df_validated)))

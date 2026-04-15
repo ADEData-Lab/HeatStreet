@@ -26,56 +26,67 @@ if (-not $condaPath) {
 Write-Host "[OK] Conda found!" -ForegroundColor Green
 Write-Host ""
 
-# Check if environment exists
-$envExists = conda env list | Select-String "heatstreet"
+$targetEnv = if ($env:CONDA_DEFAULT_ENV -and $env:CONDA_DEFAULT_ENV -ne "base") {
+    $env:CONDA_DEFAULT_ENV
+} else {
+    "heatstreet"
+}
 
-if (-not $envExists) {
-    Write-Host "[!] Creating conda environment 'heatstreet'..." -ForegroundColor Yellow
-    Write-Host "This will take a few minutes on first run..." -ForegroundColor Yellow
+if ($env:CONDA_DEFAULT_ENV -and $env:CONDA_DEFAULT_ENV -ne "base") {
+    Write-Host "[OK] Using active conda environment '$targetEnv'" -ForegroundColor Green
     Write-Host ""
+} else {
+    # Check if environment exists
+    $envExists = conda env list | Select-String "^\s*$targetEnv\s"
 
-    conda create -n heatstreet python=3.11 -y
+    if (-not $envExists) {
+        Write-Host "[!] Creating conda environment '$targetEnv'..." -ForegroundColor Yellow
+        Write-Host "This will take a few minutes on first run..." -ForegroundColor Yellow
+        Write-Host ""
+
+        conda create -n $targetEnv python=3.11 -y
+
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host "[X] Failed to create conda environment" -ForegroundColor Red
+            Read-Host "Press Enter to exit"
+            exit 1
+        }
+
+        Write-Host ""
+        Write-Host "[OK] Environment created!" -ForegroundColor Green
+        Write-Host ""
+    } else {
+        Write-Host "[OK] Environment '$targetEnv' already exists" -ForegroundColor Green
+        Write-Host ""
+    }
+
+    # Activate environment
+    Write-Host "[OK] Activating conda environment '$targetEnv'..." -ForegroundColor Green
+    conda activate $targetEnv
 
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "[X] Failed to create conda environment" -ForegroundColor Red
+        Write-Host "[X] Failed to activate environment" -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Try running this command manually:" -ForegroundColor Yellow
+        Write-Host "  conda activate $targetEnv" -ForegroundColor White
+        Write-Host ""
         Read-Host "Press Enter to exit"
         exit 1
     }
-
-    Write-Host ""
-    Write-Host "[OK] Environment created!" -ForegroundColor Green
-    Write-Host ""
-} else {
-    Write-Host "[OK] Environment 'heatstreet' already exists" -ForegroundColor Green
-    Write-Host ""
 }
 
-# Activate environment
-Write-Host "[OK] Activating conda environment..." -ForegroundColor Green
-conda activate heatstreet
+# Check if spatial dependencies are installed
+python -c "import geopandas, pyogrio, pyproj, shapely" 2>$null
 
 if ($LASTEXITCODE -ne 0) {
-    Write-Host "[X] Failed to activate environment" -ForegroundColor Red
-    Write-Host ""
-    Write-Host "Try running this command manually:" -ForegroundColor Yellow
-    Write-Host "  conda activate heatstreet" -ForegroundColor White
-    Write-Host ""
-    Read-Host "Press Enter to exit"
-    exit 1
-}
-
-# Check if geopandas is installed
-python -c "import geopandas" 2>$null
-
-if ($LASTEXITCODE -ne 0) {
-    Write-Host "[!] Installing spatial dependencies (geopandas + GDAL)..." -ForegroundColor Yellow
+    Write-Host "[!] Installing spatial dependencies (geopandas + pyogrio)..." -ForegroundColor Yellow
     Write-Host "This may take 5-10 minutes on first run..." -ForegroundColor Yellow
     Write-Host ""
 
-    conda install -c conda-forge geopandas -y
+    conda install -n $targetEnv -c conda-forge geopandas pyogrio pyproj shapely rtree -y
 
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "[X] Failed to install geopandas" -ForegroundColor Red
+        Write-Host "[X] Failed to install spatial dependencies" -ForegroundColor Red
         Read-Host "Press Enter to exit"
         exit 1
     }
@@ -106,7 +117,7 @@ Write-Host ""
 
 # Verify spatial dependencies
 Write-Host "[OK] Verifying spatial analysis capabilities..." -ForegroundColor Green
-python -c "import geopandas; from osgeo import gdal; print('[OK] GDAL version:', gdal.__version__); print('[OK] Geopandas version:', geopandas.__version__)"
+python -c "import geopandas, pyogrio, pyproj, shapely; print('[OK] Geopandas version:', geopandas.__version__); print('[OK] Pyogrio available')"
 
 if ($LASTEXITCODE -ne 0) {
     Write-Host "[!] Spatial verification failed, but continuing..." -ForegroundColor Yellow
@@ -141,7 +152,7 @@ if ($LASTEXITCODE -eq 0) {
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "To use this environment again:" -ForegroundColor Cyan
-Write-Host "  conda activate heatstreet" -ForegroundColor White
+Write-Host "  conda activate $targetEnv" -ForegroundColor White
 Write-Host "  python run_analysis.py" -ForegroundColor White
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""

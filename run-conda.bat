@@ -26,54 +26,63 @@ if errorlevel 1 (
 echo [OK] Conda found!
 echo.
 
-REM Check if environment exists
-conda env list | findstr /C:"heatstreet" >nul 2>nul
-if errorlevel 1 (
-    echo [!] Creating conda environment 'heatstreet'...
-    echo This will take a few minutes on first run...
-    echo.
+set "TARGET_ENV=%CONDA_DEFAULT_ENV%"
+if "%TARGET_ENV%"=="" set "TARGET_ENV=heatstreet"
+if /I "%TARGET_ENV%"=="base" set "TARGET_ENV=heatstreet"
 
-    conda create -n heatstreet python=3.11 -y
+if defined CONDA_DEFAULT_ENV if /I not "%CONDA_DEFAULT_ENV%"=="base" (
+    echo [OK] Using active conda environment '%TARGET_ENV%'
+    echo.
+) else (
+    REM Check if environment exists
+    conda env list | findstr /R /C:"^[* ]*%TARGET_ENV% " >nul 2>nul
+    if errorlevel 1 (
+        echo [!] Creating conda environment '%TARGET_ENV%'...
+        echo This will take a few minutes on first run...
+        echo.
+
+        conda create -n %TARGET_ENV% python=3.11 -y
+
+        if errorlevel 1 (
+            echo [X] Failed to create conda environment
+            pause
+            exit /b 1
+        )
+
+        echo.
+        echo [OK] Environment created!
+        echo.
+    ) else (
+        echo [OK] Environment '%TARGET_ENV%' already exists
+        echo.
+    )
+
+    REM Activate environment
+    echo [OK] Activating conda environment '%TARGET_ENV%'...
+    call conda activate %TARGET_ENV%
 
     if errorlevel 1 (
-        echo [X] Failed to create conda environment
+        echo [X] Failed to activate environment
+        echo.
+        echo Try running this command manually:
+        echo   conda activate %TARGET_ENV%
+        echo.
         pause
         exit /b 1
     )
-
-    echo.
-    echo [OK] Environment created!
-    echo.
-) else (
-    echo [OK] Environment 'heatstreet' already exists
-    echo.
 )
 
-REM Activate environment
-echo [OK] Activating conda environment...
-call conda activate heatstreet
-
+REM Check if spatial dependencies are installed
+python -c "import geopandas, pyogrio, pyproj, shapely" >nul 2>nul
 if errorlevel 1 (
-    echo [X] Failed to activate environment
-    echo.
-    echo Try running this command manually:
-    echo   conda activate heatstreet
-    echo.
-    pause
-    exit /b 1
-)
-
-REM Check if geopandas is installed
-python -c "import geopandas" >nul 2>nul
-if errorlevel 1 (
-    echo [!] Installing spatial dependencies (geopandas + GDAL)...
+    echo [!] Installing spatial dependencies (geopandas + pyogrio)...
     echo This may take 5-10 minutes on first run...
     echo.
 
-    conda install -c conda-forge geopandas -y
+    conda install -n %TARGET_ENV% -c conda-forge geopandas pyogrio pyproj shapely rtree -y
 
     if errorlevel 1 (
-        echo [X] Failed to install geopandas
+        echo [X] Failed to install spatial dependencies
         pause
         exit /b 1
     )
@@ -104,7 +113,7 @@ echo.
 
 REM Verify spatial dependencies
 echo [OK] Verifying spatial analysis capabilities...
-python -c "import geopandas; from osgeo import gdal; print('[OK] GDAL version:', gdal.__version__); print('[OK] Geopandas version:', geopandas.__version__)"
+python -c "import geopandas, pyogrio, pyproj, shapely; print('[OK] Geopandas version:', geopandas.__version__); print('[OK] Pyogrio available')"
 
 if errorlevel 1 (
     echo [!] Spatial verification failed, but continuing...
@@ -139,7 +148,7 @@ if %errorlevel% equ 0 (
 echo.
 echo ========================================
 echo To use this environment again:
-echo   conda activate heatstreet
+echo   conda activate %TARGET_ENV%
 echo   python run_analysis.py
 echo ========================================
 echo.

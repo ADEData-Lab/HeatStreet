@@ -12,8 +12,10 @@ import sys
 import subprocess
 import gc
 import re
+import platform
 from pathlib import Path
-from typing import Union
+from typing import Tuple, Union
+from datetime import date as date_cls, datetime
 from loguru import logger
 import questionary
 from rich.console import Console
@@ -76,6 +78,135 @@ def validate_api_key(api_key: str) -> Union[bool, str]:
         return "API key contains invalid characters"
 
     return True
+
+
+def parse_iso_date(value: str) -> date_cls:
+    """Parse an ISO YYYY-MM-DD date string."""
+    return datetime.strptime(value.strip(), "%Y-%m-%d").date()
+
+
+def validate_end_date(value: str) -> Union[bool, str]:
+    """Validate sample end date input."""
+    if not value or not value.strip():
+        return "End date cannot be empty"
+
+    try:
+        parse_iso_date(value)
+    except ValueError:
+        return "Please enter a valid date in YYYY-MM-DD format"
+
+    return True
+
+
+def validate_start_date(value: str, sample_end_date: date_cls) -> Union[bool, str]:
+    """Validate sample start date input against the selected end date."""
+    if not value or not value.strip():
+        return "Start date cannot be empty"
+
+    try:
+        sample_start_date = parse_iso_date(value)
+    except ValueError:
+        return "Please enter a valid date in YYYY-MM-DD format"
+
+    if sample_start_date > sample_end_date:
+        return f"Start date cannot be after end date ({sample_end_date.isoformat()})"
+
+    return True
+
+
+def compute_sample_start_date(sample_end_date: date_cls) -> date_cls:
+    """
+    Compute the exact inclusive 10-year sample start date.
+
+    Uses the same calendar day 10 years earlier, with a leap-year fallback to
+    28 February when needed.
+    """
+    try:
+        return sample_end_date.replace(year=sample_end_date.year - 10)
+    except ValueError:
+        return sample_end_date.replace(year=sample_end_date.year - 10, day=28)
+
+
+def prompt_sample_end_date() -> date_cls:
+    """Prompt for the sample end date, defaulting to today."""
+    default_value = date_cls.today().isoformat()
+    sample_end_text = questionary.text(
+        "Sample end date (YYYY-MM-DD):",
+        default=default_value,
+        validate=validate_end_date,
+    ).ask()
+
+    if sample_end_text is None:
+        raise KeyboardInterrupt("Sample end date input cancelled")
+
+    return parse_iso_date(sample_end_text)
+
+
+def prompt_sample_window() -> Tuple[date_cls, date_cls]:
+    """Prompt for a fully configurable sample window."""
+    sample_end_date = prompt_sample_end_date()
+    default_start_date = compute_sample_start_date(sample_end_date).isoformat()
+    sample_start_text = questionary.text(
+        "Sample start date (YYYY-MM-DD):",
+        default=default_start_date,
+        validate=lambda value: validate_start_date(value, sample_end_date),
+    ).ask()
+
+    if sample_start_text is None:
+        raise KeyboardInterrupt("Sample start date input cancelled")
+
+    sample_start_date = parse_iso_date(sample_start_text)
+    return sample_start_date, sample_end_date
+
+
+def metadata_sidecar_path(file_path: Path) -> Path:
+    """Return the sidecar metadata path for a dataset."""
+    return file_path.with_name(f"{file_path.stem}_metadata.json")
+
+
+def write_sample_window_metadata(
+    file_path: Path,
+    sample_start_date: date_cls,
+    sample_end_date: date_cls,
+    dataset_type: str,
+) -> None:
+    """Persist sample-window metadata for a dataset."""
+    metadata = {
+        "dataset_path": str(file_path),
+        "dataset_type": dataset_type,
+        "sample_start_date": sample_start_date.isoformat(),
+        "sample_end_date": sample_end_date.isoformat(),
+        "written_at": datetime.now().isoformat(),
+    }
+    metadata_sidecar_path(file_path).write_text(
+        json.dumps(metadata, indent=2),
+        encoding="utf-8",
+    )
+
+
+def read_sample_window_metadata(file_path: Path):
+    """Load dataset sidecar metadata if present."""
+    metadata_path = metadata_sidecar_path(file_path)
+    if not metadata_path.exists():
+        return None
+
+    try:
+        return json.loads(metadata_path.read_text(encoding="utf-8"))
+    except Exception as e:
+        logger.warning(f"Could not read sample window metadata from {metadata_path}: {e}")
+        return None
+
+
+def sample_window_matches(file_path: Path, sample_start_date: date_cls, sample_end_date: date_cls) -> bool:
+    """Return True when dataset metadata matches the requested sample window."""
+    metadata = read_sample_window_metadata(file_path)
+    if not metadata:
+        return False
+
+    return (
+        metadata.get("sample_start_date") == sample_start_date.isoformat()
+        and metadata.get("sample_end_date") == sample_end_date.isoformat()
+    )
 
 
 def is_one_stop_only(config=None) -> bool:
@@ -240,13 +371,18 @@ def ask_hnpd_download():
     return False
 
 
-def download_data(analysis_logger: AnalysisLogger = None, from_year: int = 2015):
+def download_data(
+    analysis_logger: AnalysisLogger = None,
+    sample_start_date: date_cls = None,
+    sample_end_date: date_cls = None,
+):
     """Download EPC data via API."""
     console.print()
     console.print(Panel("[bold]Phase 1: Data Download[/bold]", border_style="blue"))
     console.print()
 
     downloader = EPCAPIDownloader()
+    from_year = sample_start_date.year if sample_start_date else 2015
 
     download_scope = questionary.select(
         "Select download scope:",
@@ -284,6 +420,8 @@ def download_data(analysis_logger: AnalysisLogger = None, from_year: int = 2015)
                 selected_borough,
                 property_type='house',
                 from_year=from_year,
+                sample_start_date=sample_start_date,
+                sample_end_date=sample_end_date,
                 max_results=None,
                 log_borough=True,
                 show_progress=True,
@@ -293,6 +431,8 @@ def download_data(analysis_logger: AnalysisLogger = None, from_year: int = 2015)
             df = downloader.download_all_london_boroughs(
                 property_types=['house'],
                 from_year=from_year,
+                sample_start_date=sample_start_date,
+                sample_end_date=sample_end_date,
                 max_results_per_borough=None,
                 log_boroughs=False,
             )
@@ -308,6 +448,10 @@ def download_data(analysis_logger: AnalysisLogger = None, from_year: int = 2015)
         if analysis_logger:
             analysis_logger.add_metric("raw_records_downloaded", len(df), "Total records from API")
             analysis_logger.add_metric("from_year", from_year)
+            if sample_start_date:
+                analysis_logger.add_metric("sample_start_date", sample_start_date.isoformat(), "Exact inclusive sample start date")
+            if sample_end_date:
+                analysis_logger.add_metric("sample_end_date", sample_end_date.isoformat(), "Exact inclusive sample end date")
 
         # Apply Edwardian filters
         console.print("[cyan]Applying Edwardian terraced housing filters...[/cyan]")
@@ -322,6 +466,19 @@ def download_data(analysis_logger: AnalysisLogger = None, from_year: int = 2015)
         console.print("[cyan]Saving data...[/cyan]")
         downloader.save_data(df, "epc_london_raw.csv")
         downloader.save_data(df_filtered, "epc_london_filtered.csv")
+        if sample_start_date and sample_end_date:
+            write_sample_window_metadata(
+                DATA_RAW_DIR / "epc_london_raw.csv",
+                sample_start_date,
+                sample_end_date,
+                "raw_epc_download",
+            )
+            write_sample_window_metadata(
+                DATA_RAW_DIR / "epc_london_filtered.csv",
+                sample_start_date,
+                sample_end_date,
+                "filtered_epc_download",
+            )
         console.print(f"[green]✓[/green] Data saved to data/raw/")
 
         if analysis_logger:
@@ -343,7 +500,12 @@ def download_data(analysis_logger: AnalysisLogger = None, from_year: int = 2015)
         return None
 
 
-def validate_data(df, analysis_logger: AnalysisLogger = None):
+def validate_data(
+    df,
+    analysis_logger: AnalysisLogger = None,
+    sample_start_date: date_cls = None,
+    sample_end_date: date_cls = None,
+):
     """Validate and clean data."""
     console.print()
     console.print(Panel("[bold]Phase 2: Data Validation[/bold]", border_style="blue"))
@@ -378,6 +540,13 @@ def validate_data(df, analysis_logger: AnalysisLogger = None):
     import pandas as pd
     output_file = DATA_PROCESSED_DIR / "epc_london_validated.csv"
     df_validated.to_csv(output_file, index=False)
+    if sample_start_date and sample_end_date:
+        write_sample_window_metadata(
+            output_file,
+            sample_start_date,
+            sample_end_date,
+            "validated_epc_dataset",
+        )
 
     # Try to save parquet (optional for performance)
     try:
@@ -433,7 +602,12 @@ def validate_data(df, analysis_logger: AnalysisLogger = None):
     return df_validated, report
 
 
-def apply_methodological_adjustments(df, analysis_logger: AnalysisLogger = None):
+def apply_methodological_adjustments(
+    df,
+    analysis_logger: AnalysisLogger = None,
+    sample_start_date: date_cls = None,
+    sample_end_date: date_cls = None,
+):
     """Apply evidence-based methodological adjustments."""
     console.print()
     console.print(Panel("[bold]Phase 2.5: Methodological Adjustments[/bold]", border_style="blue"))
@@ -458,6 +632,13 @@ def apply_methodological_adjustments(df, analysis_logger: AnalysisLogger = None)
     summary = adjuster.generate_adjustment_summary(df_adjusted)
     output_file = DATA_PROCESSED_DIR / "epc_london_adjusted.csv"
     df_adjusted.to_csv(output_file, index=False)
+    if sample_start_date and sample_end_date:
+        write_sample_window_metadata(
+            output_file,
+            sample_start_date,
+            sample_end_date,
+            "adjusted_epc_dataset",
+        )
     parquet_file = None
     try:
         parquet_file = output_file.with_suffix(".parquet")
@@ -513,6 +694,70 @@ def apply_methodological_adjustments(df, analysis_logger: AnalysisLogger = None)
     return df_adjusted, summary
 
 
+def ensure_hp_hn_comparison_outputs(df=None, analysis_logger: AnalysisLogger = None):
+    """Ensure the HP-vs-HN comparison artefacts exist, rebuilding them if required."""
+    outputs_dir = Path(DATA_OUTPUTS_DIR)
+    comparisons_dir = outputs_dir / "comparisons"
+    comparison_csv = comparisons_dir / "hn_vs_hp_comparison.csv"
+    comparison_snippet = comparisons_dir / "hn_vs_hp_report_snippet.md"
+
+    if comparison_csv.exists():
+        console.print("[cyan]Reusing existing HP vs HN comparison artefacts...[/cyan]")
+        return {
+            "comparison_csv": comparison_csv,
+            "comparison_snippet": comparison_snippet if comparison_snippet.exists() else None,
+            "rebuilt": False,
+        }
+
+    console.print(
+        f"[yellow]⚠ Missing {comparison_csv}; attempting to rebuild HP vs HN comparison outputs...[/yellow]"
+    )
+
+    try:
+        pathway_modeler = PathwayModeler()
+        property_results_path = pathway_modeler.output_dir / "pathway_results_by_property.parquet"
+        summary_path = pathway_modeler.output_dir / "pathway_results_summary.csv"
+
+        if property_results_path.exists() and summary_path.exists():
+            console.print("[cyan]Using existing pathway modeling outputs to rebuild comparison...[/cyan]")
+        else:
+            if df is None or len(df) == 0:
+                raise ValueError("No source dataframe available to rebuild HP vs HN comparison outputs")
+
+            console.print("[cyan]Running pathway modeling to regenerate comparison inputs...[/cyan]")
+            pathway_results = pathway_modeler.model_all_pathways(df)
+            pathway_summary = pathway_modeler.generate_pathway_summary(pathway_results)
+            property_results_path, summary_path = pathway_modeler.export_results(
+                pathway_results,
+                pathway_summary,
+            )
+
+        comparison_reporter = ComparisonReporter()
+        comparison_df = comparison_reporter.generate_comparisons(results_path=property_results_path)
+
+        if comparison_df is None or comparison_df.empty or not comparison_csv.exists():
+            raise RuntimeError("Comparison rebuild did not produce a usable hn_vs_hp_comparison.csv")
+
+        console.print(f"[green]✓[/green] Rebuilt HP vs HN comparison artefacts at {comparison_csv}")
+
+        if analysis_logger:
+            analysis_logger.add_output(str(property_results_path), "parquet", "Pathway results by property")
+            analysis_logger.add_output(str(summary_path), "csv", "Pathway results summary")
+            analysis_logger.add_output(str(comparison_csv), "csv", "HP vs HN comparison table")
+            if comparison_snippet.exists():
+                analysis_logger.add_output(str(comparison_snippet), "md", "HP vs HN markdown snippet")
+
+        return {
+            "comparison_csv": comparison_csv,
+            "comparison_snippet": comparison_snippet if comparison_snippet.exists() else None,
+            "rebuilt": True,
+        }
+    except Exception as e:
+        console.print(f"[yellow]⚠ Could not rebuild HP vs HN comparison outputs: {e}[/yellow]")
+        logger.exception("HP vs HN comparison rebuild failed")
+        return None
+
+
 def analyze_archetype(df, analysis_logger: AnalysisLogger = None):
     """Run archetype characterization."""
     console.print()
@@ -565,8 +810,6 @@ def model_scenarios(df, analysis_logger: AnalysisLogger = None):
     console.print()
     console.print(Panel("[bold]Phase 4: Scenario Modeling[/bold]", border_style="blue"))
     console.print()
-
-    one_stop_only = is_one_stop_only()
 
     if analysis_logger:
         analysis_logger.start_phase(
@@ -639,45 +882,10 @@ def model_scenarios(df, analysis_logger: AnalysisLogger = None):
         console.print(f"[yellow]⚠ Could not generate tipping point chart: {e}[/yellow]")
         logger.exception("Tipping point chart generation failed")
 
-    # Generate pathway-level outputs and HP vs HN comparisons (aligns with main pipeline)
+    # Generate pathway-level outputs and HP vs HN comparisons for both report modes.
     console.print()
-    if not one_stop_only:
-        console.print("[cyan]Building pathway modeling outputs and HP vs HN comparisons...[/cyan]")
-        try:
-            import pandas as pd
-
-            pathway_modeler = PathwayModeler()
-            property_results_path = pathway_modeler.output_dir / "pathway_results_by_property.parquet"
-            summary_path = pathway_modeler.output_dir / "pathway_results_summary.csv"
-
-            if property_results_path.exists() and summary_path.exists():
-                console.print("[cyan]Loading existing pathway modeling results...[/cyan]")
-                pathway_results = pd.read_parquet(property_results_path)
-                pathway_summary = pd.read_csv(summary_path)
-            else:
-                console.print("[cyan]Running pathway modeling to generate comparison inputs...[/cyan]")
-                pathway_results = pathway_modeler.model_all_pathways(df)
-                pathway_summary = pathway_modeler.generate_pathway_summary(pathway_results)
-                property_results_path, summary_path = pathway_modeler.export_results(pathway_results, pathway_summary)
-
-            comparison_reporter = ComparisonReporter()
-            comparison_reporter.generate_comparisons(results_path=property_results_path)
-
-            comparisons_dir = comparison_reporter.comparisons_dir
-            console.print(f"[green]✓[/green] HP vs HN comparison artefacts saved to: {comparisons_dir}")
-            console.print(f"    • Property results: {property_results_path}")
-            console.print(f"    • Pathway summary: {summary_path}")
-            console.print(f"    • Comparison CSV: {comparisons_dir / 'hn_vs_hp_comparison.csv'}")
-            console.print(f"    • Comparison snippet: {comparisons_dir / 'hn_vs_hp_report_snippet.md'}")
-
-            if analysis_logger:
-                analysis_logger.add_output(str(property_results_path), "parquet", "Pathway results by property")
-                analysis_logger.add_output(str(summary_path), "csv", "Pathway results summary")
-                analysis_logger.add_output(str(comparisons_dir / 'hn_vs_hp_comparison.csv'), "csv", "HP vs HN comparison table")
-                analysis_logger.add_output(str(comparisons_dir / 'hn_vs_hp_report_snippet.md'), "md", "HP vs HN markdown snippet")
-        except Exception as e:
-            console.print(f"[yellow]⚠ Could not generate pathway comparisons: {e}[/yellow]")
-            logger.exception("Pathway comparison generation failed")
+    console.print("[cyan]Building pathway modeling outputs and HP vs HN comparisons...[/cyan]")
+    ensure_hp_hn_comparison_outputs(df, analysis_logger)
 
     if analysis_logger:
         analysis_logger.add_metric("scenarios_modeled", len(scenario_results), "Decarbonization scenarios analyzed")
@@ -823,15 +1031,111 @@ def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None, one_stop_on
     console.print("If not installed, this phase will be skipped.")
     console.print()
 
+    def get_spatial_dependency_status():
+        """Return missing modules plus available vector IO backends."""
+        missing = []
+        for module_name in ("geopandas", "shapely", "pyproj"):
+            try:
+                __import__(module_name)
+            except ImportError:
+                missing.append(module_name)
+
+        available_backends = []
+        for backend_name in ("pyogrio", "fiona"):
+            try:
+                __import__(backend_name)
+                available_backends.append(backend_name)
+            except ImportError:
+                continue
+
+        if not available_backends:
+            missing.append("pyogrio-or-fiona")
+
+        return missing, available_backends
+
+    def get_spatial_install_command() -> tuple[str, str]:
+        """Return the preferred install mode and command for this environment."""
+        is_windows = platform.system() == "Windows"
+        conda_env = os.getenv("CONDA_DEFAULT_ENV")
+
+        if is_windows and conda_env and conda_env.lower() != "base":
+            command = (
+                f"conda install -n {conda_env} -c conda-forge "
+                "geopandas pyogrio pyproj shapely rtree"
+            )
+            return "conda", command
+
+        if is_windows:
+            return "conda", "conda install -c conda-forge geopandas pyogrio pyproj shapely rtree"
+
+        return "pip", "pip install -r requirements-spatial.txt"
+
     def check_spatial_dependencies():
         """Check for required spatial libraries before running analysis."""
-        try:
-            import geopandas  # noqa: F401
-            import fiona  # noqa: F401
-            import shapely  # noqa: F401
-            import pyproj  # noqa: F401
+        missing_modules, available_backends = get_spatial_dependency_status()
+        if not missing_modules:
             return True
-        except ImportError:
+
+        install_mode, install_command = get_spatial_install_command()
+
+        console.print()
+        console.print("[yellow]⚠ Spatial libraries missing[/yellow]")
+        console.print(f"Missing modules/backend: {', '.join(missing_modules)}")
+        if available_backends:
+            console.print(f"Detected spatial IO backend(s): {', '.join(available_backends)}")
+        console.print("Map outputs require the spatial stack to be available.")
+        console.print(f"Recommended fix for this environment: [bold]{install_command}[/bold]")
+        console.print()
+
+        choice = questionary.select(
+            "How would you like to proceed?",
+            choices=[
+                questionary.Choice(f"Attempt to install spatial dependencies now ({install_mode})", value="install"),
+                questionary.Choice("Pause/abort to install manually", value="abort"),
+                questionary.Choice("Continue without spatial results", value="skip"),
+            ],
+        ).ask()
+
+        if choice == "install":
+            console.print()
+            console.print("[cyan]Attempting to install spatial dependencies...[/cyan]")
+            if install_mode == "conda":
+                conda_env = os.getenv("CONDA_DEFAULT_ENV")
+                install_args = ["conda", "install", "-c", "conda-forge"]
+                if conda_env and conda_env.lower() != "base":
+                    install_args.extend(["-n", conda_env])
+                install_args.extend(["geopandas", "pyogrio", "pyproj", "shapely", "rtree", "-y"])
+                result = subprocess.run(install_args, capture_output=True, text=True)
+            else:
+                result = subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "-r", "requirements-spatial.txt"],
+                    capture_output=True,
+                    text=True,
+                )
+
+            if result.returncode == 0:
+                console.print("[green]✓[/green] Spatial dependencies installed. Re-checking...")
+                return check_spatial_dependencies()
+
+            console.print("[yellow]⚠ Could not install spatial dependencies automatically.[/yellow]")
+            console.print(f"Install manually with: {install_command}")
+
+        if choice == "abort":
+            console.print("[yellow]Analysis paused. Install the spatial dependencies and re-run the spatial phase.[/yellow]")
+            if analysis_logger:
+                analysis_logger.skip_phase(
+                    "Spatial Analysis", "User paused to install GIS dependencies before continuing",
+                )
+            raise SystemExit(0)
+
+        console.print("[yellow]Continuing without spatial analysis. Map outputs will be absent.[/yellow]")
+        if analysis_logger:
+            analysis_logger.skip_phase(
+                "Spatial Analysis", "Spatial dependencies missing; map outputs will not be generated",
+            )
+        return False
+
+        if False:
             console.print("[yellow]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/yellow]")
             console.print("[yellow]⚠ Spatial libraries missing[/yellow]")
             console.print("[yellow]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/yellow]")
@@ -959,7 +1263,7 @@ def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None, one_stop_on
         console.print()
         console.print("[cyan]To enable spatial analysis:[/cyan]")
         console.print("  [bold]Windows (Recommended):[/bold]")
-        console.print("    conda install -c conda-forge geopandas")
+        console.print("    conda install -c conda-forge geopandas pyogrio pyproj shapely rtree")
         console.print()
         console.print("  [bold]Linux/Mac:[/bold]")
         console.print("    pip install -r requirements-spatial.txt")
@@ -1108,12 +1412,14 @@ def generate_reports(archetype_results, scenario_results, subsidy_results=None, 
     return True
 
 
-def generate_one_stop_report(analysis_logger: AnalysisLogger = None):
+def generate_one_stop_report(df=None, analysis_logger: AnalysisLogger = None):
     """Generate the one-stop JSON report."""
     console.print()
     console.print(Panel("[bold]Phase 5: One-Stop Report[/bold]", border_style="blue"))
     console.print()
     console.print("[cyan]Generating one-stop JSON report...[/cyan]")
+
+    ensure_hp_hn_comparison_outputs(df, analysis_logger)
 
     from src.reporting.one_stop_report import OneStopReportGenerator
 
@@ -1228,16 +1534,10 @@ def generate_additional_reports(df_raw, df_validated, validation_report, archety
     console.print(Panel("[bold]Phase 5.5: Additional Reports[/bold]", border_style="blue"))
     console.print()
 
-    if is_one_stop_only():
-        console.print("[cyan]One-stop reporting enabled; skipping additional reports.[/cyan]")
-        if analysis_logger:
-            analysis_logger.skip_phase("Additional Reports", "One-stop report output enabled")
-        return {}
-
     if analysis_logger:
         analysis_logger.start_phase(
             "Additional Reports",
-            "Generate specialized reports (case streets, borough breakdown, data quality, subsidy analysis)"
+            "Generate specialized reports (case streets, borough breakdown, borough priority, tenure segmentation, data quality, subsidy analysis)"
         )
 
     from src.analysis.additional_reports import AdditionalReports
@@ -1248,6 +1548,8 @@ def generate_additional_reports(df_raw, df_validated, validation_report, archety
 
     output_dir = Path("data/outputs")
     output_dir.mkdir(parents=True, exist_ok=True)
+    reports_dir = output_dir / "reports"
+    reports_dir.mkdir(parents=True, exist_ok=True)
 
     # 1. Shakespeare Crescent Extract
     try:
@@ -1279,6 +1581,38 @@ def generate_additional_reports(df_raw, df_validated, validation_report, archety
         console.print(f"[yellow]⚠ Could not generate borough breakdown: {e}[/yellow]")
         borough_df = None
 
+    # 2.5 Borough Priority Ranking
+    try:
+        console.print("[cyan]Generating borough priority ranking...[/cyan]")
+        borough_priority_path = reports_dir / "borough_priority_ranking.csv"
+        borough_priority_summary_path = reports_dir / "borough_priority_ranking.txt"
+        borough_priority_df = reporter.generate_borough_priority_ranking(
+            df_validated,
+            output_path=borough_priority_path,
+            summary_path=borough_priority_summary_path,
+            source_label="data/processed/epc_london_adjusted.csv",
+        )
+        reports_created.append(f"✓ Borough priority ranking ({len(borough_priority_df)} boroughs)")
+    except Exception as e:
+        console.print(f"[yellow]⚠ Could not generate borough priority ranking: {e}[/yellow]")
+        borough_priority_df = None
+
+    # 2.6 Tenure Segmentation
+    try:
+        console.print("[cyan]Generating tenure segmentation analysis...[/cyan]")
+        tenure_segmentation_path = reports_dir / "tenure_segmentation.csv"
+        tenure_segmentation_summary_path = reports_dir / "tenure_segmentation.txt"
+        tenure_segmentation_df = reporter.generate_tenure_segmentation(
+            df_validated,
+            output_path=tenure_segmentation_path,
+            summary_path=tenure_segmentation_summary_path,
+            source_label="data/processed/epc_london_adjusted.csv",
+        )
+        reports_created.append(f"✓ Tenure segmentation ({len(tenure_segmentation_df)} tenure groups)")
+    except Exception as e:
+        console.print(f"[yellow]⚠ Could not generate tenure segmentation analysis: {e}[/yellow]")
+        tenure_segmentation_df = None
+
     # 3. Data Quality Report
     try:
         console.print("[cyan]Generating data quality report...[/cyan]")
@@ -1297,7 +1631,7 @@ def generate_additional_reports(df_raw, df_validated, validation_report, archety
     try:
         console.print("[cyan]Running subsidy sensitivity analysis...[/cyan]")
         subsidy_path = output_dir / "subsidy_sensitivity_analysis_simple_gbp.csv"
-        sensitivity_df = reporter.subsidy_sensitivity_analysis(
+        reporter.subsidy_sensitivity_analysis(
             df_validated,
             scenario_results,
             subsidy_levels=[0, 5000, 7500, 10000, 15000],
@@ -1308,10 +1642,10 @@ def generate_additional_reports(df_raw, df_validated, validation_report, archety
         console.print(f"[yellow]⚠ Could not generate subsidy sensitivity: {e}[/yellow]")
 
     # 5. Heat Network Connection Thresholds
+    threshold_df = None
     try:
         console.print("[cyan]Analyzing heat network connection thresholds...[/cyan]")
         threshold_path = output_dir / "heat_network_connection_thresholds.csv"
-        # Check if heat network tier exists
         if 'heat_network_tier' in df_validated.columns:
             threshold_df = reporter.analyze_heat_network_connection_thresholds(
                 df_validated,
@@ -1324,6 +1658,7 @@ def generate_additional_reports(df_raw, df_validated, validation_report, archety
             console.print("[yellow]  Heat network tier not found, skipping threshold analysis[/yellow]")
     except Exception as e:
         console.print(f"[yellow]⚠ Could not generate connection thresholds: {e}[/yellow]")
+        threshold_df = None
 
     console.print()
     console.print(f"[green]✓[/green] Additional reports complete!")
@@ -1336,7 +1671,13 @@ def generate_additional_reports(df_raw, df_validated, validation_report, archety
 
     if analysis_logger:
         analysis_logger.add_metric("additional_reports", len(reports_created), f"{len(reports_created)} specialized reports")
+        analysis_logger.add_output("data/outputs/shakespeare_crescent_extract.csv", "csv", "Case street extract")
         analysis_logger.add_output("data/outputs/borough_breakdown.csv", "csv", "Borough-level breakdown")
+        analysis_logger.add_output("data/outputs/reports/borough_priority_ranking.csv", "csv", "Borough-level priority ranking")
+        analysis_logger.add_output("data/outputs/reports/borough_priority_ranking.txt", "report", "Borough priority ranking summary")
+        analysis_logger.add_output("data/outputs/reports/tenure_segmentation.csv", "csv", "Tenure segmentation analysis")
+        analysis_logger.add_output("data/outputs/reports/tenure_segmentation.txt", "report", "Tenure segmentation summary")
+        analysis_logger.add_output("data/outputs/heat_network_connection_thresholds.csv", "csv", "Heat network connection threshold analysis")
         analysis_logger.add_output("data/outputs/subsidy_sensitivity_analysis_simple_gbp.csv", "csv", "Subsidy sensitivity analysis (simple, GBP levels)")
         analysis_logger.add_output("data/outputs/data_quality_report.txt", "report", "Data quality assessment")
         analysis_logger.complete_phase(success=True, message=f"{len(reports_created)} additional specialized reports generated")
@@ -1345,6 +1686,9 @@ def generate_additional_reports(df_raw, df_validated, validation_report, archety
         "case_street_df": case_street_df,
         "case_street_summary": case_street_summary,
         "borough_breakdown": borough_df,
+        "borough_priority_ranking": borough_priority_df,
+        "tenure_segmentation": tenure_segmentation_df,
+        "heat_network_thresholds": threshold_df,
     }
 
 
@@ -1379,17 +1723,13 @@ def package_dashboard_assets(
     console.print(Panel("[bold]Phase 6: Dashboard Packaging[/bold]", border_style="blue"))
     console.print()
 
-    if is_one_stop_only():
-        console.print("[cyan]One-stop reporting enabled; skipping dashboard packaging.[/cyan]")
-        if analysis_logger:
-            analysis_logger.skip_phase("Dashboard Packaging", "One-stop report output enabled")
-        return False
-
     if analysis_logger:
         analysis_logger.start_phase(
             "Dashboard Packaging",
             "Export latest analysis results for the React dashboard",
         )
+
+    ensure_hp_hn_comparison_outputs(df_validated, analysis_logger)
 
     try:
         from src.reporting.dashboard_data_builder import DashboardDataBuilder
@@ -1397,12 +1737,17 @@ def package_dashboard_assets(
 
         builder = DashboardDataBuilder()
         case_summary = (additional_reports or {}).get("case_street_summary") if additional_reports else None
+        case_street_df = (additional_reports or {}).get("case_street_df") if additional_reports else None
         borough_breakdown = (additional_reports or {}).get("borough_breakdown") if additional_reports else None
+        borough_priority_ranking = (additional_reports or {}).get("borough_priority_ranking") if additional_reports else None
+        tenure_segmentation = (additional_reports or {}).get("tenure_segmentation") if additional_reports else None
+        heat_network_thresholds = (additional_reports or {}).get("heat_network_thresholds") if additional_reports else None
 
         # Load additional data files if they exist
         load_profile_summary = None
         tipping_point_curve = None
         retrofit_packages_summary = None
+        hn_vs_hp_comparison = None
 
         outputs_dir = Path("data/outputs")
 
@@ -1433,13 +1778,34 @@ def package_dashboard_assets(
             except Exception as e:
                 logger.debug(f"Could not load retrofit packages: {e}")
 
+        comparison_file = outputs_dir / "comparisons" / "hn_vs_hp_comparison.csv"
+        if comparison_file.exists():
+            try:
+                hn_vs_hp_comparison = pd.read_csv(comparison_file)
+                console.print(f"[green]✓[/green] Loaded HP vs HN comparison")
+            except Exception as e:
+                logger.debug(f"Could not load HP vs HN comparison: {e}")
+
+        threshold_file = outputs_dir / "heat_network_connection_thresholds.csv"
+        if heat_network_thresholds is None and threshold_file.exists():
+            try:
+                heat_network_thresholds = pd.read_csv(threshold_file)
+                console.print(f"[green]✓[/green] Loaded heat network connection thresholds")
+            except Exception as e:
+                logger.debug(f"Could not load heat network thresholds: {e}")
+
         dataset = builder.build_dataset(
             archetype_results,
             scenario_results,
             readiness_summary,
             pathway_summary,
             borough_breakdown,
+            borough_priority_ranking,
+            tenure_segmentation,
             case_summary,
+            case_street_df,
+            heat_network_thresholds,
+            hn_vs_hp_comparison,
             subsidy_results,
             df_validated,
             load_profile_summary,
@@ -1521,6 +1887,8 @@ def prompt_use_existing_dataframe(
     file_path: Path,
     analysis_logger: AnalysisLogger = None,
     include_records: bool = True,
+    sample_start_date: date_cls = None,
+    sample_end_date: date_cls = None,
 ):
     """
     Ask the user whether to reuse an existing processed dataset.
@@ -1528,6 +1896,13 @@ def prompt_use_existing_dataframe(
     Returns a DataFrame if loaded, otherwise None.
     """
     if not file_path.exists():
+        return None
+
+    if sample_start_date and sample_end_date and not sample_window_matches(file_path, sample_start_date, sample_end_date):
+        console.print(
+            f"[yellow]⚠ Existing {description} does not match requested sample window "
+            f"{sample_start_date.isoformat()} to {sample_end_date.isoformat()} - regenerating[/yellow]"
+        )
         return None
 
     _describe_existing_file(file_path, f"Existing {description}", include_records)
@@ -1576,14 +1951,19 @@ def load_json_if_exists(file_path: Path):
         return None
 
 
-def check_existing_data():
+def check_existing_data(sample_start_date: date_cls = None, sample_end_date: date_cls = None):
     """Check if previously downloaded data exists."""
     raw_csv = DATA_RAW_DIR / "epc_london_raw.csv"
     filtered_csv = DATA_RAW_DIR / "epc_london_filtered.csv"
 
+    def _matches(file_path: Path) -> bool:
+        if sample_start_date and sample_end_date:
+            return sample_window_matches(file_path, sample_start_date, sample_end_date)
+        return True
+
     if raw_csv.exists() or filtered_csv.exists():
         # Get file info
-        if filtered_csv.exists():
+        if filtered_csv.exists() and _matches(filtered_csv):
             import os
             file_size = os.path.getsize(filtered_csv) / (1024 * 1024)  # MB
             mod_time = os.path.getmtime(filtered_csv)
@@ -1612,7 +1992,7 @@ def check_existing_data():
                 logger.debug(f"Could not read existing data: {e}")
                 return False, None, 0
 
-        elif raw_csv.exists():
+        elif raw_csv.exists() and _matches(raw_csv):
             import os
             file_size = os.path.getsize(raw_csv) / (1024 * 1024)
             mod_time = os.path.getmtime(raw_csv)
@@ -1630,6 +2010,16 @@ def check_existing_data():
             console.print()
 
             return True, raw_csv, 0
+
+        elif filtered_csv.exists() or raw_csv.exists():
+            console.print()
+            console.print(Panel(
+                f"[bold yellow]Existing Data Ignored[/bold yellow]\n\n"
+                f"Stored data does not match the requested sample window:\n"
+                f"{sample_start_date.isoformat()} to {sample_end_date.isoformat()}",
+                border_style="yellow"
+            ))
+            console.print()
 
     return False, None, 0
 
@@ -1691,8 +2081,20 @@ def main():
     # London GIS data second (for heat density in Tiers 3-5)
     ask_gis_download()
 
+    try:
+        sample_start_date, sample_end_date = prompt_sample_window()
+    except KeyboardInterrupt:
+        console.print("[yellow]Analysis cancelled by user[/yellow]")
+        return
+
+    analysis_logger.set_metadata("sample_start_date", sample_start_date.isoformat())
+    analysis_logger.set_metadata("sample_end_date", sample_end_date.isoformat())
+
     # Check for existing data
-    has_existing, existing_file, record_count = check_existing_data()
+    has_existing, existing_file, record_count = check_existing_data(
+        sample_start_date=sample_start_date,
+        sample_end_date=sample_end_date,
+    )
 
     df = None
     fresh_data_downloaded = False  # Track if we just downloaded new data
@@ -1722,14 +2124,14 @@ def main():
     # If not using existing data, download new
     if df is None or df.empty:
         fresh_data_downloaded = True  # Flag that we're downloading fresh data
-        from_year = 2015
 
         # Show summary
         console.print()
         console.print(Panel(
             f"[bold]Analysis Configuration[/bold]\n\n"
             f"Mode: full\n"
-            f"From year: {from_year}",
+            f"Sample start date: {sample_start_date.isoformat()}\n"
+            f"Sample end date: {sample_end_date.isoformat()}",
             border_style="cyan"
         ))
         console.print()
@@ -1744,7 +2146,11 @@ def main():
         start_time = time.time()
 
         # Phase 1: Download
-        df = download_data(analysis_logger, from_year=from_year)
+        df = download_data(
+            analysis_logger,
+            sample_start_date=sample_start_date,
+            sample_end_date=sample_end_date,
+        )
         if df is None or df.empty:
             console.print("[red]✗ Analysis stopped - no data available[/red]")
             return
@@ -1766,7 +2172,9 @@ def main():
             "Data Validation",
             "validated EPC dataset",
             validated_path,
-            analysis_logger
+            analysis_logger,
+            sample_start_date=sample_start_date,
+            sample_end_date=sample_end_date,
         )
     validation_report = None
 
@@ -1796,7 +2204,12 @@ def main():
                 logger.warning(f"Could not save validation report: {e}")
     else:
         # Phase 2: Validate
-        df_validated, validation_report = validate_data(df, analysis_logger)
+        df_validated, validation_report = validate_data(
+            df,
+            analysis_logger,
+            sample_start_date=sample_start_date,
+            sample_end_date=sample_end_date,
+        )
         # Cleanup raw dataframe since we now use df_validated
         del df
         gc.collect()
@@ -1817,7 +2230,9 @@ def main():
             "Methodological Adjustments",
             "methodologically adjusted dataset",
             adjusted_path,
-            analysis_logger
+            analysis_logger,
+            sample_start_date=sample_start_date,
+            sample_end_date=sample_end_date,
         )
     adjustment_summary = None
     if df_adjusted is not None:
@@ -1827,7 +2242,12 @@ def main():
         else:
             console.print("[yellow]⚠ Adjustment summary JSON not found; proceeding without it[/yellow]")
     else:
-        df_adjusted, adjustment_summary = apply_methodological_adjustments(df_validated, analysis_logger)
+        df_adjusted, adjustment_summary = apply_methodological_adjustments(
+            df_validated,
+            analysis_logger,
+            sample_start_date=sample_start_date,
+            sample_end_date=sample_end_date,
+        )
         # Cleanup pre-adjustment dataframe since we now use df_adjusted
         if 'df_validated' in locals() and df_validated is not df_adjusted:
             del df_validated
@@ -1857,37 +2277,36 @@ def main():
     )
     gc.collect()  # Cleanup GIS objects and geocoding cache
 
+    # Phase 5.5: Additional reports and supporting tables
+    additional_outputs = generate_additional_reports(
+        df_raw,
+        df_adjusted,
+        validation_report,
+        archetype_results,
+        scenario_results,
+        analysis_logger,
+    )
+
     # Phase 5: Report
     if one_stop_only:
-        generate_one_stop_report(analysis_logger)
-        additional_outputs = {}
+        generate_one_stop_report(df_adjusted, analysis_logger)
         gc.collect()  # Cleanup report generation objects
     else:
         generate_reports(archetype_results, scenario_results, subsidy_results, df_adjusted, pathway_summary, analysis_logger)
         gc.collect()  # Cleanup matplotlib figures and Excel writer objects
 
-        # Phase 5.5: Additional Reports
-        additional_outputs = generate_additional_reports(
-            df_raw,
-            df_adjusted,
-            validation_report,
-            archetype_results,
-            scenario_results,
-            analysis_logger,
-        )
-
-        # Phase 6: Package dashboard
-        package_dashboard_assets(
-            archetype_results,
-            scenario_results,
-            readiness_summary,
-            pathway_summary,
-            additional_outputs,
-            subsidy_results,
-            df_adjusted,
-            analysis_logger,
-        )
-        gc.collect()  # Final cleanup after dashboard packaging
+    # Phase 6: Package dashboard
+    package_dashboard_assets(
+        archetype_results,
+        scenario_results,
+        readiness_summary,
+        pathway_summary,
+        additional_outputs,
+        subsidy_results,
+        df_adjusted,
+        analysis_logger,
+    )
+    gc.collect()  # Final cleanup after dashboard packaging
 
     # Complete
     elapsed = time.time() - start_time

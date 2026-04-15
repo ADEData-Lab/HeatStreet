@@ -3,16 +3,18 @@
 # The core analysis (archetype, scenarios, modeling) works WITHOUT these packages
 
 # IMPORTANT FOR WINDOWS USERS:
-# Installing these on Windows is complex. If you get errors, you have two options:
-# 1. Skip spatial analysis - the rest of the toolkit works fine without it
-# 2. Use conda to install GDAL: conda install -c conda-forge geopandas
+# Installing these with pip on Windows is fragile because Fiona/GDAL often need
+# compiled native dependencies. Prefer Conda for the geospatial stack:
+#   conda install -c conda-forge geopandas pyogrio pyproj shapely rtree
+# The core analysis works without these packages if you want to skip maps.
 
-# Geospatial libraries (require GDAL)
+# Geospatial libraries (GDAL-backed; Conda recommended on Windows)
 geopandas>=0.13.0
 shapely>=2.0.0
 fiona>=1.9.0
 pyproj>=3.5.0
 rtree>=1.0.0
+pyogrio>=0.7.0
 
 # Interactive maps
 folium>=0.14.0

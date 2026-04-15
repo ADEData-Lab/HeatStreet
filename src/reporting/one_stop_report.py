@@ -216,6 +216,9 @@ class OneStopReportGenerator:
         tipping_point_df = _read_csv(self.output_dir / "fabric_tipping_point_curve.csv")
         subsidy_df = _read_csv(self.output_dir / "subsidy_sensitivity_analysis.csv")
         borough_df = _read_csv(self.output_dir / "borough_breakdown.csv")
+        borough_priority_df = _read_csv(self.output_dir / "reports" / "borough_priority_ranking.csv")
+        tenure_segmentation_df = _read_csv(self.output_dir / "reports" / "tenure_segmentation.csv")
+        heat_network_threshold_df = _read_csv(self.output_dir / "heat_network_connection_thresholds.csv")
         case_street_df = _read_csv(self.output_dir / "shakespeare_crescent_extract.csv")
         lodgements_by_year_band_df = self._build_epc_lodgements_by_year_band()
 
@@ -229,7 +232,12 @@ class OneStopReportGenerator:
         self._sections["section_7"] = self._build_section_7(hn_vs_hp_df)
         self._sections["section_8"] = self._build_section_8(tipping_point_df)
         self._sections["section_9"] = self._build_section_9(subsidy_df)
-        self._sections["section_10"] = self._build_section_10(borough_df)
+        self._sections["section_10"] = self._build_section_10(
+            borough_df,
+            borough_priority_df,
+            tenure_segmentation_df,
+            heat_network_threshold_df,
+        )
         self._sections["section_11"] = self._build_section_11(case_street_df)
         self._sections["section_12"] = self._build_section_12(adjustment_summary)
         self._sections["section_13"] = self._build_section_13()
@@ -1136,33 +1144,49 @@ class OneStopReportGenerator:
             ]
             return self._render_section(self.SECTION_TITLES[6], datapoints)
 
-        # Extract comparison datapoints
-        datapoints = []
+        datapoints = [
+            AnnotatedDatapoint(
+                name="Pathways compared",
+                key="hn_vs_hp_pathways_compared",
+                value=hn_vs_hp_df.get("pathway_name", pd.Series(dtype=str)).dropna().astype(str).tolist(),
+                definition="Pathway names included in the HP vs HN comparison table (list of strings).",
+                denominator="N/A",
+                source="data/outputs/comparisons/hn_vs_hp_comparison.csv -> pathway_name",
+                usage="HN vs HP pathway comparison coverage",
+            ),
+            AnnotatedDatapoint(
+                name="Comparison pathways count",
+                key="hn_vs_hp_pathway_count",
+                value=len(hn_vs_hp_df),
+                definition="Number of pathway rows included in the HP vs HN comparison table (count).",
+                denominator="Pathways in comparison table",
+                source="data/outputs/comparisons/hn_vs_hp_comparison.csv -> row count",
+                usage="HN vs HP pathway comparison coverage",
+            ),
+        ]
 
-        # General comparison metrics (if available in the file)
-        comparison_fields = {
-            "hn_capital_cost_mean": "Heat network mean capital cost (GBP)",
-            "hp_capital_cost_mean": "Heat pump mean capital cost (GBP)",
-            "hn_operating_cost_annual": "Heat network annual operating cost (GBP)",
-            "hp_operating_cost_annual": "Heat pump annual operating cost (GBP)",
-            "hn_carbon_emissions_kg": "Heat network annual carbon emissions (kg)",
-            "hp_carbon_emissions_kg": "Heat pump annual carbon emissions (kg)",
-            "hn_lifecycle_cost_20yr": "Heat network 20-year lifecycle cost (GBP)",
-            "hp_lifecycle_cost_20yr": "Heat pump 20-year lifecycle cost (GBP)",
-        }
-
-        for field, label in comparison_fields.items():
-            if field in hn_vs_hp_df.columns and not hn_vs_hp_df[field].isna().all():
-                value = hn_vs_hp_df[field].iloc[0] if len(hn_vs_hp_df) > 0 else None
-                datapoints.append(AnnotatedDatapoint(
-                    name=label,
-                    key=field,
-                    value=value,
-                    definition=f"{label}.",
-                    denominator="Per property",
-                    source=f"data/outputs/comparisons/hn_vs_hp_comparison.csv -> {field}",
-                    usage="HN vs HP pathway comparison",
-                ))
+        for _, row in hn_vs_hp_df.iterrows():
+            pathway_id = _snake_case(str(row.get("pathway_id", row.get("pathway_name", "pathway"))))
+            pathway_name = str(row.get("pathway_name", row.get("pathway_id", "Pathway")))
+            field_labels = {
+                "capex_mean": "Mean capital cost",
+                "bill_saving_mean": "Mean annual bill saving",
+                "co2_saving_mean": "Mean annual CO2 saving",
+                "payback_mean": "Mean simple payback",
+            }
+            for field, label in field_labels.items():
+                if field in hn_vs_hp_df.columns and not pd.isna(row.get(field)):
+                    datapoints.append(
+                        AnnotatedDatapoint(
+                            name=f"{pathway_name} {label}",
+                            key=f"{pathway_id}_{field}",
+                            value=row.get(field),
+                            definition=f"{label} for {pathway_name}.",
+                            denominator="Per pathway row",
+                            source=f"data/outputs/comparisons/hn_vs_hp_comparison.csv -> {field}",
+                            usage="HN vs HP pathway comparison",
+                        )
+                    )
 
         # Include full comparison table
         tables = [(hn_vs_hp_df, "Heat Network vs Heat Pump Comparison")]
@@ -1393,9 +1417,18 @@ class OneStopReportGenerator:
 
         return self._render_section(self.SECTION_TITLES[8], datapoints, tables=tables)
 
-    def _build_section_10(self, borough_df: Optional[pd.DataFrame]) -> Dict[str, Any]:
+    def _build_section_10(
+        self,
+        borough_df: Optional[pd.DataFrame],
+        borough_priority_df: Optional[pd.DataFrame],
+        tenure_segmentation_df: Optional[pd.DataFrame],
+        heat_network_threshold_df: Optional[pd.DataFrame],
+    ) -> Dict[str, Any]:
         """Section 10: Borough-level breakdown and prioritisation."""
-        if borough_df is None or borough_df.empty:
+        if all(
+            df is None or df.empty
+            for df in [borough_df, borough_priority_df, tenure_segmentation_df, heat_network_threshold_df]
+        ):
             datapoints = [
                 AnnotatedDatapoint(
                     name="Borough breakdown status",
@@ -1409,20 +1442,71 @@ class OneStopReportGenerator:
             ]
             return self._render_section(self.SECTION_TITLES[9], datapoints)
 
-        datapoints = [
-            AnnotatedDatapoint(
-                name="Boroughs analyzed",
-                key="boroughs_analyzed",
-                value=len(borough_df),
-                definition="Number of London boroughs in breakdown (count).",
-                denominator="London boroughs",
-                source="data/outputs/borough_breakdown.csv -> row count",
-                usage="Borough coverage",
-            ),
-        ]
+        datapoints = []
+        tables = []
 
-        # Include full borough breakdown table
-        tables = [(borough_df, "Borough-Level Breakdown - Full Data")]
+        if borough_df is not None and not borough_df.empty:
+            datapoints.append(
+                AnnotatedDatapoint(
+                    name="Boroughs analyzed",
+                    key="boroughs_analyzed",
+                    value=len(borough_df),
+                    definition="Number of London boroughs in breakdown (count).",
+                    denominator="London boroughs",
+                    source="data/outputs/borough_breakdown.csv -> row count",
+                    usage="Borough coverage",
+                )
+            )
+            tables.append((borough_df, "Borough-Level Breakdown - Full Data"))
+
+        if borough_priority_df is not None and not borough_priority_df.empty:
+            top_borough = borough_priority_df.sort_values("rank").iloc[0]
+            datapoints.append(
+                AnnotatedDatapoint(
+                    name="Highest-priority borough",
+                    key="top_priority_borough",
+                    value=top_borough.get("borough"),
+                    definition="Top-ranked borough under the composite priority score (text).",
+                    denominator="Borough priority table",
+                    source="data/outputs/reports/borough_priority_ranking.csv -> borough",
+                    usage="Borough prioritisation summary",
+                )
+            )
+            tables.append((borough_priority_df, "Borough Priority Ranking"))
+
+        if tenure_segmentation_df is not None and not tenure_segmentation_df.empty:
+            largest_tenure = tenure_segmentation_df.sort_values("property_count", ascending=False).iloc[0]
+            datapoints.append(
+                AnnotatedDatapoint(
+                    name="Largest tenure group",
+                    key="largest_tenure_group",
+                    value=largest_tenure.get("tenure_group"),
+                    definition="Tenure group with the largest property count in the segmentation table (text).",
+                    denominator="Tenure segmentation table",
+                    source="data/outputs/reports/tenure_segmentation.csv -> tenure_group",
+                    usage="Tenure targeting summary",
+                )
+            )
+            tables.append((tenure_segmentation_df, "Tenure Segmentation"))
+
+        if heat_network_threshold_df is not None and not heat_network_threshold_df.empty:
+            viable_df = heat_network_threshold_df[
+                heat_network_threshold_df["viable_25yr_threshold"].fillna(False).astype(bool)
+            ]
+            if not viable_df.empty:
+                min_viable = viable_df.sort_values(["tier", "connection_rate"]).iloc[0]
+                datapoints.append(
+                    AnnotatedDatapoint(
+                        name="Minimum viable heat-network connection rate",
+                        key="minimum_viable_heat_network_connection_rate_pct",
+                        value=float(min_viable.get("connection_rate", 0)) * 100,
+                        definition="Lowest modeled connection rate achieving a sub-25-year network payback (percent).",
+                        denominator="Heat network threshold scenarios",
+                        source="data/outputs/heat_network_connection_thresholds.csv -> connection_rate",
+                        usage="Heat network threshold summary",
+                    )
+                )
+            tables.append((heat_network_threshold_df, "Heat Network Connection Thresholds"))
 
         return self._render_section(self.SECTION_TITLES[9], datapoints, tables=tables)
 

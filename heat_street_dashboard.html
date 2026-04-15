@@ -767,6 +767,7 @@
             <button class="nav-btn" data-tab="readiness">Retrofit Readiness</button>
             <button class="nav-btn" data-tab="scenarios">Scenario Comparison</button>
             <button class="nav-btn" data-tab="subsidy">Subsidy Sensitivity</button>
+            <button class="nav-btn" data-tab="priorities">Delivery Priorities</button>
         </div>
     </nav>
 
@@ -1236,6 +1237,28 @@
                     </tbody>
                 </table>
             </div>
+
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Heat pump vs heat network comparison</h2>
+                    <p class="card-subtitle">Pathway-level comparison exported from the latest run</p>
+                </div>
+                <table class="data-table" id="hnVsHpTable">
+                    <thead>
+                        <tr>
+                            <th>Pathway</th>
+                            <th>Homes</th>
+                            <th>Mean capex</th>
+                            <th>Mean bill saving</th>
+                            <th>Mean CO&#8322; saving</th>
+                            <th>Mean payback</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td colspan="6" style="color: var(--text-muted);">Loading…</td></tr>
+                    </tbody>
+                </table>
+            </div>
         </div>
 
         <!-- Subsidy Sensitivity Tab -->
@@ -1357,6 +1380,134 @@
                         <tr><td colspan="7" style="color: var(--text-muted);">Loadingâ€¦</td></tr>
                     </tbody>
                 </table>
+            </div>
+        </div>
+
+        <div id="priorities" class="tab-content">
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Delivery priorities</h2>
+                    <p class="card-subtitle">Borough targeting, tenure signals, exemplar stock, and network thresholds</p>
+                </div>
+                <div class="narrative">
+                    <p>
+                        This tab folds the previously skipped one-stop outputs into the main briefing view. It is designed to answer
+                        where to focus first, which tenure groups may need different policy levers, how the exemplar street compares,
+                        and what connection rates make heat networks look viable under the simplified threshold model.
+                    </p>
+                </div>
+            </div>
+
+            <div class="grid-2-equal">
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">Borough breakdown</h2>
+                    </div>
+                    <table class="data-table" id="boroughBreakdownTable">
+                        <thead>
+                            <tr>
+                                <th>Borough</th>
+                                <th>Properties</th>
+                                <th>Mean EPC</th>
+                                <th>Mean energy</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td colspan="4" style="color: var(--text-muted);">Loading…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">Borough priority ranking</h2>
+                    </div>
+                    <table class="data-table" id="boroughPriorityTable">
+                        <thead>
+                            <tr>
+                                <th>Rank</th>
+                                <th>Borough</th>
+                                <th>Priority score</th>
+                                <th>Mean EPC</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td colspan="4" style="color: var(--text-muted);">Loading…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="grid-2-equal">
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">Tenure segmentation</h2>
+                    </div>
+                    <table class="data-table" id="tenureSegmentationTable">
+                        <thead>
+                            <tr>
+                                <th>Group</th>
+                                <th>Share</th>
+                                <th>Mean SAP</th>
+                                <th>Wall insulated</th>
+                                <th>Gas</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td colspan="5" style="color: var(--text-muted);">Loading…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">Heat-network thresholds</h2>
+                    </div>
+                    <table class="data-table" id="thresholdTable">
+                        <thead>
+                            <tr>
+                                <th>Tier</th>
+                                <th>Connection rate</th>
+                                <th>Connected</th>
+                                <th>Payback</th>
+                                <th>Viable</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td colspan="5" style="color: var(--text-muted);">Loading…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <div class="grid-2-equal">
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">Case street summary</h2>
+                    </div>
+                    <div class="narrative" id="caseStreetSummary">
+                        <p>Loading…</p>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h2 class="card-title">Case street sample</h2>
+                    </div>
+                    <table class="data-table" id="caseStreetTable">
+                        <thead>
+                            <tr>
+                                <th>Address</th>
+                                <th>Postcode</th>
+                                <th>EPC</th>
+                                <th>SAP</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr><td colspan="4" style="color: var(--text-muted);">Loading…</td></tr>
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </main>
@@ -1515,6 +1666,48 @@
             const out = {};
             (section?.datapoints || []).forEach(dp => { out[dp.key] = dp.value; });
             return out;
+        }
+
+        function escapeHtml(value) {
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
+        }
+
+        function formatCellValue(value, kind = 'text') {
+            if (value === null || value === undefined || value === '') return '—';
+            if (kind === 'int') return formatInt(value);
+            if (kind === 'percent') return formatPercent(value, 1);
+            if (kind === 'money') return formatGbp(value, 0);
+            if (kind === 'years') return `${Number(value).toFixed(1)} yrs`;
+            if (kind === 'bool') return value ? 'Yes' : 'No';
+            if (typeof value === 'number' && !Number.isNaN(value)) {
+                return Number(value).toLocaleString(undefined, { maximumFractionDigits: 2 });
+            }
+            return escapeHtml(value);
+        }
+
+        function findSectionTable(oneStop, sectionId, captionIncludes) {
+            const tables = oneStop?.sections?.[sectionId]?.tables || [];
+            return tables.find(t => (t.caption || '').toLowerCase().includes(captionIncludes.toLowerCase())) || null;
+        }
+
+        function renderTableBody(tableId, rows, columns, emptyMessage) {
+            const tbody = document.querySelector(`#${tableId} tbody`);
+            if (!tbody) return;
+            if (!rows.length) {
+                tbody.innerHTML = `<tr><td colspan="${columns.length}" style="color: var(--text-muted);">${escapeHtml(emptyMessage)}</td></tr>`;
+                return;
+            }
+
+            tbody.innerHTML = rows.map((row) => `
+                <tr>
+                    ${columns.map((col) => `<td>${formatCellValue(row[col.key], col.kind)}</td>`).join('')}
+                </tr>
+            `).join('');
         }
 
         async function tryFetchJson(path) {
@@ -2405,6 +2598,132 @@
             });
         }
 
+        function renderHnVsHpComparisonTable(oneStop) {
+            const table = findSectionTable(oneStop, 'section_7', 'heat network vs heat pump comparison');
+            const rows = table?.data || [];
+            renderTableBody(
+                'hnVsHpTable',
+                rows.map((row) => ({
+                    pathway_name: row.pathway_name || row.pathway_id,
+                    n_homes: row.n_homes,
+                    capex_mean: row.capex_mean,
+                    bill_saving_mean: row.bill_saving_mean,
+                    co2_saving_mean: row.co2_saving_mean,
+                    payback_mean: row.payback_mean,
+                })),
+                [
+                    { key: 'pathway_name' },
+                    { key: 'n_homes', kind: 'int' },
+                    { key: 'capex_mean', kind: 'money' },
+                    { key: 'bill_saving_mean', kind: 'money' },
+                    { key: 'co2_saving_mean' },
+                    { key: 'payback_mean', kind: 'years' },
+                ],
+                'No HP vs HN comparison table found in one-stop output.'
+            );
+        }
+
+        function renderPrioritiesTab(oneStop) {
+            const boroughRows = findSectionTable(oneStop, 'section_10', 'borough-level breakdown')?.data || [];
+            const priorityRows = findSectionTable(oneStop, 'section_10', 'borough priority ranking')?.data || [];
+            const tenureRows = findSectionTable(oneStop, 'section_10', 'tenure segmentation')?.data || [];
+            const thresholdRows = findSectionTable(oneStop, 'section_10', 'heat network connection thresholds')?.data || [];
+            const caseStreetRows = findSectionTable(oneStop, 'section_11', 'case street sample')?.data || [];
+            const caseStreetDatapoints = getDatapointMap(oneStop?.sections?.section_11);
+
+            renderTableBody(
+                'boroughBreakdownTable',
+                boroughRows.map((row) => ({
+                    borough: row.LOCAL_AUTHORITY_NAME || row.LOCAL_AUTHORITY || row.index,
+                    property_count: row.property_count,
+                    mean_epc_rating: row.mean_epc_rating,
+                    mean_energy_kwh_m2_year: row.mean_energy_kwh_m2_year,
+                })),
+                [
+                    { key: 'borough' },
+                    { key: 'property_count', kind: 'int' },
+                    { key: 'mean_epc_rating' },
+                    { key: 'mean_energy_kwh_m2_year' },
+                ],
+                'No borough breakdown table found in one-stop output.'
+            );
+
+            renderTableBody(
+                'boroughPriorityTable',
+                priorityRows,
+                [
+                    { key: 'rank', kind: 'int' },
+                    { key: 'borough' },
+                    { key: 'composite_priority_score' },
+                    { key: 'mean_epc_score' },
+                ],
+                'No borough priority ranking found in one-stop output.'
+            );
+
+            renderTableBody(
+                'tenureSegmentationTable',
+                tenureRows,
+                [
+                    { key: 'tenure_group' },
+                    { key: 'share_pct', kind: 'percent' },
+                    { key: 'mean_sap_score' },
+                    { key: 'wall_insulation_rate_pct', kind: 'percent' },
+                    { key: 'pct_gas_boiler', kind: 'percent' },
+                ],
+                'No tenure segmentation table found in one-stop output.'
+            );
+
+            renderTableBody(
+                'thresholdTable',
+                thresholdRows.map((row) => ({
+                    tier: row.tier,
+                    connection_rate_pct: Number(row.connection_rate || 0) * 100,
+                    properties_connected: row.properties_connected,
+                    network_payback_years: row.network_payback_years,
+                    viable_25yr_threshold: row.viable_25yr_threshold,
+                })),
+                [
+                    { key: 'tier' },
+                    { key: 'connection_rate_pct', kind: 'percent' },
+                    { key: 'properties_connected', kind: 'int' },
+                    { key: 'network_payback_years', kind: 'years' },
+                    { key: 'viable_25yr_threshold', kind: 'bool' },
+                ],
+                'No heat-network threshold table found in one-stop output.'
+            );
+
+            renderTableBody(
+                'caseStreetTable',
+                caseStreetRows.map((row) => ({
+                    ADDRESS1: row.ADDRESS1,
+                    POSTCODE: row.POSTCODE,
+                    CURRENT_ENERGY_RATING: row.CURRENT_ENERGY_RATING,
+                    CURRENT_ENERGY_EFFICIENCY: row.CURRENT_ENERGY_EFFICIENCY,
+                })),
+                [
+                    { key: 'ADDRESS1' },
+                    { key: 'POSTCODE' },
+                    { key: 'CURRENT_ENERGY_RATING' },
+                    { key: 'CURRENT_ENERGY_EFFICIENCY' },
+                ],
+                'No case street sample found in one-stop output.'
+            );
+
+            const summary = document.getElementById('caseStreetSummary');
+            if (summary) {
+                const propertyCount = formatInt(caseStreetDatapoints.case_street_property_count);
+                const meanSap = caseStreetDatapoints.case_street_mean_sap == null
+                    ? '—'
+                    : Number(caseStreetDatapoints.case_street_mean_sap).toFixed(1);
+                summary.innerHTML = `
+                    <p><strong>Street:</strong> ${escapeHtml(caseStreetDatapoints.case_street_name || 'Shakespeare Crescent')}</p>
+                    <p><strong>Properties sampled:</strong> ${propertyCount}</p>
+                    <p><strong>Mean SAP:</strong> ${meanSap}</p>
+                    <p><strong>Modal EPC band:</strong> ${escapeHtml(caseStreetDatapoints.case_street_modal_epc_band || '—')}</p>
+                `;
+            }
+        }
+
         function selectScenario(scenarioId) {
             const data = scenarioData[scenarioId];
             if (!data) return;
@@ -2491,7 +2810,9 @@
 
             scenarioData = buildScenarioDataFromOneStop(oneStop);
             renderScenarioTable();
+            renderHnVsHpComparisonTable(oneStop);
             renderHeatNetworkTierTable(oneStop);
+            renderPrioritiesTab(oneStop);
 
             const epcDist = sec3.epc_band_distribution || {};
             const epcLabels = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];

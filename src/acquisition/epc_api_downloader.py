@@ -13,6 +13,7 @@ import pandas as pd
 import io
 from pathlib import Path
 from typing import List, Optional, Dict
+from datetime import date as date_cls
 from datetime import datetime
 from tqdm import tqdm
 from loguru import logger
@@ -129,6 +130,8 @@ class EPCAPIDownloader:
         borough_name: str,
         property_type: str = 'house',
         from_year: int = 2015,
+        sample_start_date: Optional[date_cls] = None,
+        sample_end_date: Optional[date_cls] = None,
         max_results: Optional[int] = None,
         log_borough: bool = True,
         show_progress: bool = True,
@@ -140,6 +143,8 @@ class EPCAPIDownloader:
             borough_name: Name of the London borough
             property_type: Property type filter (default: 'house')
             from_year: Earliest year for certificates (default: 2015)
+            sample_start_date: Exact inclusive sample start date
+            sample_end_date: Exact inclusive sample end date
             max_results: Maximum number of results to download (None = all)
 
         Returns:
@@ -206,6 +211,12 @@ class EPCAPIDownloader:
 
         if all_data:
             df = pd.concat(all_data, ignore_index=True)
+            df = self._apply_sample_window_filter(
+                df,
+                sample_start_date=sample_start_date,
+                sample_end_date=sample_end_date,
+                log_prefix=borough_name if log_borough else "download",
+            )
             if log_borough:
                 logger.info(f"Downloaded {len(df):,} records for {borough_name} in {page_count} pages")
             return df
@@ -262,10 +273,71 @@ class EPCAPIDownloader:
             logger.error(f"Unexpected error: {e}")
             return None, None
 
+    def _apply_sample_window_filter(
+        self,
+        df: pd.DataFrame,
+        sample_start_date: Optional[date_cls] = None,
+        sample_end_date: Optional[date_cls] = None,
+        log_prefix: str = "download",
+    ) -> pd.DataFrame:
+        """
+        Apply an exact inclusive date filter after download.
+
+        The legacy EPC API only supports coarse year filtering server-side, so
+        we trim to the exact requested sample window locally using
+        LODGEMENT_DATE with INSPECTION_DATE as fallback.
+        """
+        if df.empty or (sample_start_date is None and sample_end_date is None):
+            return df
+
+        lodgement_col = next(
+            (col for col in ['LODGEMENT_DATE', 'lodgement-date'] if col in df.columns),
+            None,
+        )
+        inspection_col = next(
+            (col for col in ['INSPECTION_DATE', 'inspection-date'] if col in df.columns),
+            None,
+        )
+
+        if lodgement_col is None and inspection_col is None:
+            logger.warning(
+                f"{log_prefix}: Could not apply exact sample window filter because no lodgement/inspection date columns were found"
+            )
+            return df
+
+        lodgement_dates = (
+            pd.to_datetime(df[lodgement_col], errors='coerce', dayfirst=False)
+            if lodgement_col
+            else pd.Series(pd.NaT, index=df.index)
+        )
+        inspection_dates = (
+            pd.to_datetime(df[inspection_col], errors='coerce', dayfirst=False)
+            if inspection_col
+            else pd.Series(pd.NaT, index=df.index)
+        )
+        effective_dates = lodgement_dates.fillna(inspection_dates)
+        mask = effective_dates.notna()
+
+        if sample_start_date is not None:
+            mask &= effective_dates.dt.date >= sample_start_date
+        if sample_end_date is not None:
+            mask &= effective_dates.dt.date <= sample_end_date
+
+        filtered_df = df.loc[mask].copy()
+        logger.info(
+            f"{log_prefix}: Applied exact sample window filter "
+            f"{sample_start_date.isoformat() if sample_start_date else 'open'} to "
+            f"{sample_end_date.isoformat() if sample_end_date else 'open'}; "
+            f"retained {len(filtered_df):,} / {len(df):,} records"
+        )
+        return filtered_df
+
     def download_all_london_boroughs(
         self,
         property_types: Optional[List[str]] = None,
         from_year: int = 2015,
+        sample_start_date: Optional[date_cls] = None,
+        sample_end_date: Optional[date_cls] = None,
         max_results_per_borough: Optional[int] = None,
         max_workers: int = 4,
         log_boroughs: bool = True,
@@ -276,6 +348,8 @@ class EPCAPIDownloader:
         Args:
             property_types: List of property types to download (default: ['house'])
             from_year: Earliest year for certificates (default: 2015)
+            sample_start_date: Exact inclusive sample start date
+            sample_end_date: Exact inclusive sample end date
             max_results_per_borough: Max results per borough (None = all)
             max_workers: Number of parallel download threads (default: 4)
 
@@ -288,6 +362,10 @@ class EPCAPIDownloader:
         logger.info(f"Downloading EPC data for all {len(self.LONDON_LA_CODES)} London boroughs...")
         logger.info(f"Property types: {property_types}")
         logger.info(f"From year: {from_year}")
+        if sample_start_date and sample_end_date:
+            logger.info(
+                f"Exact sample window: {sample_start_date.isoformat()} to {sample_end_date.isoformat()}"
+            )
         logger.info(f"Using {max_workers} parallel download threads")
 
         all_borough_data = []
@@ -300,6 +378,8 @@ class EPCAPIDownloader:
                     borough_name=borough_name,
                     property_type=property_type,
                     from_year=from_year,
+                    sample_start_date=sample_start_date,
+                    sample_end_date=sample_end_date,
                     max_results=max_results_per_borough,
                     log_borough=log_boroughs,
                     show_progress=log_boroughs,
@@ -367,6 +447,8 @@ class EPCAPIDownloader:
             Filtered DataFrame
         """
         logger.info("Applying Edwardian terraced housing filters...")
+        df = df.copy()
+        df.columns = df.columns.str.replace('-', '_').str.upper()
         initial_count = len(df)
 
         if df.empty:

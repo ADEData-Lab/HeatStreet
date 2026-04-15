@@ -61,6 +61,11 @@ export default function HeatStreetDashboard() {
     retrofitReadinessData = [],
     interventionData = [],
     boroughData = [],
+    boroughPriorityData = [],
+    tenureSegmentationData = [],
+    caseStreetData = {},
+    heatNetworkThresholdData = [],
+    hnVsHpComparisonData = [],
     confidenceBandsData = [],
     sensitivityData = [],
     gridPeakData = [],
@@ -84,6 +89,17 @@ export default function HeatStreetDashboard() {
     mergedSummary.dhViableProperties && totalProperties
       ? (mergedSummary.dhViableProperties / totalProperties) * 100
       : null;
+  const caseStreetSummary = caseStreetData?.summary || {};
+  const caseStreetSample = caseStreetData?.sample || [];
+  const topPriorityBorough = boroughPriorityData[0];
+  const thresholdSummaryRows = [...heatNetworkThresholdData]
+    .sort((a, b) => Number(a.connectionRatePct || 0) - Number(b.connectionRatePct || 0))
+    .reduce((acc, row) => {
+      if (!row?.tier || !row.viable25yrThreshold || acc.some((item) => item.tier === row.tier)) {
+        return acc;
+      }
+      return [...acc, row];
+    }, []);
 
   const formatNumber = (value, options = {}) => {
     if (value === null || value === undefined || Number.isNaN(Number(value))) return '—';
@@ -293,6 +309,58 @@ export default function HeatStreetDashboard() {
                 </ResponsiveContainer>
               </div>
             </div>
+
+            <div style={styles.gridTwo}>
+              <div style={styles.card}>
+                <h3 style={styles.cardTitle}>Case street summary</h3>
+                <table style={styles.table}>
+                  <tbody>
+                    <tr>
+                      <td>Street</td>
+                      <td>{caseStreetSummary.streetName || 'Shakespeare Crescent'}</td>
+                    </tr>
+                    <tr>
+                      <td>Properties sampled</td>
+                      <td>{formatNumber(caseStreetSummary.propertyCount)}</td>
+                    </tr>
+                    <tr>
+                      <td>Mean SAP</td>
+                      <td>{formatNumber(caseStreetSummary.meanSAP, { maximumFractionDigits: 1 })}</td>
+                    </tr>
+                    <tr>
+                      <td>Modal EPC band</td>
+                      <td>{caseStreetSummary.modalEpcBand || '—'}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+
+              <div style={styles.card}>
+                <h3 style={styles.cardTitle}>Case street sample</h3>
+                <table style={styles.table}>
+                  <thead>
+                    <tr>
+                      <th>Address</th>
+                      <th>EPC</th>
+                      <th>SAP</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {caseStreetSample.length ? caseStreetSample.slice(0, 6).map((row, index) => (
+                      <tr key={`${row.LMK_KEY || row.ADDRESS1 || 'case'}-${index}`}>
+                        <td>{row.ADDRESS1 || row.POSTCODE || row.LMK_KEY || '—'}</td>
+                        <td>{row.CURRENT_ENERGY_RATING || '—'}</td>
+                        <td>{formatNumber(row.CURRENT_ENERGY_EFFICIENCY, { maximumFractionDigits: 0 })}</td>
+                      </tr>
+                    )) : (
+                      <tr>
+                        <td colSpan="3">No case street sample available.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </section>
         )}
 
@@ -396,6 +464,37 @@ export default function HeatStreetDashboard() {
               <p className="subtle">Click a bar to drill into the scenario details.</p>
             </div>
             <ComparisonDrawer />
+            <div style={styles.card}>
+              <h3 style={styles.cardTitle}>HP vs HN pathway comparison</h3>
+              <table style={styles.table}>
+                <thead>
+                  <tr>
+                    <th>Pathway</th>
+                    <th>Homes</th>
+                    <th>Capex mean</th>
+                    <th>Bill saving</th>
+                    <th>CO2 saving</th>
+                    <th>Payback</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {hnVsHpComparisonData.length ? hnVsHpComparisonData.map((row) => (
+                    <tr key={row.pathwayId || row.pathwayName}>
+                      <td>{row.pathwayName || row.pathwayId}</td>
+                      <td>{formatNumber(row.homes)}</td>
+                      <td>£{formatNumber(row.capexMean, { maximumFractionDigits: 0 })}</td>
+                      <td>£{formatNumber(row.billSavingMean, { maximumFractionDigits: 0 })}</td>
+                      <td>{formatNumber(row.co2SavingMean, { maximumFractionDigits: 2 })}</td>
+                      <td>{formatNumber(row.paybackMean, { maximumFractionDigits: 1 })} yrs</td>
+                    </tr>
+                  )) : (
+                    <tr>
+                      <td colSpan="6">No HP vs HN comparison data available.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
           </section>
         )}
 
@@ -527,6 +626,68 @@ export default function HeatStreetDashboard() {
                 </tbody>
               </table>
             </div>
+            <div style={styles.gridTwo}>
+              <div style={styles.card}>
+                <h3 style={styles.cardTitle}>Priority ranking</h3>
+                <p className="subtle">
+                  {topPriorityBorough
+                    ? `Top-ranked borough: ${topPriorityBorough.borough} (${formatNumber(topPriorityBorough.propertyCount)} properties)`
+                    : 'No borough priority ranking available.'}
+                </p>
+                <table style={styles.table}>
+                  <thead>
+                    <tr>
+                      <th>Rank</th>
+                      <th>Borough</th>
+                      <th>Priority score</th>
+                      <th>Mean EPC</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {boroughPriorityData.length ? boroughPriorityData.slice(0, 10).map((row) => (
+                      <tr key={`${row.borough}-${row.rank}`}>
+                        <td>{row.rank}</td>
+                        <td>{row.borough}</td>
+                        <td>{formatNumber(row.priorityScore, { maximumFractionDigits: 3 })}</td>
+                        <td>{formatNumber(row.meanEPC, { maximumFractionDigits: 1 })}</td>
+                      </tr>
+                    )) : (
+                      <tr>
+                        <td colSpan="4">No borough priority ranking available.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <div style={styles.card}>
+                <h3 style={styles.cardTitle}>Heat-network thresholds</h3>
+                <table style={styles.table}>
+                  <thead>
+                    <tr>
+                      <th>Tier</th>
+                      <th>Min viable rate</th>
+                      <th>Connected</th>
+                      <th>Payback</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(thresholdSummaryRows.length ? thresholdSummaryRows : heatNetworkThresholdData.slice(0, 8)).length
+                      ? (thresholdSummaryRows.length ? thresholdSummaryRows : heatNetworkThresholdData.slice(0, 8)).map((row) => (
+                        <tr key={`${row.tier}-${row.connectionRatePct}`}>
+                          <td>{row.tier}</td>
+                          <td>{formatPercent(row.connectionRatePct, 1)}</td>
+                          <td>{formatNumber(row.propertiesConnected)}</td>
+                          <td>{formatNumber(row.networkPaybackYears, { maximumFractionDigits: 1 })} yrs</td>
+                        </tr>
+                      )) : (
+                        <tr>
+                          <td colSpan="4">No heat-network threshold analysis available.</td>
+                        </tr>
+                      )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
             <MapView />
           </section>
         )}
@@ -618,6 +779,47 @@ export default function HeatStreetDashboard() {
 
         {activeTab === 'policy' && (
           <section>
+            <div style={styles.introBlock}>
+              <div style={styles.introLabel}>Delivery targeting</div>
+              <h3 style={styles.introTitle}>Who to focus on and where policy friction sits</h3>
+              <ul style={styles.introList}>
+                <li>Tenure segmentation shows where SAP, insulation, and heating-system profiles differ across ownership models.</li>
+                <li>Use it to frame programme design, landlord levers, and where subsidy or engagement support is likely to matter most.</li>
+              </ul>
+            </div>
+            <div style={styles.card}>
+              <h3 style={styles.cardTitle}>Tenure segmentation</h3>
+              <table style={styles.table}>
+                <thead>
+                  <tr>
+                    <th>Group</th>
+                    <th>Share</th>
+                    <th>Mean SAP</th>
+                    <th>Wall insulated</th>
+                    <th>Gas</th>
+                    <th>HP</th>
+                    <th>District</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {tenureSegmentationData.length ? tenureSegmentationData.map((row) => (
+                    <tr key={row.tenureGroup}>
+                      <td>{row.label}</td>
+                      <td>{formatPercent(row.sharePct, 1)}</td>
+                      <td>{formatNumber(row.meanSAP, { maximumFractionDigits: 1 })}</td>
+                      <td>{formatPercent(row.wallInsulationRatePct, 1)}</td>
+                      <td>{formatPercent(row.gasBoilerPct, 1)}</td>
+                      <td>{formatPercent(row.heatPumpPct, 1)}</td>
+                      <td>{formatPercent(row.districtPct, 1)}</td>
+                    </tr>
+                  )) : (
+                    <tr>
+                      <td colSpan="7">No tenure segmentation data available.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
             <div style={styles.card}>
               <h3 style={styles.cardTitle}>Heat network tiers</h3>
               <table style={styles.table}>

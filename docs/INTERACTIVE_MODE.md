@@ -58,7 +58,7 @@ You'll be asked what to download:
 
 **Full Dataset** (2-4 hours)
 - All 33 London boroughs
-- Complete EPC history from 2015
+- User-selected sample window
 - Production-ready dataset
 
 **Custom Selection**
@@ -79,6 +79,7 @@ These are saved to `.env` for future use.
 
 Review your settings before starting:
 - Data scope
+- Sample start and end dates
 - Time estimate
 - Storage requirements
 
