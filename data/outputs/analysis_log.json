@@ -1,0 +1,384 @@
+{
+  "metadata": {
+    "analysis_start": "2026-04-03T07:43:02.193456",
+    "total_properties": 167861,
+    "data_source": "EPC API",
+    "analysis_type": "Edwardian Terraced Housing - Heat Street Analysis",
+    "sample_start_date": "2016-01-01",
+    "sample_end_date": "2025-12-31",
+    "analysis_end": "2026-04-03T07:51:30.459050",
+    "total_duration_seconds": 508.265612,
+    "total_duration_minutes": 8.471093533333333
+  },
+  "phases": [
+    {
+      "phase_number": 1,
+      "phase_name": "Loading Existing Data",
+      "description": "Load previously downloaded EPC data from file",
+      "start_time": "2026-04-03T07:43:34.984844",
+      "end_time": "2026-04-03T07:43:36.885403",
+      "duration_seconds": 1.900559,
+      "status": "completed",
+      "success": true,
+      "message": "Loaded 183,303 existing records",
+      "metrics": {
+        "records_loaded": {
+          "value": 183303,
+          "description": "Records loaded from existing file"
+        }
+      },
+      "outputs": [
+        {
+          "path": "C:\\Users\\PhilipNicholson\\OneDrive - ADE\\Documents\\Scratch\\HeatStreet\\data\\raw\\epc_london_filtered.csv",
+          "type": "csv",
+          "description": "Existing EPC data loaded",
+          "documentation": "C:\\Users\\PhilipNicholson\\OneDrive - ADE\\Documents\\Scratch\\HeatStreet\\data\\raw\\epc_london_filtered_calculation.md"
+        }
+      ]
+    },
+    {
+      "phase_number": 2,
+      "phase_name": "Data Validation",
+      "description": "Load existing validated EPC dataset from disk",
+      "start_time": "2026-04-03T07:43:37.296652",
+      "end_time": "2026-04-03T07:43:39.402285",
+      "duration_seconds": 2.105633,
+      "status": "completed",
+      "success": true,
+      "message": "Loaded existing validated EPC dataset",
+      "metrics": {
+        "records_loaded": {
+          "value": 167861,
+          "description": "validated EPC dataset records loaded from disk"
+        }
+      },
+      "outputs": [
+        {
+          "path": "C:\\Users\\PhilipNicholson\\OneDrive - ADE\\Documents\\Scratch\\HeatStreet\\data\\processed\\epc_london_validated.csv",
+          "type": "csv",
+          "description": "Existing validated EPC dataset",
+          "documentation": "C:\\Users\\PhilipNicholson\\OneDrive - ADE\\Documents\\Scratch\\HeatStreet\\data\\processed\\epc_london_validated_calculation.md"
+        }
+      ]
+    },
+    {
+      "phase_number": 3,
+      "phase_name": "Methodological Adjustments",
+      "description": "Load existing methodologically adjusted dataset from disk",
+      "start_time": "2026-04-03T07:43:39.911068",
+      "end_time": "2026-04-03T07:43:42.317927",
+      "duration_seconds": 2.406859,
+      "status": "completed",
+      "success": true,
+      "message": "Loaded existing methodologically adjusted dataset",
+      "metrics": {
+        "records_loaded": {
+          "value": 167861,
+          "description": "methodologically adjusted dataset records loaded from disk"
+        }
+      },
+      "outputs": [
+        {
+          "path": "C:\\Users\\PhilipNicholson\\OneDrive - ADE\\Documents\\Scratch\\HeatStreet\\data\\processed\\epc_london_adjusted.csv",
+          "type": "csv",
+          "description": "Existing methodologically adjusted dataset",
+          "documentation": "C:\\Users\\PhilipNicholson\\OneDrive - ADE\\Documents\\Scratch\\HeatStreet\\data\\processed\\epc_london_adjusted_calculation.md"
+        }
+      ]
+    },
+    {
+      "phase_number": 4,
+      "phase_name": "Archetype Analysis",
+      "description": "Characterize Edwardian housing stock by EPC bands, insulation, heating systems, etc.",
+      "start_time": "2026-04-03T07:43:42.332440",
+      "end_time": "2026-04-03T07:43:43.951246",
+      "duration_seconds": 1.618806,
+      "status": "completed",
+      "success": true,
+      "message": "Archetype characterization complete",
+      "metrics": {
+        "epc_band_D": {
+          "value": 103778,
+          "description": "Band D: 61.8%"
+        },
+        "epc_band_E": {
+          "value": 22845,
+          "description": "Band E: 13.6%"
+        },
+        "epc_band_F": {
+          "value": 2267,
+          "description": "Band F: 1.4%"
+        },
+        "epc_band_G": {
+          "value": 1162,
+          "description": "Band G: 0.7%"
+        }
+      },
+      "outputs": [
+        {
+          "path": "data/outputs/archetype_analysis_results.txt",
+          "type": "report",
+          "description": "Archetype characterization results",
+          "documentation": "data\\outputs\\archetype_analysis_results_calculation.md"
+        }
+      ]
+    },
+    {
+      "phase_number": 5,
+      "phase_name": "Scenario Modeling",
+      "description": "Model decarbonization scenarios (heat pump, hybrid, district heating) and subsidy sensitivity",
+      "start_time": "2026-04-03T07:43:44.070552",
+      "end_time": "2026-04-03T07:50:01.308585",
+      "duration_seconds": 377.238033,
+      "status": "completed",
+      "success": true,
+      "message": "7 scenarios modeled successfully",
+      "metrics": {
+        "scenario_baseline_cost": {
+          "value": 0,
+          "description": "Capital cost per property"
+        },
+        "scenario_fabric_only_cost": {
+          "value": 22301.319699036703,
+          "description": "Capital cost per property"
+        },
+        "scenario_fabric_to_tipping_point_cost": {
+          "value": 15817.105289495476,
+          "description": "Capital cost per property"
+        },
+        "scenario_minimum_fabric_hp_ready_cost": {
+          "value": 18937.28269818481,
+          "description": "Capital cost per property"
+        },
+        "scenario_heat_pump_cost": {
+          "value": 25422.171326275908,
+          "description": "Capital cost per property"
+        },
+        "scenario_heat_network_cost": {
+          "value": 20539.07912499032,
+          "description": "Capital cost per property"
+        },
+        "scenario_hybrid_cost": {
+          "value": 19533.123900131657,
+          "description": "Capital cost per property"
+        },
+        "scenarios_modeled": {
+          "value": 7,
+          "description": "Decarbonization scenarios analyzed"
+        }
+      },
+      "outputs": [
+        {
+          "path": "data/outputs/figures/tipping_point.png",
+          "type": "png",
+          "description": "Fabric tipping point analysis (chart)",
+          "documentation": "data\\outputs\\figures\\tipping_point_calculation.md"
+        },
+        {
+          "path": "data/outputs/figures/tipping_point.svg",
+          "type": "svg",
+          "description": "Fabric tipping point analysis (vector)",
+          "documentation": "data\\outputs\\figures\\tipping_point_calculation.md"
+        },
+        {
+          "path": "data/outputs/scenario_modeling_results.txt",
+          "type": "report",
+          "description": "Scenario modeling results",
+          "documentation": "data\\outputs\\scenario_modeling_results_calculation.md"
+        },
+        {
+          "path": "C:\\Users\\PhilipNicholson\\OneDrive - ADE\\Documents\\Scratch\\HeatStreet\\data\\outputs\\scenario_results_by_property.parquet",
+          "type": "parquet",
+          "description": "Scenario results by property",
+          "documentation": "C:\\Users\\PhilipNicholson\\OneDrive - ADE\\Documents\\Scratch\\HeatStreet\\data\\outputs\\scenario_results_by_property_calculation.md"
+        },
+        {
+          "path": "C:\\Users\\PhilipNicholson\\OneDrive - ADE\\Documents\\Scratch\\HeatStreet\\data\\outputs\\scenario_results_summary.csv",
+          "type": "csv",
+          "description": "Scenario results summary",
+          "documentation": "C:\\Users\\PhilipNicholson\\OneDrive - ADE\\Documents\\Scratch\\HeatStreet\\data\\outputs\\scenario_results_summary_calculation.md"
+        }
+      ]
+    },
+    {
+      "phase_number": 6,
+      "phase_name": "Retrofit Readiness Analysis",
+      "description": "Assess heat pump readiness, fabric pre-requisites, and retrofit costs",
+      "start_time": "2026-04-03T07:50:01.736574",
+      "end_time": "2026-04-03T07:50:27.676086",
+      "duration_seconds": 25.939512,
+      "status": "completed",
+      "success": true,
+      "message": "Retrofit readiness assessment complete",
+      "metrics": {
+        "retrofit_tier_5": {
+          "value": 8358,
+          "description": "5.0% of properties"
+        },
+        "mean_fabric_cost": {
+          "value": 11201.716229499407,
+          "description": "Average fabric improvement cost per property"
+        },
+        "total_retrofit_cost": {
+          "value": 3976976648.0,
+          "description": "Total retrofit investment needed"
+        }
+      },
+      "outputs": [
+        {
+          "path": "data/outputs/figures/epc_lodgement_year_band_stacked_counts.png",
+          "type": "png",
+          "description": "EPC lodgements by year (counts; bands stacked)",
+          "documentation": "data\\outputs\\figures\\epc_lodgement_year_band_stacked_counts_calculation.md"
+        },
+        {
+          "path": "data/outputs/figures/epc_lodgement_year_band_stacked_share.png",
+          "type": "png",
+          "description": "EPC lodgements by year (share; bands stacked)",
+          "documentation": "data\\outputs\\figures\\epc_lodgement_year_band_stacked_share_calculation.md"
+        },
+        {
+          "path": "data/outputs/retrofit_readiness_analysis.csv",
+          "type": "csv",
+          "description": "Property-level retrofit readiness",
+          "documentation": "data\\outputs\\retrofit_readiness_analysis_calculation.md"
+        },
+        {
+          "path": "data/outputs/reports/retrofit_readiness_summary.txt",
+          "type": "report",
+          "description": "Retrofit readiness summary",
+          "documentation": "data\\outputs\\reports\\retrofit_readiness_summary_calculation.md"
+        }
+      ]
+    },
+    {
+      "phase_number": 7,
+      "phase_name": "Spatial Analysis",
+      "description": "Geocode properties and classify into heat network tiers based on heat density",
+      "start_time": "2026-04-03T07:50:28.573176",
+      "end_time": "2026-04-03T07:51:18.069462",
+      "duration_seconds": 49.496286,
+      "status": "completed",
+      "success": true,
+      "message": "Spatial analysis with heat network classification complete",
+      "metrics": {
+        "properties_geocoded": {
+          "value": 167861,
+          "description": "Properties with spatial classification"
+        }
+      },
+      "outputs": [
+        {
+          "path": "data/processed/epc_with_heat_network_tiers.geojson",
+          "type": "geojson",
+          "description": "Geocoded properties with heat network tiers",
+          "documentation": "data\\processed\\epc_with_heat_network_tiers_calculation.md"
+        },
+        {
+          "path": "data/outputs/pathway_suitability_by_tier.csv",
+          "type": "csv",
+          "description": "Pathway suitability by tier",
+          "documentation": "data\\outputs\\pathway_suitability_by_tier_calculation.md"
+        }
+      ]
+    },
+    {
+      "phase_number": 8,
+      "phase_name": "Additional Reports",
+      "description": "Generate specialized reports (case streets, borough breakdown, borough priority, tenure segmentation, data quality, subsidy analysis)",
+      "start_time": "2026-04-03T07:51:18.176516",
+      "end_time": "2026-04-03T07:51:19.836643",
+      "duration_seconds": 1.660127,
+      "status": "completed",
+      "success": true,
+      "message": "6 additional specialized reports generated",
+      "metrics": {
+        "additional_reports": {
+          "value": 6,
+          "description": "6 specialized reports"
+        }
+      },
+      "outputs": [
+        {
+          "path": "data/outputs/shakespeare_crescent_extract.csv",
+          "type": "csv",
+          "description": "Case street extract",
+          "documentation": "data\\outputs\\shakespeare_crescent_extract_calculation.md"
+        },
+        {
+          "path": "data/outputs/borough_breakdown.csv",
+          "type": "csv",
+          "description": "Borough-level breakdown",
+          "documentation": "data\\outputs\\borough_breakdown_calculation.md"
+        },
+        {
+          "path": "data/outputs/reports/borough_priority_ranking.csv",
+          "type": "csv",
+          "description": "Borough-level priority ranking",
+          "documentation": "data\\outputs\\reports\\borough_priority_ranking_calculation.md"
+        },
+        {
+          "path": "data/outputs/reports/borough_priority_ranking.txt",
+          "type": "report",
+          "description": "Borough priority ranking summary",
+          "documentation": "data\\outputs\\reports\\borough_priority_ranking_calculation.md"
+        },
+        {
+          "path": "data/outputs/reports/tenure_segmentation.csv",
+          "type": "csv",
+          "description": "Tenure segmentation analysis",
+          "documentation": "data\\outputs\\reports\\tenure_segmentation_calculation.md"
+        },
+        {
+          "path": "data/outputs/reports/tenure_segmentation.txt",
+          "type": "report",
+          "description": "Tenure segmentation summary",
+          "documentation": "data\\outputs\\reports\\tenure_segmentation_calculation.md"
+        },
+        {
+          "path": "data/outputs/heat_network_connection_thresholds.csv",
+          "type": "csv",
+          "description": "Heat network connection threshold analysis",
+          "documentation": "data\\outputs\\heat_network_connection_thresholds_calculation.md"
+        },
+        {
+          "path": "data/outputs/subsidy_sensitivity_analysis_simple_gbp.csv",
+          "type": "csv",
+          "description": "Subsidy sensitivity analysis (simple, GBP levels)",
+          "documentation": "data\\outputs\\subsidy_sensitivity_analysis_simple_gbp_calculation.md"
+        },
+        {
+          "path": "data/outputs/data_quality_report.txt",
+          "type": "report",
+          "description": "Data quality assessment",
+          "documentation": "data\\outputs\\data_quality_report_calculation.md"
+        }
+      ]
+    },
+    {
+      "phase_number": 9,
+      "phase_name": "Dashboard Packaging",
+      "description": "Export latest analysis results for the React dashboard",
+      "start_time": "2026-04-03T07:51:27.973692",
+      "end_time": "2026-04-03T07:51:30.357578",
+      "duration_seconds": 2.383886,
+      "status": "completed",
+      "success": true,
+      "message": "Dashboard data exported",
+      "metrics": {
+        "dashboard_data_arrays": {
+          "value": 20,
+          "description": "Data arrays in dashboard JSON"
+        }
+      },
+      "outputs": [
+        {
+          "path": "C:\\Users\\PhilipNicholson\\OneDrive - ADE\\Documents\\Scratch\\HeatStreet\\data\\outputs\\dashboard\\dashboard-data.json",
+          "type": "json",
+          "description": "Dashboard dataset for React UI",
+          "documentation": "C:\\Users\\PhilipNicholson\\OneDrive - ADE\\Documents\\Scratch\\HeatStreet\\data\\outputs\\dashboard\\dashboard-data_calculation.md"
+        }
+      ]
+    }
+  ]
+}

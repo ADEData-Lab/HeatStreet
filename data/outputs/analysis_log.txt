@@ -1,0 +1,201 @@
+================================================================================
+ANALYSIS LOG - Heat Street EPC Analysis
+================================================================================
+
+ANALYSIS METADATA
+--------------------------------------------------------------------------------
+analysis_start: 2026-04-03T07:43:02.193456
+total_properties: 167861
+data_source: EPC API
+analysis_type: Edwardian Terraced Housing - Heat Street Analysis
+sample_start_date: 2016-01-01
+sample_end_date: 2025-12-31
+analysis_end: 2026-04-03T07:51:30.459050
+total_duration_seconds: 508.265612
+total_duration_minutes: 8.471093533333333
+
+Total Analysis Duration: 7.7 minutes (465 seconds)
+
+PHASE SUMMARY
+--------------------------------------------------------------------------------
+Total Phases: 9
+  Successful: 9
+  Failed: 0
+  Skipped: 0
+
+DETAILED PHASE INFORMATION
+================================================================================
+
+Phase 1: Loading Existing Data
+--------------------------------------------------------------------------------
+Description: Load previously downloaded EPC data from file
+Status: ✓ COMPLETED
+Message: Loaded 183,303 existing records
+Duration: 1.9 seconds
+
+Metrics:
+  • records_loaded: 183,303 - Records loaded from existing file
+
+Outputs Generated:
+  • [csv] C:\Users\PhilipNicholson\OneDrive - ADE\Documents\Scratch\HeatStreet\data\raw\epc_london_filtered.csv
+    Existing EPC data loaded
+
+Phase 2: Data Validation
+--------------------------------------------------------------------------------
+Description: Load existing validated EPC dataset from disk
+Status: ✓ COMPLETED
+Message: Loaded existing validated EPC dataset
+Duration: 2.1 seconds
+
+Metrics:
+  • records_loaded: 167,861 - validated EPC dataset records loaded from disk
+
+Outputs Generated:
+  • [csv] C:\Users\PhilipNicholson\OneDrive - ADE\Documents\Scratch\HeatStreet\data\processed\epc_london_validated.csv
+    Existing validated EPC dataset
+
+Phase 3: Methodological Adjustments
+--------------------------------------------------------------------------------
+Description: Load existing methodologically adjusted dataset from disk
+Status: ✓ COMPLETED
+Message: Loaded existing methodologically adjusted dataset
+Duration: 2.4 seconds
+
+Metrics:
+  • records_loaded: 167,861 - methodologically adjusted dataset records loaded from disk
+
+Outputs Generated:
+  • [csv] C:\Users\PhilipNicholson\OneDrive - ADE\Documents\Scratch\HeatStreet\data\processed\epc_london_adjusted.csv
+    Existing methodologically adjusted dataset
+
+Phase 4: Archetype Analysis
+--------------------------------------------------------------------------------
+Description: Characterize Edwardian housing stock by EPC bands, insulation, heating systems, etc.
+Status: ✓ COMPLETED
+Message: Archetype characterization complete
+Duration: 1.6 seconds
+
+Metrics:
+  • epc_band_D: 103,778 - Band D: 61.8%
+  • epc_band_E: 22,845 - Band E: 13.6%
+  • epc_band_F: 2,267 - Band F: 1.4%
+  • epc_band_G: 1,162 - Band G: 0.7%
+
+Outputs Generated:
+  • [report] data/outputs/archetype_analysis_results.txt
+    Archetype characterization results
+
+Phase 5: Scenario Modeling
+--------------------------------------------------------------------------------
+Description: Model decarbonization scenarios (heat pump, hybrid, district heating) and subsidy sensitivity
+Status: ✓ COMPLETED
+Message: 7 scenarios modeled successfully
+Duration: 6.3 minutes (377 seconds)
+
+Metrics:
+  • scenario_baseline_cost: 0 - Capital cost per property
+  • scenario_fabric_only_cost: 22,301 - Capital cost per property
+  • scenario_fabric_to_tipping_point_cost: 15,817 - Capital cost per property
+  • scenario_minimum_fabric_hp_ready_cost: 18,937 - Capital cost per property
+  • scenario_heat_pump_cost: 25,422 - Capital cost per property
+  • scenario_heat_network_cost: 20,539 - Capital cost per property
+  • scenario_hybrid_cost: 19,533 - Capital cost per property
+  • scenarios_modeled: 7 - Decarbonization scenarios analyzed
+
+Outputs Generated:
+  • [png] data/outputs/figures/tipping_point.png
+    Fabric tipping point analysis (chart)
+  • [svg] data/outputs/figures/tipping_point.svg
+    Fabric tipping point analysis (vector)
+  • [report] data/outputs/scenario_modeling_results.txt
+    Scenario modeling results
+  • [parquet] C:\Users\PhilipNicholson\OneDrive - ADE\Documents\Scratch\HeatStreet\data\outputs\scenario_results_by_property.parquet
+    Scenario results by property
+  • [csv] C:\Users\PhilipNicholson\OneDrive - ADE\Documents\Scratch\HeatStreet\data\outputs\scenario_results_summary.csv
+    Scenario results summary
+
+Phase 6: Retrofit Readiness Analysis
+--------------------------------------------------------------------------------
+Description: Assess heat pump readiness, fabric pre-requisites, and retrofit costs
+Status: ✓ COMPLETED
+Message: Retrofit readiness assessment complete
+Duration: 25.9 seconds
+
+Metrics:
+  • retrofit_tier_5: 8,358 - 5.0% of properties
+  • mean_fabric_cost: 11,202 - Average fabric improvement cost per property
+  • total_retrofit_cost: 3,976,976,648 - Total retrofit investment needed
+
+Outputs Generated:
+  • [png] data/outputs/figures/epc_lodgement_year_band_stacked_counts.png
+    EPC lodgements by year (counts; bands stacked)
+  • [png] data/outputs/figures/epc_lodgement_year_band_stacked_share.png
+    EPC lodgements by year (share; bands stacked)
+  • [csv] data/outputs/retrofit_readiness_analysis.csv
+    Property-level retrofit readiness
+  • [report] data/outputs/reports/retrofit_readiness_summary.txt
+    Retrofit readiness summary
+
+Phase 7: Spatial Analysis
+--------------------------------------------------------------------------------
+Description: Geocode properties and classify into heat network tiers based on heat density
+Status: ✓ COMPLETED
+Message: Spatial analysis with heat network classification complete
+Duration: 49.5 seconds
+
+Metrics:
+  • properties_geocoded: 167,861 - Properties with spatial classification
+
+Outputs Generated:
+  • [geojson] data/processed/epc_with_heat_network_tiers.geojson
+    Geocoded properties with heat network tiers
+  • [csv] data/outputs/pathway_suitability_by_tier.csv
+    Pathway suitability by tier
+
+Phase 8: Additional Reports
+--------------------------------------------------------------------------------
+Description: Generate specialized reports (case streets, borough breakdown, borough priority, tenure segmentation, data quality, subsidy analysis)
+Status: ✓ COMPLETED
+Message: 6 additional specialized reports generated
+Duration: 1.7 seconds
+
+Metrics:
+  • additional_reports: 6 - 6 specialized reports
+
+Outputs Generated:
+  • [csv] data/outputs/shakespeare_crescent_extract.csv
+    Case street extract
+  • [csv] data/outputs/borough_breakdown.csv
+    Borough-level breakdown
+  • [csv] data/outputs/reports/borough_priority_ranking.csv
+    Borough-level priority ranking
+  • [report] data/outputs/reports/borough_priority_ranking.txt
+    Borough priority ranking summary
+  • [csv] data/outputs/reports/tenure_segmentation.csv
+    Tenure segmentation analysis
+  • [report] data/outputs/reports/tenure_segmentation.txt
+    Tenure segmentation summary
+  • [csv] data/outputs/heat_network_connection_thresholds.csv
+    Heat network connection threshold analysis
+  • [csv] data/outputs/subsidy_sensitivity_analysis_simple_gbp.csv
+    Subsidy sensitivity analysis (simple, GBP levels)
+  • [report] data/outputs/data_quality_report.txt
+    Data quality assessment
+
+Phase 9: Dashboard Packaging
+--------------------------------------------------------------------------------
+Description: Export latest analysis results for the React dashboard
+Status: ✓ COMPLETED
+Message: Dashboard data exported
+Duration: 2.4 seconds
+
+Metrics:
+  • dashboard_data_arrays: 20 - Data arrays in dashboard JSON
+
+Outputs Generated:
+  • [json] C:\Users\PhilipNicholson\OneDrive - ADE\Documents\Scratch\HeatStreet\data\outputs\dashboard\dashboard-data.json
+    Dashboard dataset for React UI
+
+================================================================================
+Analysis Log Generated: 2026-04-03T07:51:30.459353
+================================================================================
