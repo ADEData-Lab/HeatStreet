@@ -32,7 +32,8 @@ The GIS dataset from London Datastore contains:
 
 **London Datastore - London Heat Map GIS Data**
 - URL: https://data.london.gov.uk/dataset/london-heat-map
-- Direct Download: https://data.london.gov.uk/download/2ogw5/1c75726b-0b5e-4f2c-9fd6-25fc83b32454/GIS_All_Data.zip
+- Resource Page: https://data.london.gov.uk/dataset/london-heat-map
+- Download Resolution: HeatStreet resolves the current `GIS_All_Data.zip` link from the resource page at runtime
 - Size: ~2.2 MB (compressed)
 - Last Updated: April 2012
 - Format: ESRI Shapefiles (.shp)
@@ -55,8 +56,9 @@ These columns are consumed by both the hybrid scenario builder and `PathwayModel
 **If automatic download fails, follow these steps:**
 
 1. **Download the ZIP file**:
-   - Visit: https://data.london.gov.uk/download/2ogw5/1c75726b-0b5e-4f2c-9fd6-25fc83b32454/GIS_All_Data.zip
-   - Or use browser/download manager to save `GIS_All_Data.zip`
+   - Visit: https://data.london.gov.uk/dataset/london-heat-map
+   - Open the current `GIS_All_Data.zip` resource from the London Datastore page
+   - Or use your browser/download manager to save `GIS_All_Data.zip`
 
 2. **Create the directory**:
    ```bash
@@ -87,6 +89,8 @@ The interactive CLI will automatically prompt you to download GIS data:
 ```powershell
 .\run-conda.ps1  # or run-conda.bat
 ```
+
+On Windows, keep using the Conda launcher for this flow. It is the supported path for validating the active interpreter and avoiding mixed `python`/`pip` installs before `run_analysis.py` enters Phase 1.
 
 When prompted:
 ```
@@ -194,17 +198,21 @@ This classification helps determine:
 - Uses standard Python libraries + wget
 
 ### For Spatial Analysis (Reading Shapefiles)
-If you want to actually use the GIS data for spatial analysis, you need optional spatial dependencies:
+If you want to use the GIS data for spatial analysis:
+
+- On Windows, use the supported Conda workflow from [SPATIAL_SETUP.md](SPATIAL_SETUP.md):
+
+```bash
+conda env create -f environment.yml
+conda activate heatstreet
+.\run-conda.ps1
+```
+
+- On Linux/macOS or advanced setups with working GDAL tooling, `requirements-spatial.txt` remains the fallback:
 
 ```bash
 pip install -r requirements-spatial.txt
 ```
-
-This includes:
-- geopandas
-- shapely
-- fiona
-- GDAL (see [SPATIAL_SETUP.md](SPATIAL_SETUP.md) for Windows setup)
 
 ## Data Fields
 
@@ -241,7 +249,7 @@ The download script automatically handles SSL certificate issues by using `wget 
    ```powershell
    python -c "from src.acquisition.london_gis_downloader import LondonGISDownloader; LondonGISDownloader().download_and_prepare(force_redownload=True)"
    ```
-2. Manual download: Visit the URL directly and place `GIS_All_Data.zip` in `data/external/`
+2. Manual download: Open the London Heat Map page, download the current `GIS_All_Data.zip` resource, and place it in `data/external/`
 
 ### Cannot Read Shapefiles
 
@@ -252,12 +260,25 @@ If you get errors reading shapefiles:
    python -c "import geopandas; print('OK')"
    ```
 
-2. **Install spatial dependencies**:
+2. **Windows users**: use the supported Conda path instead of pip:
+   ```powershell
+   conda env create -f environment.yml
+   conda activate heatstreet
+   .\run-conda.ps1
+   ```
+
+3. **If `conda info` and `python --version` disagree**, diagnose the shell before reinstalling:
+   ```powershell
+   where python
+   where pip
+   conda info
+   conda list | findstr /i "python geopandas fiona gdal shapely"
+   ```
+
+4. **Linux/macOS fallback**:
    ```powershell
    pip install -r requirements-spatial.txt
    ```
-
-3. **Windows users**: See [SPATIAL_SETUP.md](SPATIAL_SETUP.md) for GDAL setup
 
 ### Data Already Downloaded
 

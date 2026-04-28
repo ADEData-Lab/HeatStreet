@@ -29,9 +29,10 @@ The pipeline uses two kinds of inputs:
 1) **Primary administrative data** (EPC Register)
 2) **Secondary parameters** (costs, savings, carbon factors, etc.) and **spatial datasets** (heat networks and zones)
 
-### 2.1 Primary dataset: UK EPC Register (domestic)
+### 2.1 Primary dataset: Energy Certificate Data API (domestic)
 **Acquisition method**
-- Data is downloaded programmatically from the UK EPC Register **domestic search API** as CSV, by London local authority code, using API pagination.
+- Full-London stock-definition runs use the Energy Certificate Data API **domestic full-load CSV extract** as the source of truth, then restrict it to the 33 London local authorities and house records before applying the pre-1930 terraced filter.
+- The search API can still be used for narrower connectivity/testing workflows, but it is not treated as the authoritative source for the London pre-1930 terraced stock definition because it may omit required stock-definition columns.
 
 **Key EPC variables used**
 The EPC Register contains many fields; Heat Street relies on a subset, grouped below by how they are used:
@@ -136,9 +137,9 @@ The pipeline is structured into phases. Each phase is designed to be auditable: 
 **Objective:** obtain a consistent EPC dataset for the target stock, plus any supporting spatial layers.
 
 **How it works**
-- EPC data is downloaded borough‑by‑borough via the EPC Register API, using pagination (`search-after`).
-- A stock filter is applied to keep only pre‑1930 terraced houses (Edwardian proxy), based on EPC age bands and built form.
-- Raw and filtered datasets are saved to `data/raw/`.
+- The full-load EPC extract is downloaded and restricted to the 33 London boroughs plus house records.
+- A stock filter is then applied to keep only pre‑1930 terraced houses (Edwardian proxy), based on `CONSTRUCTION_AGE_BAND`, `BUILT_FORM`, and `PROPERTY_TYPE`.
+- `data/raw/epc_london_raw.csv` stores raw London house records; `data/raw/epc_london_filtered.csv` stores the London pre‑1930 terraced-house subset used for analysis.
 
 **Key assumptions / implications**
 - EPC age bands are treated as the authoritative indicator for build period; mis‑classification in EPCs can propagate into the stock definition.
@@ -151,7 +152,7 @@ The pipeline is structured into phases. Each phase is designed to be auditable: 
 Academic evidence suggests EPCs can contain errors; Heat Street therefore includes explicit QA steps to reduce distortions in aggregate results.
 
 **Main validation steps**
-1) **Standardise column names:** EPC API fields are normalised to consistent uppercase with underscores (e.g., hyphens removed).
+1) **Standardise column names:** EPC API fields are normalised to consistent uppercase with underscores after mapping the new JSON field names into the legacy analysis schema.
 2) **Deduplicate:** where `UPRN` exists, keep the most recent certificate per UPRN; otherwise deduplicate by address proxy. This avoids over‑counting homes with multiple certificates.
 3) **Floor area plausibility bounds:** remove implausible `TOTAL_FLOOR_AREA` values outside configured ranges.
 4) **Critical field completeness:** enforce presence of required fields (postcode, built form, construction age band, energy rating, wall/heating descriptions, etc.).
@@ -551,7 +552,7 @@ The analysis is implemented across these high‑level modules. This appendix is 
 - Analysis log: `src/utils/analysis_logger.py` (phase timings, metrics, and output artefact registry)
 
 **Acquisition**
-- EPC download: `src/acquisition/epc_api_downloader.py` (EPC API queries by borough; pagination; stock filters; raw outputs)
+- EPC download: `src/acquisition/epc_api_downloader.py` (Energy Certificate Data API queries by borough; pagination; stock filters; raw outputs)
 - Heat network planning data: `src/acquisition/hnpd_downloader.py` (downloads and filters HNPD)
 - London GIS layers: `src/acquisition/london_gis_downloader.py` (downloads and prepares London Datastore layers when used)
 

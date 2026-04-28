@@ -4,9 +4,10 @@ If the automatic download fails, follow these steps to manually install the Lond
 
 ## Step 1: Download the ZIP File
 
-**Download URL**: https://data.london.gov.uk/download/2ogw5/1c75726b-0b5e-4f2c-9fd6-25fc83b32454/GIS_All_Data.zip
+**Source Page**: https://data.london.gov.uk/dataset/london-heat-map
 
 - File name: `GIS_All_Data.zip`
+- Open the current `GIS_All_Data.zip` resource from the London Heat Map page
 - Size: ~2.2 MB
 - Use your browser or download manager to save this file
 

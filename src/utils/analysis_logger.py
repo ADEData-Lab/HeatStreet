@@ -352,7 +352,16 @@ class AnalysisLogger:
         lines.append("ANALYSIS METADATA")
         lines.append("-" * 80)
         for key, value in self.metadata.items():
-            lines.append(f"{key}: {value}")
+            if isinstance(value, (dict, list)):
+                lines.append(f"{key}:")
+                pretty_value = json.dumps(
+                    convert_to_json_serializable(value),
+                    indent=2,
+                    ensure_ascii=False,
+                )
+                lines.extend(pretty_value.splitlines())
+            else:
+                lines.append(f"{key}: {value}")
         lines.append("")
 
         # Calculate total duration

@@ -282,6 +282,12 @@ class PathwayModeler:
         # ====================================================================
         fabric_capex = 0.0
         fabric_saving_pct = 0.0
+        fabric_result = {
+            'capex_per_home': 0.0,
+            'annual_kwh_saving': 0.0,
+            'annual_kwh_saving_pct': 0.0,
+            'flow_temp_reduction_k': 0.0,
+        }
 
         if pathway.fabric_package != 'none' and pathway.fabric_package in self.packages:
             pkg = self.packages[pathway.fabric_package]

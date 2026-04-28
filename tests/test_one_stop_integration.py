@@ -1,4 +1,5 @@
 import json
+import uuid
 from pathlib import Path
 
 import pandas as pd
@@ -8,8 +9,13 @@ from src.reporting.dashboard_data_builder import DashboardDataBuilder
 from src.reporting.one_stop_report import OneStopReportGenerator
 
 
-def test_model_scenarios_generates_comparisons_when_one_stop_only(monkeypatch, tmp_path):
+def test_model_scenarios_generates_comparisons_when_one_stop_only(monkeypatch):
     comparison_calls = []
+    temp_root = Path("temp_verify_dir")
+    temp_root.mkdir(exist_ok=True)
+    test_root = temp_root / f"one_stop_integration_{uuid.uuid4().hex}"
+    test_root.mkdir(parents=True, exist_ok=True)
+    analysis_outputs_dir = test_root / "data" / "outputs"
 
     class FakeScenarioModeler:
         def model_all_scenarios(self, df):
@@ -30,8 +36,8 @@ def test_model_scenarios_generates_comparisons_when_one_stop_only(monkeypatch, t
             return {}
 
     class FakePathwayModeler:
-        def __init__(self):
-            self.output_dir = tmp_path / "outputs"
+        def __init__(self, output_dir=None):
+            self.output_dir = output_dir or analysis_outputs_dir
             self.output_dir.mkdir(parents=True, exist_ok=True)
 
         def model_all_pathways(self, df):
@@ -48,8 +54,9 @@ def test_model_scenarios_generates_comparisons_when_one_stop_only(monkeypatch, t
             return property_path, summary_path
 
     class FakeComparisonReporter:
-        def __init__(self):
-            self.comparisons_dir = tmp_path / "comparisons"
+        def __init__(self, outputs_dir=None):
+            output_root = outputs_dir or analysis_outputs_dir
+            self.comparisons_dir = output_root / "comparisons"
             self.comparisons_dir.mkdir(parents=True, exist_ok=True)
 
         def generate_comparisons(self, results_path=None):
@@ -77,6 +84,8 @@ def test_model_scenarios_generates_comparisons_when_one_stop_only(monkeypatch, t
     monkeypatch.setattr(run_analysis, "ScenarioModeler", FakeScenarioModeler)
     monkeypatch.setattr(run_analysis, "PathwayModeler", FakePathwayModeler)
     monkeypatch.setattr(run_analysis, "ComparisonReporter", FakeComparisonReporter)
+    monkeypatch.setattr(run_analysis, "DATA_OUTPUTS_DIR", analysis_outputs_dir)
+    monkeypatch.setattr(run_analysis, "_hp_hn_comparison_outputs_cache", None)
     monkeypatch.setattr(run_analysis, "is_one_stop_only", lambda config=None: True)
 
     import src.reporting.visualizations as visualizations
