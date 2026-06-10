@@ -438,42 +438,33 @@ def save_startup_failure_log(analysis_logger: Optional[AnalysisLogger]) -> Optio
         return None
 
 
-def validate_email(email: str) -> Union[bool, str]:
+def validate_epc_token(token: str) -> Union[bool, str]:
     """
-    Validate email address format.
+    Validate EPC API bearer token format.
 
     Returns:
         True if valid, error message string if invalid
     """
-    if not email or '@' not in email:
-        return "Email address must contain '@'"
+    if not token or not token.strip():
+        return "Bearer token cannot be empty"
 
-    # RFC 5322 simplified regex
-    pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
-    if not re.match(pattern, email):
-        return "Please enter a valid email (e.g., user@example.com)"
+    cleaned = token.strip()
+    if len(cleaned) < 16:
+        return "Bearer token looks too short"
 
-    return True
-
-
-def validate_api_key(api_key: str) -> Union[bool, str]:
-    """
-    Validate API key format.
-
-    Returns:
-        True if valid, error message string if invalid
-    """
-    if not api_key or len(api_key.strip()) == 0:
-        return "API key cannot be empty"
-
-    # EPC API keys: 10-64 alphanumeric characters
-    if len(api_key) < 10:
-        return "API key too short (expected ≥10 characters)"
-
-    if not re.match(r'^[a-zA-Z0-9\-_]+$', api_key):
-        return "API key contains invalid characters"
+    if not re.match(r"^[A-Za-z0-9._~+/=-]+$", cleaned):
+        return "Bearer token contains invalid characters"
 
     return True
+
+
+def write_epc_token_env(token: str, env_path: Union[str, Path] = ".env") -> None:
+    """Persist the EPC bearer token using the configured EPC_API_TOKEN name."""
+    Path(env_path).write_text(
+        "# EPC API Credentials\n"
+        f"EPC_API_TOKEN={token.strip()}\n",
+        encoding="utf-8",
+    )
 
 
 def parse_iso_date(value: str) -> date_cls:
@@ -741,19 +732,23 @@ def check_credentials():
         console.print("[dim]Get the token from your my account page on the Energy Certificate Data API service.[/dim]")
         console.print()
 
-        token = questionary.text(
+        token = questionary.password(
             "Bearer token:",
-            validate=lambda value: True if value and value.strip() else "Bearer token cannot be empty"
+            validate=validate_epc_token
         ).ask()
 
         if token is None:
             console.print("[yellow]Credential input cancelled[/yellow]")
             return False
 
-        # Save to .env
-        with open('.env', 'w') as f:
-            f.write(f"# EPC API Credentials\n")
-            f.write(f"EPC_API_TOKEN={token}\n")
+        try:
+            write_epc_token_env(token, '.env')
+        except FileNotFoundError:
+            console.print("[red]×[/red] Could not save .env because the file path was not found", style="red")
+            return False
+        except PermissionError:
+            console.print("[red]×[/red] Permission denied while saving .env", style="red")
+            return False
 
         # Reload environment
         from dotenv import load_dotenv

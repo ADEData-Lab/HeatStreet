@@ -166,7 +166,7 @@ def test_gc_collect_added():
 
 
 def test_validation_functions_added():
-    """Verify that email and API key validation functions have been added."""
+    """Verify that EPC bearer token validation is present in run_analysis.py."""
     project_root = Path(__file__).parent.parent
     run_analysis_path = project_root / 'run_analysis.py'
 
@@ -174,15 +174,13 @@ def test_validation_functions_added():
         content = f.read()
 
     # Check for validation functions
-    assert 'def validate_email(' in content, "validate_email function should be defined"
-    assert 'def validate_api_key(' in content, "validate_api_key function should be defined"
+    assert 'def validate_epc_token(' in content, "validate_epc_token function should be defined"
 
     # Check for regex import
     assert 'import re' in content, "re module should be imported"
 
     # Check that validation is used
-    assert 'validate=validate_email' in content, "validate_email should be used"
-    assert 'validate=validate_api_key' in content, "validate_api_key should be used"
+    assert 'validate=validate_epc_token' in content, "validate_epc_token should be used"
 
 
 def test_specific_exception_handling():

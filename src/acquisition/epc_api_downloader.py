@@ -447,14 +447,21 @@ class EPCAPIDownloader:
             destination.parent.mkdir(parents=True, exist_ok=True)
             with self._open_download_response(url, request_context=request_context) as response:
                 with open(destination, "wb") as output_file:
+                    supports_sized_read = True
                     while True:
-                        try:
-                            chunk = response.read(1024 * 1024)
-                        except TypeError:
+                        if supports_sized_read:
+                            try:
+                                chunk = response.read(1024 * 1024)
+                            except TypeError:
+                                supports_sized_read = False
+                                chunk = response.read()
+                        else:
                             chunk = response.read()
                         if not chunk:
                             break
                         output_file.write(chunk)
+                        if not supports_sized_read:
+                            break
 
             if destination.exists() and destination.stat().st_size > 0:
                 return destination
@@ -754,15 +761,17 @@ class EPCAPIDownloader:
 
         expected_start = sample_start_date.isoformat() if sample_start_date else None
         expected_end = sample_end_date.isoformat() if sample_end_date else None
+        manifest_start = manifest.get("sample_start_date")
+        manifest_end = manifest.get("sample_end_date")
         if (
-            manifest.get("sample_start_date") != expected_start
-            or manifest.get("sample_end_date") != expected_end
+            (manifest_start is not None and manifest_start != expected_start)
+            or (manifest_end is not None and manifest_end != expected_end)
         ):
             self._log_full_load_reuse_rejected(
                 stage_dir,
                 reason="sample-window mismatch",
                 detail=(
-                    f"manifest={manifest.get('sample_start_date')}..{manifest.get('sample_end_date')}, "
+                    f"manifest={manifest_start}..{manifest_end}, "
                     f"requested={expected_start}..{expected_end}"
                 ),
             )
@@ -777,11 +786,7 @@ class EPCAPIDownloader:
             return None
 
         dataset_path_value = manifest.get("dataset_path")
-        if not dataset_path_value:
-            self._log_full_load_reuse_rejected(stage_dir, reason="missing dataset path")
-            return None
-
-        dataset_path = Path(dataset_path_value)
+        dataset_path = Path(dataset_path_value) if dataset_path_value else stage_dir / "raw_certificates_dataset"
         if not parquet_dataset_exists(dataset_path):
             self._log_full_load_reuse_rejected(
                 stage_dir,
