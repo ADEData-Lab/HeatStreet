@@ -96,8 +96,8 @@ Real-time progress indicators:
 ### Files Created
 
 **data/raw/**
-- `epc_london_raw.csv` - All downloaded data
-- `epc_london_filtered.csv` - Filtered for Edwardian terraced
+- `epc_london_raw.csv` - Raw London house records
+- `epc_london_filtered.csv` - London pre-1930 terraced house subset
 - `.parquet` versions for faster loading
 
 **data/processed/**
@@ -124,18 +124,14 @@ London Edwardian Terraced Housing Analysis
 Data Download Options:
 
 ? What would you like to download?
-  ❯ Quick test (single borough, limited data)
-    Medium dataset (5 boroughs, last 5 years)
-    Full dataset (all 33 London boroughs)
-    Custom selection
-
-? Select a borough for testing: Camden
+  ❯ Full dataset (all 33 London boroughs)
+    Single borough (testing)
 
 Analysis Configuration
 
-Mode: single
-From year: 2020
-Boroughs: 1
+Mode: full
+Sample start date: 2016-03-27
+Sample end date: 2026-03-27
 
 ? Start analysis? Yes
 
@@ -143,11 +139,11 @@ Boroughs: 1
 Phase 1: Data Download
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-Downloading Camden data...
-Camden: 100%|██████████| 5234/5234 [00:45<00:00, 115.42 records/s]
-✓ Downloaded 5,234 records
-Applying Edwardian terraced housing filters...
-✓ Filtered to 1,247 Edwardian terraced houses
+Using EPC full-load CSV extract for London stock definition...
+Downloading ALL London boroughs...
+✓ Raw London house records: 2,417,706
+Applying London pre-1930 terraced house filters...
+✓ Filtered London pre-1930 terraced house records: 704,292
 Saving data...
 ✓ Data saved to data/raw/
 
@@ -226,7 +222,7 @@ Generating reports and visualizations...
 ### Smart Defaults
 
 - Sensible download presets
-- Optimal filtering for Edwardian terraced
+- Full-load stock-definition filtering for London pre-1930 terraced houses
 - Automatic file naming
 - Both CSV and Parquet formats
 
@@ -295,8 +291,7 @@ Set these to skip prompts:
 
 ```powershell
 # PowerShell
-$env:EPC_API_EMAIL="your.email@example.com"
-$env:EPC_API_KEY="your_api_key"
+$env:EPC_API_TOKEN="your_bearer_token"
 
 # Then run
 python run_analysis.py

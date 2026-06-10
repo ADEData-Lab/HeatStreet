@@ -55,13 +55,14 @@ HeatStreet/
 ### Prerequisites
 
 **Core Requirements**:
-- Python 3.11 or higher
+- Python 3.11 or 3.12 recommended
 - pip package manager
 
 **For Spatial Analysis (Heat Network Tiers)**:
-- **Option A (Recommended)**: Miniconda/Anaconda - handles GDAL automatically
-- **Option B**: Manual GDAL installation (complex on Windows)
-- **Option C**: Skip spatial analysis - 85% of functionality still works!
+- **Option A (Recommended on Windows)**: Miniconda/Anaconda with `environment.yml`
+- **Option B**: `requirements-spatial.txt` on Linux/macOS or advanced setups with working GDAL tooling
+- **Option C**: Skip spatial analysis - 85% of functionality still works
+- **Windows note**: Python 3.13/3.14 is not the supported default for the spatial stack in this repo
 
 ### 🚀 Quick Start (Recommended Methods)
 
@@ -76,10 +77,12 @@ This method automatically installs GDAL/geopandas via Conda, avoiding Windows in
 - Run installer with default settings
 - Restart your terminal
 
-**Step 2**: Clone and run
+**Step 2**: Clone, create the Conda env, activate it, then run the launcher
 ```bash
 git clone https://github.com/ADEData-Lab/HeatStreet.git
 cd HeatStreet
+conda env create -f environment.yml
+conda activate heatstreet
 
 # Windows Command Prompt
 run-conda.bat
@@ -88,12 +91,14 @@ run-conda.bat
 .\run-conda.ps1
 ```
 
-This single command:
-- Creates conda environment with Python 3.11
-- Installs geopandas + GDAL automatically
-- Installs all other dependencies
-- Runs the interactive analysis
-- **Everything works, including spatial analysis!**
+This supported path:
+- Creates a fresh Conda env from `environment.yml`
+- Keeps the GDAL-backed stack on `conda-forge`
+- Installs the repo's pure-Python dependencies from `requirements.txt`
+- Detects mixed-interpreter shells before install steps
+- Runs the interactive analysis with spatial support available
+
+On Windows, `run-conda.ps1` / `run-conda.bat` is the canonical launcher. Avoid bare `python run_analysis.py` unless `python`, `pip`, and `CONDA_PREFIX` are already aligned inside the active Conda environment.
 
 #### Method 2: Standard Launcher (Core Analysis Only)
 
@@ -113,7 +118,8 @@ pip install -r requirements.txt
 python run_analysis.py
 ```
 
-For spatial analysis on Windows, use the Conda launcher above (or see `docs/SPATIAL_SETUP.md`).
+For spatial analysis on Windows, use the Conda workflow above (or see `docs/SPATIAL_SETUP.md`).
+For Phase 1 runtime verification on Windows, the launcher is the source of truth for interpreter and prefix alignment.
 
 #### Method 3: Manual Setup (Advanced Users)
 
@@ -195,26 +201,74 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 **Conda: "conda is not recognized"**
 - Install Miniconda: https://docs.conda.io/en/latest/miniconda.html
 - Restart your terminal after installation
-- Use `run-conda.bat` or `run-conda.ps1`
+- Create the environment with `conda env create -f environment.yml`
+- Activate it with `conda activate heatstreet`
+- Then use `run-conda.bat` or `run-conda.ps1`
 
 **GDAL/Geopandas installation fails**
-- This is common on Windows when installing GDAL via pip/venv
-- For spatial analysis, use `run-conda.bat` instead
+- This is common on Windows when `pip` tries to build Fiona/GDAL from source
+- If you see `GDAL_VERSION` or `gdal-config`, switch to the Conda path immediately
+- Rebuild with `conda env create -f environment.yml`
+- Activate with `conda activate heatstreet`
+- Then run `run-conda.bat` or `.\run-conda.ps1`
 - See [docs/SPATIAL_SETUP.md](docs/SPATIAL_SETUP.md) for detailed guide
 
 **"No module named 'osgeo'" during spatial analysis**
 - GDAL not installed
-- Use `run-conda.bat` for automatic installation
+- Use the Conda environment from `environment.yml`
 - Or skip spatial analysis (analysis works without it)
+
+**`conda info` shows one Python but `python --version` shows another**
+- Your shell is mixed and the launcher will stop on purpose
+- Run these diagnosis commands:
+
+```powershell
+where python
+where pip
+conda info
+conda list | findstr /i "python geopandas fiona gdal shapely"
+```
+
+- If `pip` points into `AppData\Roaming\Python\...`, reactivate the Conda env or recreate it from `environment.yml`
+
+**Runtime mismatch: startup diagnostics show old Phase 1 behavior**
+- First response: rerun with `run-conda.bat` or `.\run-conda.ps1` on Windows so the launcher validates `python`, `pip`, and `CONDA_PREFIX` before `run_analysis.py` starts.
+- Then compare the startup diagnostics against the staged runtime expected in this checkout:
+  `download_data()` should resolve to `run_analysis.py` around line 805 and include `download_national_domestic_dataset(` plus `materialize_full_load_subset(`.
+  `download_national_domestic_dataset()` should resolve to `src/acquisition/epc_api_downloader.py` around line 674 and include `ensure_clean_directory(dataset_dir)`, `write_parquet_part(`, and `ignored_recommendation_members`.
+- Deterministic diagnosis sequence:
+  1. Print `sys.executable` and `os.getcwd()`.
+  2. Print `run_analysis.__file__`.
+  3. Print the resolved line numbers for `download_data()` and `download_national_domestic_dataset()`.
+  4. Compare them against the expected staged line ranges above.
+  5. If they do not match, classify the mismatch as one of: different checkout, stale installed package / alternate import path, wrong interpreter, or stale copied script outside the repo root.
+- Minimal probe:
+
+```bash
+python - <<'PY'
+import inspect, os, sys
+import run_analysis
+from src.acquisition.epc_api_downloader import EPCAPIDownloader
+
+print("sys.executable =", sys.executable)
+print("os.getcwd() =", os.getcwd())
+print("run_analysis.__file__ =", run_analysis.__file__)
+print("download_data line =", inspect.getsourcelines(run_analysis.download_data)[1])
+print(
+    "download_national_domestic_dataset line =",
+    inspect.getsourcelines(EPCAPIDownloader.download_national_domestic_dataset)[1],
+)
+PY
+```
 
 #### How Should I Run It?
 
 | Option | Best For | Spatial Analysis? |
 |--------|----------|-------------------|
-| `run-conda.bat/ps1` | **Windows users wanting heat network tiers** | ✅ Yes (auto-installs GDAL) |
+| `run-conda.bat/ps1` | **Windows users wanting heat network tiers** | ✅ Yes (Conda-managed GDAL stack) |
 | `python run_analysis.py` (in your own env) | Core analysis and non-Windows runs | ⚠️ Depends on GDAL/geopandas |
 
-**Recommendation**: Use `run-conda.bat` if you want the complete analysis with spatial features on Windows!
+**Recommendation**: Use `environment.yml` plus `run-conda.bat` / `.\run-conda.ps1` for the complete Windows spatial workflow.
 
 ## Data Acquisition
 
@@ -222,10 +276,10 @@ Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
 
 HeatStreet can obtain EPC data via the UK Government EPC Register in two ways:
 
-1. **API download (recommended)**: run the interactive pipeline and choose a download scope. The runner will prompt for (or read) your API email/key from `.env`.
-2. **Bulk/manual download**: place EPC CSVs in `data/raw/` and skip the download step when prompted.
+1. **API download (recommended)**: run the interactive pipeline and choose a download scope. Full-London stock-definition runs use the EPC **full-load CSV extract** so `epc_london_filtered.csv` is a true London pre-1930 terraced-house subset rather than all London houses. The runner will prompt for (or read) your API bearer token from `.env`.
+2. **Bulk/manual download**: place EPC CSVs in `data/raw/` and skip the download step when prompted, or use the full-load download mode in the API downloader.
 
-Register for API access at [https://epc.opendatacommunities.org/](https://epc.opendatacommunities.org/) and copy `.env.example` to `.env` if you prefer to set credentials up-front.
+Register for API access at [https://get-energy-performance-data.communities.gov.uk/](https://get-energy-performance-data.communities.gov.uk/) and copy `.env.example` to `.env` if you prefer to set the token up-front.
 
 ### Supplementary Data
 
@@ -235,7 +289,7 @@ Register for API access at [https://epc.opendatacommunities.org/](https://epc.op
 
 **London Heat Map GIS package (legacy; optional/fallback)**:
 - Used as a fallback evidence layer if HNPD is unavailable, and to provide zone/“potential network” geometries used by the Tier 2 overlay.
-- The pipeline can auto-download this from the London Datastore as `data/external/GIS_All_Data.zip` and extract it under `data/external/`.
+- The pipeline resolves the current `GIS_All_Data.zip` link from the London Datastore London Heat Map page and extracts it under `data/external/`.
 
 **Boundary Files**:
 - London borough boundaries
@@ -656,7 +710,7 @@ pytest --cov=src tests/
 ## References
 
 - Hardy, A., & Glew, D. (2019). An analysis of errors in the Energy Performance certificate database. *Energy Policy*, 129, 1168-1178.
-- UK EPC Register: https://epc.opendatacommunities.org/
+- Energy Certificate Data API: https://get-energy-performance-data.communities.gov.uk/
 - London Heat Map: https://www.london.gov.uk/programmes-strategies/environment-and-climate-change/energy/london-heat-map
 - RdSAP Methodology: https://www.bre.co.uk/sap/
 

@@ -1,0 +1,16 @@
+name: heatstreet
+channels:
+  - conda-forge
+dependencies:
+  - python=3.11
+  - pip
+  - geopandas
+  - fiona
+  - gdal
+  - pyproj
+  - shapely
+  - rtree
+  - pyogrio
+  - folium
+  - pip:
+      - -r requirements.txt

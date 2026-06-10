@@ -1,330 +1,123 @@
-# Setting Up Spatial Analysis (GDAL/Geopandas) on Windows
+# Spatial Setup
 
-The spatial analysis features require **GDAL** (Geospatial Data Abstraction Library) and **geopandas**, which can be challenging to install on Windows. This guide provides multiple methods from easiest to most comprehensive.
+## Windows: Supported Workflow
 
-## ⚠️ Important Note
-
-**The core analysis works perfectly WITHOUT spatial dependencies!**
-
-If you run into issues, you can:
-- Use the analysis for EPC data, scenarios, and reports (85% of functionality)
-- Skip the heat network tier classification
-- Come back to spatial analysis later
-
-## 🎯 **Recommended: Conda Method** (Easiest, Most Reliable)
-
-This is the **strongly recommended** approach for Windows users.
-
-### Step 1: Install Miniconda (if you don't have it)
-
-1. Download Miniconda for Windows:
-   https://docs.conda.io/en/latest/miniconda.html
-
-2. Install Miniconda (use default settings)
-
-3. Open "Anaconda Prompt" from Start Menu
-
-### Step 2: Create a Conda Environment
+The supported Windows path for spatial analysis is a fresh Conda environment built from the repo's root `environment.yml`. Do not use `pip install -r requirements-spatial.txt` as the default Windows setup path.
 
 ```bash
-# Create new environment with Python 3.11
-conda create -n heatstreet python=3.11 -y
-
-# Activate the environment
+git clone https://github.com/ADEData-Lab/HeatStreet.git
+cd HeatStreet
+conda env create -f environment.yml
 conda activate heatstreet
+.\run-conda.ps1
 ```
 
-### Step 3: Install Geopandas (includes GDAL)
+If the environment already exists:
 
 ```bash
-# Install geopandas from conda-forge (this installs GDAL automatically)
-conda install -c conda-forge geopandas -y
+conda env update -n heatstreet -f environment.yml --prune
+conda activate heatstreet
+.\run-conda.ps1
 ```
 
-This single command installs:
-- GDAL (with all dependencies)
-- geopandas
-- shapely
-- fiona
-- pyproj
-- rtree
+`environment.yml` installs the GDAL-backed stack from `conda-forge`:
 
-### Step 4: Install Other Project Dependencies
+- `geopandas`
+- `fiona`
+- `gdal`
+- `pyproj`
+- `shapely`
+- `rtree`
+- `pyogrio`
+- `folium`
+
+The launcher then installs `requirements.txt` without asking pip to build Fiona/GDAL from source.
+It is also the canonical Windows path for verifying that `python`, `pip`, and `CONDA_PREFIX` match before the interactive pipeline reaches Phase 1.
+
+## Supported Python Versions
+
+- Windows spatial default: Python 3.11 from `environment.yml`
+- Also supported if you intentionally create the env that way: Python 3.12
+- Not the supported default in this repo yet: Python 3.13 and 3.14
+
+## Why Windows Pip Fails
+
+The common failure mode is a mixed shell:
+
+- `conda info` reports one interpreter
+- `python --version` resolves to another
+- `pip` points into `AppData\Roaming\Python\...`
+- `fiona` falls back to a source build and asks for `GDAL_VERSION` or `gdal-config`
+
+The fix is not to debug the pip build. The fix is to use the Conda environment from `environment.yml`.
+
+## Diagnosis Commands
+
+Run these in the shell you plan to use:
+
+```powershell
+where python
+where pip
+conda info
+conda list | findstr /i "python geopandas fiona gdal shapely"
+```
+
+What you want to see:
+
+- `python` and `pip` resolve inside the active Conda env
+- `conda info` shows the same active env you just activated
+- `conda list` shows the geospatial packages inside that env
+
+## What `run-conda` Validates
+
+The hardened launchers now fail fast when:
+
+- no dedicated Conda env is active
+- `python` is not coming from the active env
+- `pip` is not coming from the active env
+- the active Windows interpreter is not Python 3.11 or 3.12
+
+They also warn when user-site Python executables are visible on PATH, because that is a common precursor to mixed installs.
+
+## Linux / macOS Fallback
+
+If you already manage system GDAL tooling on Linux or macOS, you can still use:
 
 ```bash
-# Navigate to your project directory
-cd "path\to\HeatStreet"
-
-# Install core requirements
 pip install -r requirements.txt
-
-# Install remaining spatial dependencies
-pip install folium>=0.14.0
-```
-
-### Step 5: Test Installation
-
-```bash
-python -c "import geopandas; print('✓ Geopandas installed successfully!')"
-python -c "from osgeo import gdal; print('✓ GDAL installed successfully!')"
-```
-
-### Step 6: Run Analysis
-
-```bash
-# From the Anaconda Prompt (with heatstreet environment activated)
+pip install -r requirements-spatial.txt
 python run_analysis.py
 ```
 
-## 🔧 **Alternative: Pre-built Wheels Method**
+That file remains a fallback for non-Windows or advanced environments. It is not the primary Windows path.
 
-If you prefer to stick with standard Python (not Conda):
+## Verification
 
-### Step 1: Install Pre-built Wheels
-
-Visit: https://www.lfd.uci.edu/~gohlke/pythonlibs/
-
-Download these files (match your Python version and architecture):
-1. `GDAL‑3.4.3‑cp311‑cp311‑win_amd64.whl`
-2. `Fiona‑1.9.2‑cp311‑cp311‑win_amd64.whl`
-3. `Shapely‑2.0.1‑cp311‑cp311‑win_amd64.whl`
-
-### Step 2: Install in Order
-
-```powershell
-# Install GDAL first
-pip install "path\to\GDAL‑3.4.3‑cp311‑cp311‑win_amd64.whl"
-
-# Then Fiona
-pip install "path\to\Fiona‑1.9.2‑cp311‑cp311‑win_amd64.whl"
-
-# Then Shapely
-pip install "path\to\Shapely‑2.0.1‑cp311‑cp311‑win_amd64.whl"
-
-# Finally geopandas
-pip install geopandas
-```
-
-### Step 3: Install Remaining Dependencies
-
-```powershell
-pip install -r requirements-spatial.txt
-```
-
-## 🐧 **Linux Method** (Simple)
-
-On Linux, spatial dependencies install easily:
+Once the Conda env is active, these imports should succeed:
 
 ```bash
-# Ubuntu/Debian
-sudo apt-get install gdal-bin libgdal-dev
-
-# Install Python packages
-pip install -r requirements-spatial.txt
+python -c "import geopandas, fiona, pyogrio, pyproj, shapely, folium; from osgeo import gdal; print(geopandas.__version__)"
 ```
 
-## 🍎 **Mac Method**
+Then start the pipeline:
 
 ```bash
-# Install GDAL via Homebrew
-brew install gdal
-
-# Install Python packages
-pip install -r requirements-spatial.txt
-```
-
-## ✅ **Verifying Your Installation**
-
-Run this test script to check everything:
-
-```python
-python -c """
-import sys
-
-print('Testing spatial dependencies...')
-print('-' * 60)
-
-# Test GDAL
-try:
-    from osgeo import gdal
-    print('✓ GDAL:', gdal.__version__)
-except ImportError as e:
-    print('✗ GDAL not installed')
-    print('  Error:', e)
-    sys.exit(1)
-
-# Test geopandas
-try:
-    import geopandas as gpd
-    print('✓ Geopandas:', gpd.__version__)
-except ImportError:
-    print('✗ Geopandas not installed')
-    sys.exit(1)
-
-# Test shapely
-try:
-    import shapely
-    print('✓ Shapely:', shapely.__version__)
-except ImportError:
-    print('✗ Shapely not installed')
-    sys.exit(1)
-
-# Test fiona
-try:
-    import fiona
-    print('✓ Fiona:', fiona.__version__)
-except ImportError:
-    print('✗ Fiona not installed')
-    sys.exit(1)
-
-# Test folium (for maps)
-try:
-    import folium
-    print('✓ Folium:', folium.__version__)
-except ImportError:
-    print('⚠ Folium not installed (optional, for interactive maps)')
-
-print('-' * 60)
-print('✓ All spatial dependencies installed successfully!')
-print('')
-print('You can now run the full spatial analysis:')
-print('  python run_analysis.py')
-"""
-```
-
-## 🚀 **What Spatial Analysis Does**
-
-Once GDAL is installed, you'll get these additional features:
-
-### Data sources used for tiering (evidence layers)
-- **HNPD (DESNZ/BEIS Heat Network Planning Database, Jan 2024)**: the primary source of up-to-date heat network scheme locations (downloaded automatically to `data/external/hnpd-january-2024.csv`).
-- **London Heat Map GIS package (legacy)**: optional/fallback; provides zone / “potential network” geometries used by the Tier 2 overlay (downloaded as `data/external/GIS_All_Data.zip`).
-- **EPC-derived demand**: used to compute local heat density (GWh/km²) for Tier 3–5.
-
-### Heat Network Tier Classification
-- **Tier 1**: Properties within 250m of existing heat networks
-- **Tier 2**: Properties within planned Heat Network Zones
-- **Tier 3**: High heat density areas (≥20 GWh/km²; configurable in `config/config.yaml`)
-- **Tier 4**: Moderate heat density areas (5-20 GWh/km²)
-- **Tier 5**: Low heat density areas (<5 GWh/km²)
-
-### Outputs
-1. **GeoJSON file** with all properties + tier classifications
-2. **CSV summary** of pathway suitability by tier
-3. **Interactive HTML map** showing tier distribution
-4. **Heat density values** (GWh/km²) per property
-
-### Analysis Features
-- Geocoding from EPC coordinates
-- Distance calculations to heat networks
-- Spatial aggregation of heat demand
-- Grid-based density calculation
-- Pathway suitability recommendations
-
-## ❓ **Troubleshooting**
-
-### "ImportError: DLL load failed"
-- **Cause**: GDAL dependencies not found
-- **Solution**: Use Conda method (installs all dependencies automatically)
-
-### "ModuleNotFoundError: No module named 'osgeo'"
-- **Cause**: GDAL not installed
-- **Solution**: Install GDAL before other spatial packages
-
-### "GDAL version mismatch"
-- **Cause**: Conflicting GDAL versions
-- **Solution**:
-  ```bash
-  pip uninstall gdal fiona shapely geopandas -y
-  # Then reinstall using Conda method
-  ```
-
-### "Unable to find GDAL library"
-- **Cause**: GDAL not in system PATH
-- **Solution**: Use Conda (sets PATH automatically)
-
-### Still Having Issues?
-
-**Option 1**: Skip spatial analysis
-- Run: `python run_analysis.py`
-- When prompted about spatial dependencies, it will skip gracefully
-- You still get 85% of functionality!
-
-**Option 2**: Use Windows Subsystem for Linux (WSL)
-```bash
-# In WSL
-sudo apt-get install gdal-bin libgdal-dev
-pip install -r requirements-spatial.txt
-```
-
-**Option 3**: Use Docker
-```dockerfile
-FROM python:3.11-slim
-RUN apt-get update && apt-get install -y gdal-bin libgdal-dev
-# ... rest of Dockerfile
-```
-
-## 📊 **Running Without Spatial Analysis**
-
-If you choose not to install GDAL, the analysis will:
-
-✅ Still work perfectly for:
-- EPC data download and validation
-- Archetype characterization
-- Scenario modeling (all 5 pathways)
-- Subsidy sensitivity analysis
-- Visualization (charts + Excel)
-- Executive summary reports
-
-⚠️ Won't include:
-- Heat network tier classification
-- Heat density maps
-- Spatial pathway recommendations
-- Distance-to-network calculations
-
-The pipeline automatically detects whether GDAL is available and adjusts accordingly!
-
-## 🎓 **Understanding the Environment**
-
-### With Conda (Recommended)
-Your environment is isolated:
-- `conda activate heatstreet` - activates environment
-- `conda deactivate` - deactivates
-- Packages don't interfere with your main Python
-
-### Without Conda (Regular pip)
-Packages install system-wide:
-- Can cause conflicts with other projects
-- Harder to troubleshoot GDAL issues
-- But works if you get it right!
-
-## 📚 **Additional Resources**
-
-- [Geopandas Windows Installation Guide](https://geopandas.org/en/stable/getting_started/install.html#windows)
-- [GDAL Windows Binaries](https://www.gisinternals.com/release.php)
-- [Conda Documentation](https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html)
-
-## ✨ **Success Checklist**
-
-- [ ] Conda installed (if using Conda method)
-- [ ] Environment activated: `conda activate heatstreet`
-- [ ] Geopandas installed: `conda install -c conda-forge geopandas`
-- [ ] Test passes: `python -c "import geopandas"`
-- [ ] Core requirements: `pip install -r requirements.txt`
-- [ ] Analysis runs: `python run_analysis.py` (or `run-conda.bat` / `.\run-conda.ps1` on Windows)
-- [ ] Spatial phase completes successfully
-- [ ] Map generated: `data/outputs/maps/heat_network_tiers.html`
-
----
-
-**TL;DR**: Use Conda! It handles all the complexity automatically.
-
-```bash
-conda create -n heatstreet python=3.11 -y
-conda activate heatstreet
-conda install -c conda-forge geopandas -y
-pip install -r requirements.txt
 python run_analysis.py
 ```
 
-Done! 🎉
+Or, on Windows, use the canonical launcher again:
+
+```bash
+.\run-conda.ps1
+```
+
+## If You Do Not Need Spatial Analysis
+
+The rest of the project still works without GIS dependencies:
+
+- EPC download and validation
+- archetype analysis
+- scenario modeling
+- charts, workbooks, and reports
+
+Spatial setup is only required for heat-network tier classification and map outputs.

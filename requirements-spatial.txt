@@ -1,17 +1,20 @@
-# Optional: Geospatial Analysis Dependencies
-# These are ONLY needed if you want to use the spatial analysis features (heat network tier mapping)
-# The core analysis (archetype, scenarios, modeling) works WITHOUT these packages
+# OPTIONAL NON-WINDOWS / ADVANCED FALLBACK ONLY
+# ------------------------------------------------
+# Do NOT use this file as the primary Windows install path.
+# Windows users who need spatial analysis should create the Conda environment
+# from environment.yml, activate it, and run run-conda.bat / .\run-conda.ps1.
+#
+# Why: pip installs on Windows can fall back to building Fiona/GDAL from source,
+# which commonly fails with messages about GDAL_VERSION or gdal-config.
+# The supported Windows path installs the full spatial stack from conda-forge.
+#
+# This file remains available for:
+#   - Linux or macOS environments with working system GDAL tooling
+#   - Advanced users who deliberately manage native geospatial dependencies
 
-# IMPORTANT FOR WINDOWS USERS:
-# Installing these with pip on Windows is fragile because Fiona/GDAL often need
-# compiled native dependencies. Prefer Conda for the geospatial stack:
-#   conda install -c conda-forge geopandas pyogrio pyproj shapely rtree
-# The core analysis works without these packages if you want to skip maps.
-
-# Geospatial libraries (GDAL-backed; Conda recommended on Windows)
+# Geospatial libraries
 geopandas>=0.13.0
 shapely>=2.0.0
-fiona>=1.9.0
 pyproj>=3.5.0
 rtree>=1.0.0
 pyogrio>=0.7.0

@@ -1,16 +1,14 @@
 # EPC API Usage Guide
 
-This guide explains how to use the EPC API downloader to automatically fetch data from the UK EPC Register.
+This guide explains how to use the EPC API downloader to automatically fetch data from the Energy Certificate Data API.
 
 ## Setup
 
 ### 1. Get API Credentials
 
-1. Visit [https://epc.opendatacommunities.org/](https://epc.opendatacommunities.org/)
-2. Register for an account (free)
-3. Your API credentials will be emailed to you:
-   - Email address (username)
-   - API key
+1. Visit [https://get-energy-performance-data.communities.gov.uk/](https://get-energy-performance-data.communities.gov.uk/)
+2. Sign in or create a GOV.UK One Login account
+3. Copy your bearer token from your my account page
 
 ### 2. Configure Credentials
 
@@ -20,10 +18,9 @@ This guide explains how to use the EPC API downloader to automatically fetch dat
 # Copy the example file
 cp .env.example .env
 
-# Edit .env and add your credentials
+# Edit .env and add your bearer token
 # .env file will look like:
-EPC_API_EMAIL=your.email@example.com
-EPC_API_KEY=your_api_key_here
+EPC_API_TOKEN=your_bearer_token_here
 ```
 
 ⚠️ **Important**: The `.env` file is already in `.gitignore` and will NOT be committed to git.
@@ -32,35 +29,33 @@ EPC_API_KEY=your_api_key_here
 
 Windows PowerShell:
 ```powershell
-$env:EPC_API_EMAIL="your.email@example.com"
-$env:EPC_API_KEY="your_api_key_here"
+$env:EPC_API_TOKEN="your_bearer_token_here"
 ```
 
 Linux/Mac:
 ```bash
-export EPC_API_EMAIL="your.email@example.com"
-export EPC_API_KEY="your_api_key_here"
+export EPC_API_TOKEN="your_bearer_token_here"
 ```
 
 ## Usage
 
 ### Quick Start
 
-Download all London EPC data for Edwardian terraced houses:
+Download all London house EPC data and derive the London pre-1930 terraced subset:
 
 ```python
 from src.acquisition.epc_api_downloader import EPCAPIDownloader
 
-# Initialize downloader (reads credentials from .env)
-downloader = EPCAPIDownloader()
+# Initialize downloader with the full-load source of truth for stock definition
+downloader = EPCAPIDownloader(download_mode="full_load")
 
-# Download all London boroughs (this will take a while!)
+# Download all London house records (this will take a while!)
 df = downloader.download_all_london_boroughs(
     property_types=['house'],
     from_year=2015
 )
 
-# Apply Edwardian filters
+# Apply the London pre-1930 terraced-house stock definition
 df_filtered = downloader.apply_edwardian_filters(df)
 
 # Save results
@@ -105,9 +100,9 @@ python src/acquisition/epc_api_downloader.py
 ```
 
 This will:
-1. Download all London house EPCs from 2015 onwards
-2. Apply Edwardian terraced filters
-3. Save both raw and filtered data to `data/raw/`
+1. Download all London house EPCs from the full-load extract
+2. Apply the London pre-1930 terraced-house stock definition
+3. Save both raw London house records and the filtered London pre-1930 terraced subset to `data/raw/`
 
 ## Available London Boroughs
 
@@ -149,8 +144,15 @@ The downloader automatically handles all 33 London boroughs:
 
 ## Filters Applied
 
+`apply_edwardian_filters()` requires these EPC columns to be present:
+- `PROPERTY_TYPE`
+- `BUILT_FORM`
+- `CONSTRUCTION_AGE_BAND`
+
+Use `download_mode="full_load"` for any workflow that needs the stock-definition filter. The search API can be useful for quick connectivity tests, but it does not reliably expose the full stock-definition schema.
+
 ### Property Type
-- `house` - All house types (detached, semi-detached, terraced)
+- `house` - House records only
 
 ### Construction Period (Edwardian)
 - Before 1900
@@ -189,45 +191,44 @@ combined = pd.concat(all_data, ignore_index=True)
 ### Access Raw API
 
 ```python
-# Build custom query
-query_params = {
-    'local-authority': 'E09000007',  # Camden
-    'property-type': 'house',
-    'from-year': 2015,
-    'size': 5000
+# Use the shared request helper if you need custom API access
+params = {
+    "council[]": ["Camden"],
+    "date_start": "2015-01-01",
+    "date_end": "2015-12-31",
+    "current_page": 1,
+    "page_size": 5000,
 }
 
-# Make request
-df, next_search_after = downloader._make_api_request(query_params)
+payload = downloader._request_json(downloader.SEARCH_URL, params)
+records = payload.get("data", [])
 ```
 
 ## API Limits
 
 - **Page size**: Maximum 5,000 records per request
-- **Total results**: No limit (use pagination)
-- **Rate limiting**: The API may have rate limits - the downloader includes automatic retry logic
+- **Total results**: No limit for search requests, subject to pagination
+- **Rate limiting**: The API limits applications to 6000 requests per 5 minutes; the downloader includes retry logic for 429 responses
 
 ## Data Output
 
 Downloaded data is saved to:
-- `data/raw/epc_london_raw.csv` - All downloaded data
+- `data/raw/epc_london_raw.csv` - Raw London house records from the EPC full-load extract
 - `data/raw/epc_london_raw.parquet` - Same data in Parquet format (faster)
-- `data/raw/epc_london_filtered.csv` - Filtered for Edwardian terraced
-- `data/raw/epc_london_filtered.parquet` - Filtered data in Parquet
+- `data/raw/epc_london_filtered.csv` - London pre-1930 terraced house subset
+- `data/raw/epc_london_filtered.parquet` - London pre-1930 terraced house subset in Parquet
 
 ## Troubleshooting
 
-### "API credentials not found"
+### "API token not found"
 
 Make sure you have either:
-- Created a `.env` file with your credentials, OR
+- Created a `.env` file with your bearer token, OR
 - Set environment variables
 
 ### "HTTP Error 401: Unauthorized"
 
-Your credentials are incorrect. Double-check:
-- Email address
-- API key (no spaces or extra characters)
+Your bearer token is incorrect, expired, or copied incorrectly.
 
 ### "HTTP Error 429: Too Many Requests"
 
@@ -279,7 +280,7 @@ df_validated, report = validator.validate_dataset(df)
 The `.env` file is already in `.gitignore` to prevent accidental commits.
 
 If you accidentally commit credentials:
-1. Immediately revoke them at [https://epc.opendatacommunities.org/](https://epc.opendatacommunities.org/)
+1. Immediately revoke them at [https://get-energy-performance-data.communities.gov.uk/](https://get-energy-performance-data.communities.gov.uk/)
 2. Request new credentials
 3. Remove the commit from git history
 
@@ -292,15 +293,15 @@ from src.acquisition.epc_api_downloader import EPCAPIDownloader
 import pandas as pd
 
 # Initialize
-downloader = EPCAPIDownloader()
+downloader = EPCAPIDownloader(download_mode="full_load")
 
-# Download Camden data
+# Download Camden house data from the full-load extract
 print("Downloading Camden EPCs...")
 df = downloader.download_borough_data('Camden', from_year=2015)
 print(f"Downloaded: {len(df):,} records")
 
 # Apply filters
-print("\nApplying Edwardian filters...")
+print("\nApplying London pre-1930 terraced-house filters...")
 df_filtered = downloader.apply_edwardian_filters(df)
 print(f"After filtering: {len(df_filtered):,} records")
 
@@ -318,7 +319,7 @@ print("\nData saved to data/raw/camden_edwardian.csv")
 
 ## API Documentation
 
-Full API documentation: [https://epc.opendatacommunities.org/docs/api/domestic](https://epc.opendatacommunities.org/docs/api/domestic)
+Full API documentation: [https://get-energy-performance-data.communities.gov.uk/api-technical-documentation](https://get-energy-performance-data.communities.gov.uk/api-technical-documentation)
 
 ## Support
 

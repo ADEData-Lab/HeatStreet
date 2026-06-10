@@ -284,6 +284,62 @@ def test_pathway_modeler_rejects_negative_intensity():
         )
 
 
+def test_baseline_pathway_handles_no_fabric_package():
+    from src.modeling.pathway_model import PathwayModeler, PATHWAYS
+
+    modeler = PathwayModeler()
+    baseline_property = pd.Series({
+        'LMK_KEY': 'BASELINE_001',
+        'TOTAL_FLOOR_AREA': 100,
+        'ENERGY_CONSUMPTION_CURRENT': 180,
+        'energy_consumption_adjusted': 180,
+        'estimated_flow_temp': 55,
+        'wall_type': 'solid_brick',
+        'wall_insulated': False,
+        'roof_insulation_thickness_mm': 50,
+        'floor_insulation_present': False,
+        'glazing_type': 'single',
+    })
+
+    result = modeler.calculate_property_pathway(
+        baseline_property,
+        PATHWAYS['baseline'],
+        has_hn_access=False,
+    )
+
+    assert result['fabric_capex'] == 0
+    assert result['total_capex'] == 0
+    assert result['heat_pump_flow_temp_c'] == pytest.approx(max(modeler.min_flow_temp, 55.0))
+    assert pd.notna(result['heat_pump_cop_central'])
+    assert result['heat_pump_cop_central'] > 0
+
+
+def test_model_all_pathways_includes_baseline_pathway():
+    from src.modeling.pathway_model import PathwayModeler
+
+    modeler = PathwayModeler()
+    df = pd.DataFrame([
+        {
+            'LMK_KEY': 'PATHWAYS_001',
+            'TOTAL_FLOOR_AREA': 100,
+            'ENERGY_CONSUMPTION_CURRENT': 180,
+            'energy_consumption_adjusted': 180,
+            'estimated_flow_temp': 55,
+            'hn_ready': False,
+            'wall_type': 'solid_brick',
+            'wall_insulated': False,
+            'roof_insulation_thickness_mm': 50,
+            'floor_insulation_present': False,
+            'glazing_type': 'single',
+        }
+    ])
+
+    results = modeler.model_all_pathways(df)
+
+    assert 'baseline' in set(results['pathway_id'])
+    assert len(results) == len(modeler.pathways)
+
+
 def test_package_and_pathway_ids():
     """
     Verify that all package and pathway IDs resolve to known definitions.

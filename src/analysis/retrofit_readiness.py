@@ -202,7 +202,7 @@ class RetrofitReadinessAnalyzer:
     def _calculate_heat_demand(self, df: pd.DataFrame) -> pd.Series:
         """Calculate current heat demand in kWh/m²/year."""
         # ENERGY_CONSUMPTION_CURRENT from EPC API is already in kWh/m²/year
-        # See: https://epc.opendatacommunities.org/docs/guidance (glossary)
+        # See: https://get-energy-performance-data.communities.gov.uk/api-technical-documentation
         # No need to divide by floor area - just use directly
 
         heat_demand = df['ENERGY_CONSUMPTION_CURRENT'].copy()

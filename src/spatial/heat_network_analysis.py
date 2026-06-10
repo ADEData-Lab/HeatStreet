@@ -1751,8 +1751,16 @@ class HeatNetworkAnalyzer:
             logger.error("=" * 80)
             logger.error(f"\nMissing dependency: {e}")
             logger.error("\nTo install spatial dependencies:")
-            logger.error("  Option 1 (Windows - Recommended): conda install -c conda-forge geopandas")
-            logger.error("  Option 2 (Linux/Mac): pip install -r requirements-spatial.txt")
+            logger.error("  Windows (supported path):")
+            logger.error("    conda env create -f environment.yml")
+            logger.error("    conda activate heatstreet")
+            logger.error(r"    .\run-conda.ps1")
+            logger.error("  Linux/Mac fallback:")
+            logger.error("    pip install -r requirements-spatial.txt")
+            logger.error(
+                "  If Fiona/GDAL asks for GDAL_VERSION or gdal-config on Windows, "
+                "rebuild the Conda environment instead of using pip."
+            )
             logger.error("\nOr skip spatial analysis - the rest of the analysis works without it!")
             logger.error("=" * 80)
             return None, None

@@ -26,8 +26,9 @@ def test_validate_start_date_rejects_dates_after_end_date():
     )
 
 
-def test_sample_window_matches_requires_exact_metadata_match(tmp_path):
-    dataset_path = tmp_path / "epc_london_filtered.csv"
+def test_sample_window_matches_requires_exact_metadata_match():
+    dataset_path = Path(".tmp_sample_window") / "epc_london_filtered.csv"
+    dataset_path.parent.mkdir(parents=True, exist_ok=True)
     dataset_path.write_text("id\n1\n", encoding="utf-8")
 
     write_sample_window_metadata(
@@ -50,7 +51,7 @@ def test_sample_window_matches_requires_exact_metadata_match(tmp_path):
 
 
 def test_apply_sample_window_filter_is_inclusive_and_falls_back_to_inspection_date():
-    downloader = EPCAPIDownloader(email="user@example.com", api_key="abcdefghij")
+    downloader = EPCAPIDownloader(token="test-bearer-token")
     df = pd.DataFrame(
         [
             {

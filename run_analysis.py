@@ -10,12 +10,14 @@ import json
 import shutil
 import sys
 import subprocess
+import importlib
+import inspect
 import gc
 import re
 import platform
 from pathlib import Path
-from typing import Tuple, Union
-from datetime import date as date_cls, datetime
+from typing import Any, Dict, Optional, Tuple, Union
+from datetime import date as date_cls, datetime, timedelta
 from loguru import logger
 import questionary
 from rich.console import Console
@@ -28,7 +30,11 @@ import time
 sys.path.append(str(Path(__file__).parent))
 
 from config.config import load_config, ensure_directories, DATA_RAW_DIR, DATA_PROCESSED_DIR, DATA_OUTPUTS_DIR
-from src.acquisition.epc_api_downloader import EPCAPIDownloader
+from src.acquisition.epc_api_downloader import (
+    EPCAPIDownloader,
+    EPCDownloadError,
+    EPCStockDefinitionError,
+)
 from src.acquisition.london_gis_downloader import LondonGISDownloader
 from src.acquisition.hnpd_downloader import HNPDDownloader
 from src.cleaning.data_validator import EPCDataValidator
@@ -37,9 +43,399 @@ from src.modeling.scenario_model import ScenarioModeler
 from src.modeling.pathway_model import PathwayModeler
 from src.reporting.comparisons import ComparisonReporter
 from src.utils.analysis_logger import AnalysisLogger
+from src.utils.staged_dataset import DatasetReference, parquet_row_count
+from src.utils.staged_processing import (
+    apply_adjustments_staged_dataset,
+    validate_staged_dataset,
+)
 
 
 console = Console()
+
+EXIT_SUCCESS = 0
+EXIT_ANALYSIS_FAILED = 1
+EXIT_CANCELLED = 130
+REPO_ROOT = Path(__file__).resolve().parent
+_hp_hn_comparison_outputs_cache: Optional[Dict[str, Any]] = None
+
+EXPECTED_STAGED_DOWNLOAD_DATA_MARKERS = (
+    "download_national_domestic_dataset(",
+    "materialize_full_load_subset(",
+    'Using staged Parquet processing for the national EPC full-load extract',
+)
+
+EXPECTED_STAGED_NATIONAL_DOWNLOADER_MARKERS = (
+    "create_attempt_directory(stage_dir)",
+    "write_parquet_part(",
+    "ignored_recommendation_members",
+    "rows_retained_after_sample_window",
+)
+
+
+class AnalysisCancelled(Exception):
+    """User cancelled the interactive analysis flow."""
+
+
+def _safe_resolve_path(value: Optional[Union[str, Path]]) -> Optional[str]:
+    """Return a normalized absolute path string when possible."""
+    if not value:
+        return None
+
+    try:
+        return str(Path(value).resolve())
+    except Exception:
+        return str(value)
+
+
+def _get_source_location(target) -> Tuple[Optional[str], Optional[int]]:
+    """Return the resolved source file and first line number for a callable."""
+    try:
+        source_file = inspect.getsourcefile(target) or inspect.getfile(target)
+        _, start_line = inspect.getsourcelines(target)
+    except (OSError, TypeError):
+        return None, None
+
+    return _safe_resolve_path(source_file), int(start_line)
+
+
+def _get_source_text(target) -> Optional[str]:
+    """Return source text for a callable when inspect can resolve it."""
+    try:
+        return inspect.getsource(target)
+    except (OSError, TypeError):
+        return None
+
+
+def _path_within_repo(path_value: Optional[str]) -> bool:
+    """Return True when a path resolves inside the active repo root."""
+    if not path_value:
+        return False
+
+    try:
+        Path(path_value).resolve().relative_to(REPO_ROOT)
+        return True
+    except Exception:
+        return False
+
+
+def _resolve_git_commit_hash() -> Optional[str]:
+    """Resolve the active git commit hash when available."""
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except Exception:
+        return None
+
+    if result.returncode != 0:
+        return None
+
+    commit_hash = result.stdout.strip()
+    return commit_hash or None
+
+
+def _missing_source_markers(source_text: Optional[str], markers: tuple[str, ...]) -> list[str]:
+    """Return the expected staged markers that are absent from a source block."""
+    if source_text is None:
+        return list(markers)
+    return [marker for marker in markers if marker not in source_text]
+
+
+def collect_runtime_identity() -> Dict[str, Any]:
+    """Collect interpreter, checkout, and source-location details for startup diagnostics."""
+    download_data_file, download_data_line = _get_source_location(download_data)
+    national_dataset_file, national_dataset_line = _get_source_location(
+        EPCAPIDownloader.download_national_domestic_dataset
+    )
+    downloader_module = inspect.getmodule(EPCAPIDownloader)
+
+    return {
+        "repo_root": str(REPO_ROOT),
+        "python_executable": _safe_resolve_path(sys.executable),
+        "working_directory": _safe_resolve_path(Path.cwd()),
+        "run_analysis_file": _safe_resolve_path(__file__),
+        "epc_api_downloader_file": _safe_resolve_path(getattr(downloader_module, "__file__", None)),
+        "download_data_source_file": download_data_file,
+        "download_data_line": download_data_line,
+        "download_national_domestic_dataset_source_file": national_dataset_file,
+        "download_national_domestic_dataset_line": national_dataset_line,
+        "git_commit_hash": _resolve_git_commit_hash(),
+        "conda_env_name": os.getenv("CONDA_DEFAULT_ENV") or None,
+        "conda_prefix": _safe_resolve_path(os.getenv("CONDA_PREFIX")),
+    }
+
+
+def run_startup_preflight(runtime_identity: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Verify that the live runtime resolves to the staged national-ingest path.
+
+    This is intentionally strict so old in-memory full-load behavior cannot run
+    silently from the wrong interpreter, checkout, or import path.
+    """
+    checks = []
+    issues = []
+
+    def add_check(name: str, ok: bool, detail: str) -> None:
+        checks.append({"name": name, "ok": ok, "detail": detail})
+
+    download_data_source = _get_source_text(download_data)
+    missing_download_markers = _missing_source_markers(
+        download_data_source,
+        EXPECTED_STAGED_DOWNLOAD_DATA_MARKERS,
+    )
+    download_location = (
+        f"{runtime_identity.get('download_data_source_file') or 'unknown'}:"
+        f"{runtime_identity.get('download_data_line') or 'unknown'}"
+    )
+    download_data_ok = not missing_download_markers and _path_within_repo(
+        runtime_identity.get("download_data_source_file")
+    )
+    if download_data_ok:
+        add_check(
+            "download_data() staged implementation",
+            True,
+            f"resolved to {download_location}",
+        )
+    else:
+        detail_parts = [f"resolved to {download_location}"]
+        if missing_download_markers:
+            detail_parts.append(
+                "missing staged markers: " + ", ".join(missing_download_markers)
+            )
+        if not _path_within_repo(runtime_identity.get("download_data_source_file")):
+            detail_parts.append("source file is outside the active repo root")
+        detail = "; ".join(detail_parts)
+        add_check("download_data() staged implementation", False, detail)
+        issues.append(
+            "download_data() did not resolve to the staged national-ingest block. "
+            f"{detail}."
+        )
+
+    national_source = _get_source_text(EPCAPIDownloader.download_national_domestic_dataset)
+    missing_national_markers = _missing_source_markers(
+        national_source,
+        EXPECTED_STAGED_NATIONAL_DOWNLOADER_MARKERS,
+    )
+    national_location = (
+        f"{runtime_identity.get('download_national_domestic_dataset_source_file') or 'unknown'}:"
+        f"{runtime_identity.get('download_national_domestic_dataset_line') or 'unknown'}"
+    )
+    national_ok = not missing_national_markers and _path_within_repo(
+        runtime_identity.get("download_national_domestic_dataset_source_file")
+    )
+    if national_ok:
+        add_check(
+            "download_national_domestic_dataset() staged implementation",
+            True,
+            f"resolved to {national_location}",
+        )
+    else:
+        detail_parts = [f"resolved to {national_location}"]
+        if missing_national_markers:
+            detail_parts.append(
+                "missing staged markers: " + ", ".join(missing_national_markers)
+            )
+        if not _path_within_repo(runtime_identity.get("download_national_domestic_dataset_source_file")):
+            detail_parts.append("source file is outside the active repo root")
+        detail = "; ".join(detail_parts)
+        add_check(
+            "download_national_domestic_dataset() staged implementation",
+            False,
+            detail,
+        )
+        issues.append(
+            "EPCAPIDownloader.download_national_domestic_dataset() did not resolve "
+            f"to the dataset-backed staged implementation. {detail}."
+        )
+
+    for module_name in ("src.utils.staged_dataset", "src.utils.staged_processing"):
+        try:
+            module = importlib.import_module(module_name)
+            module_file = _safe_resolve_path(getattr(module, "__file__", None))
+            add_check(
+                f"import {module_name}",
+                True,
+                module_file or "imported successfully",
+            )
+        except Exception as exc:
+            add_check(f"import {module_name}", False, str(exc))
+            issues.append(
+                f"{module_name} could not be imported in this runtime: {exc}"
+            )
+
+    try:
+        duckdb_module = importlib.import_module("duckdb")
+        duckdb_file = _safe_resolve_path(getattr(duckdb_module, "__file__", None))
+        add_check(
+            "import duckdb",
+            True,
+            duckdb_file or "imported successfully",
+        )
+    except Exception as exc:
+        add_check("import duckdb", False, str(exc))
+        issues.append(
+            "duckdb is not importable, so staged national EPC ingest cannot run: "
+            f"{exc}"
+        )
+
+    return {
+        "status": "passed" if not issues else "failed",
+        "ok": not issues,
+        "checks": checks,
+        "issues": issues,
+        "likely_causes": [
+            "different checkout",
+            "stale installed package or alternate import path",
+            "wrong interpreter",
+            "stale copied script outside the repo root",
+        ],
+    }
+
+
+def persist_startup_diagnostics(
+    analysis_logger: Optional[AnalysisLogger],
+    runtime_identity: Dict[str, Any],
+    preflight: Dict[str, Any],
+) -> None:
+    """Persist startup diagnostics into analysis-log metadata."""
+    if analysis_logger is None:
+        return
+
+    analysis_logger.set_metadata("runtime_identity", runtime_identity)
+    analysis_logger.set_metadata("startup_preflight", preflight)
+    analysis_logger.set_metadata(
+        "runtime_python_executable",
+        runtime_identity.get("python_executable"),
+    )
+    analysis_logger.set_metadata(
+        "runtime_working_directory",
+        runtime_identity.get("working_directory"),
+    )
+    analysis_logger.set_metadata(
+        "runtime_run_analysis_file",
+        runtime_identity.get("run_analysis_file"),
+    )
+    analysis_logger.set_metadata(
+        "runtime_epc_api_downloader_file",
+        runtime_identity.get("epc_api_downloader_file"),
+    )
+    analysis_logger.set_metadata(
+        "runtime_download_data_source",
+        (
+            f"{runtime_identity.get('download_data_source_file')}:"
+            f"{runtime_identity.get('download_data_line')}"
+        ),
+    )
+    analysis_logger.set_metadata(
+        "runtime_download_national_domestic_dataset_source",
+        (
+            f"{runtime_identity.get('download_national_domestic_dataset_source_file')}:"
+            f"{runtime_identity.get('download_national_domestic_dataset_line')}"
+        ),
+    )
+    analysis_logger.set_metadata(
+        "runtime_git_commit_hash",
+        runtime_identity.get("git_commit_hash") or "unavailable",
+    )
+    analysis_logger.set_metadata(
+        "runtime_conda_env_name",
+        runtime_identity.get("conda_env_name") or "not set",
+    )
+    analysis_logger.set_metadata(
+        "runtime_conda_prefix",
+        runtime_identity.get("conda_prefix") or "not set",
+    )
+    analysis_logger.set_metadata(
+        "startup_preflight_status",
+        preflight.get("status"),
+    )
+
+
+def emit_startup_diagnostics(
+    analysis_logger: Optional[AnalysisLogger] = None,
+    runtime_identity: Optional[Dict[str, Any]] = None,
+    preflight: Optional[Dict[str, Any]] = None,
+) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+    """Print and persist the runtime identity plus staged-path preflight checks."""
+    runtime_identity = runtime_identity or collect_runtime_identity()
+    preflight = preflight or run_startup_preflight(runtime_identity)
+    persist_startup_diagnostics(analysis_logger, runtime_identity, preflight)
+
+    conda_env = runtime_identity.get("conda_env_name") or "not set"
+    git_commit = runtime_identity.get("git_commit_hash") or "unavailable"
+    status_text = "PASSED" if preflight.get("ok") else "FAILED"
+    status_color = "green" if preflight.get("ok") else "red"
+
+    lines = [
+        "[bold]Runtime Identity[/bold]",
+        f"Python executable: {runtime_identity.get('python_executable') or 'unknown'}",
+        f"Working directory: {runtime_identity.get('working_directory') or 'unknown'}",
+        f"run_analysis.__file__: {runtime_identity.get('run_analysis_file') or 'unknown'}",
+        (
+            "src.acquisition.epc_api_downloader.__file__: "
+            f"{runtime_identity.get('epc_api_downloader_file') or 'unknown'}"
+        ),
+        (
+            "download_data(): "
+            f"{runtime_identity.get('download_data_source_file') or 'unknown'}:"
+            f"{runtime_identity.get('download_data_line') or 'unknown'}"
+        ),
+        (
+            "download_national_domestic_dataset(): "
+            f"{runtime_identity.get('download_national_domestic_dataset_source_file') or 'unknown'}:"
+            f"{runtime_identity.get('download_national_domestic_dataset_line') or 'unknown'}"
+        ),
+        f"Git commit: {git_commit}",
+        f"Conda env: {conda_env}",
+        "",
+        f"[bold]Startup Preflight: {status_text}[/bold]",
+    ]
+
+    for check in preflight.get("checks", []):
+        prefix = "[green]OK[/green]" if check.get("ok") else "[red]X[/red]"
+        lines.append(f"{prefix} {check.get('name')}: {check.get('detail')}")
+
+    if preflight.get("issues"):
+        lines.extend(
+            [
+                "",
+                "[bold]Failures[/bold]",
+                *[f"- {issue}" for issue in preflight.get("issues", [])],
+                "",
+                "[bold]Likely causes[/bold]",
+                *[f"- {cause}" for cause in preflight.get("likely_causes", [])],
+                "",
+                "The pipeline will stop before any prompts or Phase 1 work.",
+                "Use the runtime mismatch workflow in README, and on Windows rerun via .\\run-conda.ps1 or run-conda.bat.",
+            ]
+        )
+
+    console.print(
+        Panel.fit(
+            "\n".join(lines),
+            title="Startup Diagnostics",
+            border_style=status_color,
+        )
+    )
+    console.print()
+
+    return runtime_identity, preflight
+
+
+def save_startup_failure_log(analysis_logger: Optional[AnalysisLogger]) -> Optional[Path]:
+    """Persist a metadata-only analysis log when startup fails before Phase 1."""
+    if analysis_logger is None or not hasattr(analysis_logger, "save_log"):
+        return None
+
+    try:
+        return Path(analysis_logger.save_log())
+    except Exception as exc:
+        logger.warning(f"Could not save startup diagnostics log: {exc}")
+        return None
 
 
 def validate_email(email: str) -> Union[bool, str]:
@@ -128,8 +524,8 @@ def compute_sample_start_date(sample_end_date: date_cls) -> date_cls:
 
 
 def prompt_sample_end_date() -> date_cls:
-    """Prompt for the sample end date, defaulting to today."""
-    default_value = date_cls.today().isoformat()
+    """Prompt for the sample end date, defaulting to yesterday for API safety."""
+    default_value = (date_cls.today() - timedelta(days=1)).isoformat()
     sample_end_text = questionary.text(
         "Sample end date (YYYY-MM-DD):",
         default=default_value,
@@ -171,6 +567,9 @@ def write_sample_window_metadata(
     dataset_type: str,
 ) -> None:
     """Persist sample-window metadata for a dataset."""
+    if not file_path.exists():
+        logger.debug(f"Skipping sample-window metadata for missing dataset: {file_path}")
+        return
     metadata = {
         "dataset_path": str(file_path),
         "dataset_type": dataset_type,
@@ -209,6 +608,95 @@ def sample_window_matches(file_path: Path, sample_start_date: date_cls, sample_e
     )
 
 
+def is_dataset_reference(value) -> bool:
+    """Return True when the value is a staged dataset reference."""
+    return isinstance(value, DatasetReference)
+
+
+def dataset_record_count(value) -> int:
+    """Return a row count for a dataframe or staged dataset."""
+    if is_dataset_reference(value):
+        if value.row_count is not None:
+            return int(value.row_count)
+        return parquet_row_count(value.parquet_path)
+    return len(value) if value is not None else 0
+
+
+def dataset_is_empty(value) -> bool:
+    """Return True when a dataframe or staged dataset has no rows."""
+    return dataset_record_count(value) == 0
+
+
+def ensure_dataframe(value, *, stage_name: str):
+    """Materialize a staged dataset into memory when a downstream phase needs a dataframe."""
+    if not is_dataset_reference(value):
+        return value
+
+    console.print(f"[cyan]Materializing {stage_name} from staged Parquet at {value.parquet_path}...[/cyan]")
+    try:
+        df = value.load_dataframe()
+    except MemoryError as exc:
+        raise RuntimeError(
+            f"{stage_name} could not be materialized due to memory limits. "
+            f"Staged dataset: {value.parquet_path}"
+        ) from exc
+    except Exception as exc:
+        raise RuntimeError(
+            f"{stage_name} could not be materialized from staged dataset {value.parquet_path}: {exc}"
+        ) from exc
+
+    console.print(f"[green]OK[/green] Loaded {len(df):,} records from staged dataset")
+    return df
+
+
+def normalize_validation_report(report: Optional[Dict[str, Any]], *, input_dataset, validated_dataset) -> Dict[str, Any]:
+    """Normalize validation counts for dataframes and staged datasets."""
+    normalized_report = dict(report or {})
+    total_records = int(normalized_report.get("total_records", dataset_record_count(input_dataset)) or 0)
+    duplicates_removed = int(normalized_report.get("duplicates_removed", 0) or 0)
+    records_passed = int(
+        normalized_report.get(
+            "records_passed",
+            normalized_report.get("valid_records", dataset_record_count(validated_dataset)),
+        ) or 0
+    )
+    invalid_records = max(total_records - duplicates_removed - records_passed, 0)
+
+    normalized_report["total_records"] = total_records
+    normalized_report["duplicates_removed"] = duplicates_removed
+    normalized_report["records_passed"] = records_passed
+    normalized_report["valid_records"] = records_passed
+    normalized_report["invalid_records"] = invalid_records
+    return normalized_report
+
+
+def write_json_report(file_path: Path, payload: Dict[str, Any]) -> None:
+    """Write a JSON report with numpy-safe serialization."""
+    from src.utils.analysis_logger import convert_to_json_serializable
+
+    with open(file_path, "w", encoding="utf-8") as f:
+        json.dump(convert_to_json_serializable(payload), f, indent=2)
+
+
+def add_analysis_output_if_exists(
+    analysis_logger: Optional[AnalysisLogger],
+    file_path: Optional[Union[str, Path]],
+    output_type: str,
+    description: str,
+) -> bool:
+    """Register an analysis output only when the path currently exists."""
+    if analysis_logger is None or not file_path:
+        return False
+
+    path = Path(file_path)
+    if not path.exists():
+        logger.debug(f"Skipping analysis output registration for missing {output_type}: {path}")
+        return False
+
+    analysis_logger.add_output(str(path), output_type, description)
+    return True
+
+
 def is_one_stop_only(config=None) -> bool:
     """Return True when reporting is restricted to the one-stop markdown output."""
     config = config or load_config()
@@ -228,12 +716,11 @@ def print_header():
 
 
 def check_credentials():
-    """Check if API credentials are configured."""
-    email = os.getenv('EPC_API_EMAIL')
-    api_key = os.getenv('EPC_API_KEY')
+    """Check if the API token is configured."""
+    token = os.getenv('EPC_API_TOKEN')
 
-    if not email or not api_key:
-        console.print("[yellow]⚠[/yellow]  API credentials not found in .env file", style="yellow")
+    if not token:
+        console.print("[yellow]⚠[/yellow]  API token not found in .env file", style="yellow")
         console.print()
 
         if not Path('.env').exists():
@@ -246,44 +733,33 @@ def check_credentials():
                 # Create .env file
                 with open('.env', 'w') as f:
                     f.write("# EPC API Credentials\n")
-                    f.write("EPC_API_EMAIL=\n")
-                    f.write("EPC_API_KEY=\n")
+                    f.write("EPC_API_TOKEN=\n")
                 console.print("[green]✓[/green] Created .env file")
 
         console.print()
-        console.print("[cyan]Please enter your EPC API credentials:[/cyan]")
-        console.print("[dim]Get credentials from: https://epc.opendatacommunities.org/[/dim]")
+        console.print("[cyan]Please enter your EPC API bearer token:[/cyan]")
+        console.print("[dim]Get the token from your my account page on the Energy Certificate Data API service.[/dim]")
         console.print()
 
-        email = questionary.text(
-            "Email address:",
-            validate=validate_email
+        token = questionary.text(
+            "Bearer token:",
+            validate=lambda value: True if value and value.strip() else "Bearer token cannot be empty"
         ).ask()
 
-        if email is None:
-            console.print("[yellow]Credential input cancelled[/yellow]")
-            return False
-
-        api_key = questionary.text(
-            "API key:",
-            validate=validate_api_key
-        ).ask()
-
-        if api_key is None:
+        if token is None:
             console.print("[yellow]Credential input cancelled[/yellow]")
             return False
 
         # Save to .env
         with open('.env', 'w') as f:
             f.write(f"# EPC API Credentials\n")
-            f.write(f"EPC_API_EMAIL={email}\n")
-            f.write(f"EPC_API_KEY={api_key}\n")
+            f.write(f"EPC_API_TOKEN={token}\n")
 
         # Reload environment
         from dotenv import load_dotenv
         load_dotenv(override=True)
 
-        console.print("[green]✓[/green] Credentials saved to .env file")
+        console.print("[green]✓[/green] API token saved to .env file")
         console.print()
 
     return True
@@ -320,9 +796,16 @@ def ask_gis_download():
         if gis_downloader.download_and_prepare():
             console.print("[green]✓[/green] GIS data downloaded and ready")
             return True
-        else:
-            console.print("[yellow]⚠[/yellow] GIS data download failed (spatial analysis will be limited)")
-            return False
+
+        error_detail = getattr(gis_downloader, "last_error", None)
+        console.print(
+            "[yellow]⚠[/yellow] Optional London Datastore GIS download failed "
+            "(spatial analysis will continue without London Datastore GIS layers; "
+            "this does not affect the EPC API download path)"
+        )
+        if error_detail:
+            console.print(f"[dim]Reason: {error_detail}[/dim]")
+        return False
 
     return False
 
@@ -381,7 +864,6 @@ def download_data(
     console.print(Panel("[bold]Phase 1: Data Download[/bold]", border_style="blue"))
     console.print()
 
-    downloader = EPCAPIDownloader()
     from_year = sample_start_date.year if sample_start_date else 2015
 
     download_scope = questionary.select(
@@ -393,28 +875,35 @@ def download_data(
     ).ask()
 
     if not download_scope:
-        console.print("[yellow]⚠[/yellow] Download cancelled by user", style="yellow")
-        return None
+        raise AnalysisCancelled("Download cancelled by user")
 
     selected_borough = None
     if download_scope == "Single borough (testing)":
         selected_borough = questionary.autocomplete(
             "Select borough:",
-            choices=list(downloader.LONDON_LA_CODES.keys()),
+            choices=list(EPCAPIDownloader.LONDON_LA_CODES.keys()),
         ).ask()
 
         if not selected_borough:
-            console.print("[yellow]⚠[/yellow] Download cancelled by user", style="yellow")
-            return None
+            raise AnalysisCancelled("Download cancelled by user")
+
+    download_mode = "full_load"
+    downloader = EPCAPIDownloader(download_mode=download_mode)
 
     if analysis_logger:
         analysis_logger.start_phase(
             "Data Download",
-            "Download EPC data from API and filter for Edwardian terraced houses"
+            "Download EPC data and define the London pre-1930 terraced house stock"
         )
 
     try:
         if selected_borough:
+            console.print(
+                f"[cyan]Using EPC full-load CSV extract as the stock-definition source for {selected_borough}...[/cyan]"
+            )
+            console.print(
+                "[cyan]This still stages the national extract, then subsets it to the selected borough.[/cyan]"
+            )
             console.print(f"[cyan]Downloading {selected_borough} only...[/cyan]")
             df = downloader.download_borough_data(
                 selected_borough,
@@ -426,7 +915,118 @@ def download_data(
                 log_borough=True,
                 show_progress=True,
             )
+        elif hasattr(downloader, "download_national_domestic_dataset"):
+            console.print("[cyan]Using staged Parquet processing for the national EPC full-load extract...[/cyan]")
+            console.print("[cyan]Streaming certificate members to disk and excluding recommendation files before filtering...[/cyan]")
+
+            national_stage = downloader.download_national_domestic_dataset(
+                sample_start_date=sample_start_date,
+                sample_end_date=sample_end_date,
+            )
+            ingest_manifest = national_stage.metadata
+            selected_members = ingest_manifest.get("selected_certificate_members", [])
+            ignored_recommendations = ingest_manifest.get("ignored_recommendation_members", [])
+            malformed_rows = int(ingest_manifest.get("malformed_rows_skipped", 0) or 0)
+
+            if selected_members:
+                console.print("[cyan]Selected certificate members:[/cyan]")
+                for member in selected_members:
+                    console.print(f"    {member}")
+
+            if ignored_recommendations:
+                console.print("[cyan]Ignored recommendation members:[/cyan]")
+                for member in ignored_recommendations:
+                    console.print(f"    {member}")
+
+            console.print(f"[cyan]Approximate malformed rows skipped during ingest:[/cyan] {malformed_rows:,}")
+            console.print(f"[cyan]Raw staged dataset:[/cyan] {national_stage.parquet_path}")
+            if national_stage.manifest_path:
+                console.print(f"[cyan]Ingest manifest:[/cyan] {national_stage.manifest_path}")
+
+            raw_ref = downloader.materialize_full_load_subset(
+                national_stage,
+                DATA_RAW_DIR / "epc_london_raw.parquet",
+                dataset_name="raw_london_house_dataset",
+                borough_names=EPCAPIDownloader.LONDON_LA_CODES.keys(),
+                property_types=["house"],
+            )
+            filtered_ref = downloader.materialize_full_load_subset(
+                raw_ref,
+                DATA_RAW_DIR / "epc_london_filtered.parquet",
+                dataset_name="filtered_london_pre_1930_terraced_dataset",
+                apply_stock_definition=True,
+            )
+
+            raw_record_count = dataset_record_count(raw_ref)
+            filtered_record_count = dataset_record_count(filtered_ref)
+            if filtered_record_count == 0:
+                console.print(
+                    f"[red]x[/red] No London stock records retained after staged filtering. "
+                    f"Staged dataset: {filtered_ref.parquet_path}",
+                    style="red",
+                )
+                if analysis_logger:
+                    analysis_logger.complete_phase(success=False, message=f"No data retained in {filtered_ref.parquet_path}")
+                return None
+
+            console.print(f"[green]OK[/green] Raw London house records: {raw_record_count:,}")
+            console.print(f"[green]OK[/green] Filtered London pre-1930 terraced house records: {filtered_record_count:,}")
+            console.print(f"[cyan]Filtered staged dataset:[/cyan] {filtered_ref.parquet_path}")
+
+            if sample_start_date and sample_end_date:
+                for output_path, dataset_type in (
+                    (DATA_RAW_DIR / "epc_london_raw.csv", "raw_epc_download"),
+                    (DATA_RAW_DIR / "epc_london_raw.parquet", "raw_epc_download_parquet"),
+                    (DATA_RAW_DIR / "epc_london_filtered.csv", "filtered_epc_download"),
+                    (DATA_RAW_DIR / "epc_london_filtered.parquet", "filtered_epc_download_parquet"),
+                ):
+                    write_sample_window_metadata(
+                        output_path,
+                        sample_start_date,
+                        sample_end_date,
+                        dataset_type,
+                    )
+
+            if analysis_logger:
+                analysis_logger.add_metric("raw_records_downloaded", raw_record_count, "House records from staged EPC source before pre-1930 terraced filtering")
+                analysis_logger.add_metric("raw_house_records", raw_record_count, "House records before pre-1930 terraced filtering")
+                analysis_logger.add_metric("filtered_records", filtered_record_count, "London pre-1930 terraced houses after filtering")
+                analysis_logger.add_metric("filtered_pre_1930_terraced_house_records", filtered_record_count, "London pre-1930 terraced house records after filtering")
+                analysis_logger.add_metric("filter_rate", filtered_record_count / raw_record_count * 100, "Percentage retained after filtering")
+                analysis_logger.add_metric("from_year", from_year)
+                analysis_logger.add_metric("ignored_recommendation_members", len(ignored_recommendations), "Recommendation CSV members excluded from staged ingest")
+                analysis_logger.add_metric("malformed_rows_skipped", malformed_rows, "Malformed certificate rows skipped during staged ingest")
+                if sample_start_date:
+                    analysis_logger.add_metric("sample_start_date", sample_start_date.isoformat(), "Exact inclusive sample start date")
+                if sample_end_date:
+                    analysis_logger.add_metric("sample_end_date", sample_end_date.isoformat(), "Exact inclusive sample end date")
+                add_analysis_output_if_exists(analysis_logger, national_stage.parquet_path, "parquet", "Raw staged national domestic certificate dataset")
+                if national_stage.manifest_path:
+                    add_analysis_output_if_exists(analysis_logger, national_stage.manifest_path, "json", "National domestic ingest manifest")
+                add_analysis_output_if_exists(analysis_logger, raw_ref.parquet_path, "parquet", "Raw London house records from staged EPC source")
+                add_analysis_output_if_exists(analysis_logger, raw_ref.csv_path, "csv", "Raw London house records from staged EPC source")
+                add_analysis_output_if_exists(analysis_logger, filtered_ref.parquet_path, "parquet", "Filtered London pre-1930 terraced houses")
+                add_analysis_output_if_exists(analysis_logger, filtered_ref.csv_path, "csv", "Filtered London pre-1930 terraced houses")
+                analysis_logger.complete_phase(
+                    success=True,
+                    message=(
+                        f"Prepared {raw_record_count:,} staged London house records and retained "
+                        f"{filtered_record_count:,} London pre-1930 terraced houses"
+                    ),
+                )
+
+            return filtered_ref
         else:
+            console.print(
+                "[yellow]WARNING[/yellow] Falling back to the legacy in-memory full-load path. "
+                "This is a non-production compatibility path and should not be used for national runs.",
+                style="yellow",
+            )
+            logger.warning(
+                "Falling back to the legacy in-memory full-load EPC path. "
+                "Startup preflight should normally prevent this path from running."
+            )
+            console.print("[cyan]Using EPC full-load CSV extract for London stock definition...[/cyan]")
             console.print("[cyan]Downloading ALL London boroughs (this will take a while)...[/cyan]")
             df = downloader.download_all_london_boroughs(
                 property_types=['house'],
@@ -443,38 +1043,54 @@ def download_data(
                 analysis_logger.complete_phase(success=False, message="No data downloaded from API")
             return None
 
-        console.print(f"[green]✓[/green] Downloaded {len(df):,} records")
+        if selected_borough:
+            console.print(f"[green]✓[/green] Raw {selected_borough} house records: {len(df):,}")
+        else:
+            console.print(f"[green]✓[/green] Raw London house records: {len(df):,}")
 
         if analysis_logger:
-            analysis_logger.add_metric("raw_records_downloaded", len(df), "Total records from API")
+            analysis_logger.add_metric("raw_records_downloaded", len(df), "House records from EPC source before pre-1930 terraced filtering")
+            analysis_logger.add_metric("raw_house_records", len(df), "House records before pre-1930 terraced filtering")
             analysis_logger.add_metric("from_year", from_year)
             if sample_start_date:
                 analysis_logger.add_metric("sample_start_date", sample_start_date.isoformat(), "Exact inclusive sample start date")
             if sample_end_date:
                 analysis_logger.add_metric("sample_end_date", sample_end_date.isoformat(), "Exact inclusive sample end date")
 
-        # Apply Edwardian filters
-        console.print("[cyan]Applying Edwardian terraced housing filters...[/cyan]")
+        # Apply stock filters
+        filter_scope = "London" if not selected_borough else selected_borough
+        console.print(f"[cyan]Applying pre-1930 terraced house filters for {filter_scope}...[/cyan]")
         df_filtered = downloader.apply_edwardian_filters(df)
-        console.print(f"[green]✓[/green] Filtered to {len(df_filtered):,} Edwardian terraced houses")
+        if selected_borough:
+            console.print(f"[green]✓[/green] Filtered {selected_borough} pre-1930 terraced house records: {len(df_filtered):,}")
+        else:
+            console.print(f"[green]✓[/green] Filtered London pre-1930 terraced house records: {len(df_filtered):,}")
 
         if analysis_logger:
-            analysis_logger.add_metric("filtered_records", len(df_filtered), "Edwardian terraced houses after filtering")
+            analysis_logger.add_metric("filtered_records", len(df_filtered), "London pre-1930 terraced houses after filtering")
+            analysis_logger.add_metric("filtered_pre_1930_terraced_house_records", len(df_filtered), "London pre-1930 terraced house records after filtering")
             analysis_logger.add_metric("filter_rate", len(df_filtered) / len(df) * 100, "Percentage retained after filtering")
+
+        raw_filename = "epc_london_raw.csv"
+        filtered_filename = "epc_london_filtered.csv"
+        if selected_borough:
+            borough_slug = selected_borough.lower().replace(" ", "_")
+            raw_filename = f"epc_{borough_slug}_raw.csv"
+            filtered_filename = f"epc_{borough_slug}_filtered.csv"
 
         # Save data
         console.print("[cyan]Saving data...[/cyan]")
-        downloader.save_data(df, "epc_london_raw.csv")
-        downloader.save_data(df_filtered, "epc_london_filtered.csv")
+        downloader.save_data(df, raw_filename)
+        downloader.save_data(df_filtered, filtered_filename, raw_df=df)
         if sample_start_date and sample_end_date:
             write_sample_window_metadata(
-                DATA_RAW_DIR / "epc_london_raw.csv",
+                DATA_RAW_DIR / raw_filename,
                 sample_start_date,
                 sample_end_date,
                 "raw_epc_download",
             )
             write_sample_window_metadata(
-                DATA_RAW_DIR / "epc_london_filtered.csv",
+                DATA_RAW_DIR / filtered_filename,
                 sample_start_date,
                 sample_end_date,
                 "filtered_epc_download",
@@ -482,12 +1098,31 @@ def download_data(
         console.print(f"[green]✓[/green] Data saved to data/raw/")
 
         if analysis_logger:
-            analysis_logger.add_output("data/raw/epc_london_raw.csv", "csv", "Raw EPC data from API")
-            analysis_logger.add_output("data/raw/epc_london_filtered.csv", "csv", "Filtered Edwardian terraced houses")
-            analysis_logger.complete_phase(success=True, message=f"Downloaded {len(df_filtered):,} Edwardian properties")
+            analysis_logger.add_output(f"data/raw/{raw_filename}", "csv", "Raw house records from EPC data")
+            analysis_logger.add_output(f"data/raw/{filtered_filename}", "csv", "Filtered pre-1930 terraced houses")
+            analysis_logger.complete_phase(
+                success=True,
+                message=(
+                    f"Prepared {len(df):,} house records and retained "
+                    f"{len(df_filtered):,} "
+                    f"{'London' if not selected_borough else selected_borough} pre-1930 terraced houses"
+                ),
+            )
 
         return df_filtered
 
+    except AnalysisCancelled:
+        raise
+    except EPCStockDefinitionError as e:
+        console.print(f"[red]✗[/red] Stock definition failed: {e}", style="red")
+        if analysis_logger:
+            analysis_logger.complete_phase(success=False, message=f"StockDefinitionError: {e}")
+        return None
+    except EPCDownloadError as e:
+        console.print(f"[red]✗[/red] EPC download failed: {e}", style="red")
+        if analysis_logger:
+            analysis_logger.complete_phase(success=False, message=str(e))
+        return None
     except ValueError as e:
         console.print(f"[red]✗[/red] Error: {e}", style="red")
         if analysis_logger:
@@ -519,20 +1154,92 @@ def validate_data(
 
     console.print("[cyan]Running quality assurance checks...[/cyan]")
 
+    if is_dataset_reference(df):
+        console.print("[cyan]Validating from staged Parquet dataset instead of a monolithic in-memory dataframe...[/cyan]")
+        output_file = DATA_PROCESSED_DIR / "epc_london_validated.csv"
+        validated_dataset, report = validate_staged_dataset(df, output_file)
+        report = normalize_validation_report(
+            report,
+            input_dataset=df,
+            validated_dataset=validated_dataset,
+        )
+        records_passed = report["records_passed"]
+        invalid_records = report["invalid_records"]
+
+        if sample_start_date and sample_end_date:
+            for output_path, dataset_type in (
+                (output_file, "validated_epc_dataset"),
+                (output_file.with_suffix(".parquet"), "validated_epc_dataset_parquet"),
+            ):
+                write_sample_window_metadata(
+                    output_path,
+                    sample_start_date,
+                    sample_end_date,
+                    dataset_type,
+                )
+
+        validator = EPCDataValidator()
+        validator.validation_report.update(report)
+        validator.save_validation_report()
+
+        try:
+            validation_report_json = DATA_PROCESSED_DIR / "validation_report.json"
+            write_json_report(validation_report_json, report)
+        except Exception as e:
+            logger.debug(f"Could not save validation report JSON: {e}")
+
+        console.print("[green]OK[/green] Validation complete")
+        if report.get("total_records", 0):
+            console.print(
+                f"    Records passed: {records_passed:,} "
+                f"({records_passed/report['total_records']*100:.1f}%)"
+            )
+        console.print(f"    Duplicates removed: {report.get('duplicates_removed', 0):,}")
+        console.print(f"    Invalid records: {invalid_records:,}")
+        console.print("[green]OK[/green] Validated data saved")
+
+        if analysis_logger:
+            analysis_logger.add_metric("input_records", report.get('total_records', 0), "Records before validation")
+            analysis_logger.add_metric("validated_records", records_passed, "Records after validation")
+            analysis_logger.add_metric("duplicates_removed", report.get('duplicates_removed', 0), "Duplicate records removed")
+            analysis_logger.add_metric("invalid_records", invalid_records, "Invalid records removed")
+            if report.get('total_records', 0):
+                analysis_logger.add_metric(
+                    "validation_rate",
+                    records_passed/report['total_records']*100,
+                    "Percentage of records passing validation",
+                )
+            analysis_logger.add_metric("negative_energy_values", report.get('negative_energy_values', 0), "Records with negative ENERGY_CONSUMPTION_CURRENT")
+            analysis_logger.add_metric("negative_co2_values", report.get('negative_co2_values', 0), "Records with negative CO2_EMISSIONS_CURRENT")
+            add_analysis_output_if_exists(analysis_logger, validated_dataset.csv_path, "csv", "Validated EPC dataset")
+            add_analysis_output_if_exists(analysis_logger, validated_dataset.parquet_path, "parquet", "Validated EPC dataset (Parquet)")
+            add_analysis_output_if_exists(analysis_logger, DATA_PROCESSED_DIR / "validation_report.txt", "report", "Data validation report")
+            add_analysis_output_if_exists(analysis_logger, validation_report_json, "report", "Data validation report (JSON)")
+            analysis_logger.complete_phase(success=True, message=f"{records_passed:,} records validated")
+
+        return validated_dataset, report
+
     validator = EPCDataValidator()
     df_validated, report = validator.validate_dataset(df)
+    report = normalize_validation_report(
+        report,
+        input_dataset=df,
+        validated_dataset=df_validated,
+    )
+    records_passed = report["records_passed"]
+    invalid_records = report["invalid_records"]
 
     console.print(f"[green]✓[/green] Validation complete")
-    console.print(f"    Records passed: {len(df_validated):,} ({len(df_validated)/report['total_records']*100:.1f}%)")
+    console.print(f"    Records passed: {records_passed:,} ({records_passed/report['total_records']*100:.1f}%)")
     console.print(f"    Duplicates removed: {report['duplicates_removed']:,}")
-    console.print(f"    Invalid records: {report['total_records'] - len(df_validated):,}")
+    console.print(f"    Invalid records: {invalid_records:,}")
 
     if analysis_logger:
         analysis_logger.add_metric("input_records", report['total_records'], "Records before validation")
-        analysis_logger.add_metric("validated_records", len(df_validated), "Records after validation")
+        analysis_logger.add_metric("validated_records", records_passed, "Records after validation")
         analysis_logger.add_metric("duplicates_removed", report['duplicates_removed'], "Duplicate records removed")
-        analysis_logger.add_metric("invalid_records", report['total_records'] - len(df_validated), "Invalid records removed")
-        analysis_logger.add_metric("validation_rate", len(df_validated)/report['total_records']*100, "Percentage of records passing validation")
+        analysis_logger.add_metric("invalid_records", invalid_records, "Invalid records removed")
+        analysis_logger.add_metric("validation_rate", records_passed/report['total_records']*100, "Percentage of records passing validation")
         analysis_logger.add_metric("negative_energy_values", report.get('negative_energy_values', 0), "Records with negative ENERGY_CONSUMPTION_CURRENT")
         analysis_logger.add_metric("negative_co2_values", report.get('negative_co2_values', 0), "Records with negative CO2_EMISSIONS_CURRENT")
 
@@ -576,18 +1283,7 @@ def validate_data(
     validator.save_validation_report()
     try:
         validation_report_json = DATA_PROCESSED_DIR / "validation_report.json"
-
-        # Ensure JSON is always written (numpy scalar types can otherwise truncate the file mid-write).
-        from src.utils.analysis_logger import convert_to_json_serializable
-
-        report = dict(report)
-        report["records_passed"] = int(len(df_validated))
-        total_records = int(report.get("total_records", len(df)))
-        duplicates_removed = int(report.get("duplicates_removed", 0))
-        report["invalid_records"] = max(total_records - duplicates_removed - int(report["records_passed"]), 0)
-
-        with open(validation_report_json, "w", encoding="utf-8") as f:
-            json.dump(convert_to_json_serializable(report), f, indent=2)
+        write_json_report(validation_report_json, report)
     except Exception as e:
         logger.debug(f"Could not save validation report JSON: {e}")
 
@@ -597,7 +1293,7 @@ def validate_data(
         analysis_logger.add_output(str(output_file), "csv", "Validated EPC dataset")
         analysis_logger.add_output("data/processed/validation_report.txt", "report", "Data validation report")
         analysis_logger.add_output("data/processed/validation_report.json", "report", "Data validation report (JSON)")
-        analysis_logger.complete_phase(success=True, message=f"{len(df_validated):,} records validated")
+        analysis_logger.complete_phase(success=True, message=f"{records_passed:,} records validated")
 
     return df_validated, report
 
@@ -623,10 +1319,58 @@ def apply_methodological_adjustments(
 
     console.print("[cyan]Applying evidence-based adjustments...[/cyan]")
 
+    if is_dataset_reference(df):
+        console.print("[cyan]Applying adjustments from staged Parquet instead of rewriting a full dataframe in memory...[/cyan]")
+        output_file = DATA_PROCESSED_DIR / "epc_london_adjusted.csv"
+        adjusted_dataset, summary = apply_adjustments_staged_dataset(df, output_file)
+        adjusted_record_count = dataset_record_count(adjusted_dataset)
+
+        if sample_start_date and sample_end_date:
+            for output_path, dataset_type in (
+                (output_file, "adjusted_epc_dataset"),
+                (output_file.with_suffix(".parquet"), "adjusted_epc_dataset_parquet"),
+            ):
+                write_sample_window_metadata(
+                    output_path,
+                    sample_start_date,
+                    sample_end_date,
+                    dataset_type,
+                )
+
+        try:
+            summary_path = DATA_PROCESSED_DIR / "methodological_adjustments_summary.json"
+            with open(summary_path, "w", encoding="utf-8") as f:
+                json.dump(summary, f, indent=2)
+        except Exception as e:
+            logger.debug(f"Could not save adjustment summary JSON: {e}")
+
+        console.print("[green]OK[/green] Methodological adjustments applied")
+        adjustments_applied = []
+        if summary.get('prebound_adjustment', {}).get('applied'):
+            console.print("    - Prebound effect adjustment (Few et al., 2023)")
+            adjustments_applied.append("Prebound effect")
+        if summary.get('flow_temperature', {}).get('applied'):
+            console.print("    - Heat pump flow temperature model")
+            adjustments_applied.append("Flow temperature")
+        if summary.get('uncertainty', {}).get('applied'):
+            console.print("    - Measurement uncertainty (Crawley et al., 2019)")
+            adjustments_applied.append("Measurement uncertainty")
+
+        if analysis_logger:
+            analysis_logger.add_metric("adjustments_applied", len(adjustments_applied), f"Applied: {', '.join(adjustments_applied)}")
+            analysis_logger.add_metric("records_adjusted", adjusted_record_count, "Records with adjustments")
+            analysis_logger.add_output(str(output_file), "csv", "Adjusted EPC dataset")
+            analysis_logger.add_output("data/processed/methodological_adjustments_summary.json", "report", "Methodological adjustments summary (JSON)")
+            analysis_logger.add_output(str(output_file.with_suffix(".parquet")), "parquet", "Adjusted EPC dataset (Parquet)")
+            analysis_logger.complete_phase(success=True, message=f"{len(adjustments_applied)} methodological adjustments applied")
+
+        return adjusted_dataset, summary
+
     adjuster = MethodologicalAdjustments()
 
     # Apply all adjustments in sequence
     df_adjusted = adjuster.apply_all_adjustments(df)
+    adjusted_record_count = dataset_record_count(df_adjusted)
 
     # Generate summary
     summary = adjuster.generate_adjustment_summary(df_adjusted)
@@ -684,7 +1428,7 @@ def apply_methodological_adjustments(
 
     if analysis_logger:
         analysis_logger.add_metric("adjustments_applied", len(adjustments_applied), f"Applied: {', '.join(adjustments_applied)}")
-        analysis_logger.add_metric("records_adjusted", len(df_adjusted), "Records with adjustments")
+        analysis_logger.add_metric("records_adjusted", adjusted_record_count, "Records with adjustments")
         analysis_logger.add_output(str(output_file), "csv", "Adjusted EPC dataset")
         analysis_logger.add_output("data/processed/methodological_adjustments_summary.json", "report", "Methodological adjustments summary (JSON)")
         if parquet_file and parquet_file.exists():
@@ -696,6 +1440,8 @@ def apply_methodological_adjustments(
 
 def ensure_hp_hn_comparison_outputs(df=None, analysis_logger: AnalysisLogger = None):
     """Ensure the HP-vs-HN comparison artefacts exist, rebuilding them if required."""
+    global _hp_hn_comparison_outputs_cache
+
     outputs_dir = Path(DATA_OUTPUTS_DIR)
     comparisons_dir = outputs_dir / "comparisons"
     comparison_csv = comparisons_dir / "hn_vs_hp_comparison.csv"
@@ -703,18 +1449,31 @@ def ensure_hp_hn_comparison_outputs(df=None, analysis_logger: AnalysisLogger = N
 
     if comparison_csv.exists():
         console.print("[cyan]Reusing existing HP vs HN comparison artefacts...[/cyan]")
-        return {
+        result = {
             "comparison_csv": comparison_csv,
             "comparison_snippet": comparison_snippet if comparison_snippet.exists() else None,
             "rebuilt": False,
         }
+        _hp_hn_comparison_outputs_cache = {
+            "status": "success",
+            "result": result,
+        }
+        return result
+
+    if _hp_hn_comparison_outputs_cache is not None:
+        if _hp_hn_comparison_outputs_cache.get("status") == "success":
+            cached_result = _hp_hn_comparison_outputs_cache.get("result")
+            if cached_result and Path(cached_result["comparison_csv"]).exists():
+                return cached_result
+        else:
+            return None
 
     console.print(
         f"[yellow]⚠ Missing {comparison_csv}; attempting to rebuild HP vs HN comparison outputs...[/yellow]"
     )
 
     try:
-        pathway_modeler = PathwayModeler()
+        pathway_modeler = PathwayModeler(output_dir=outputs_dir)
         property_results_path = pathway_modeler.output_dir / "pathway_results_by_property.parquet"
         summary_path = pathway_modeler.output_dir / "pathway_results_summary.csv"
 
@@ -732,7 +1491,7 @@ def ensure_hp_hn_comparison_outputs(df=None, analysis_logger: AnalysisLogger = N
                 pathway_summary,
             )
 
-        comparison_reporter = ComparisonReporter()
+        comparison_reporter = ComparisonReporter(outputs_dir=outputs_dir)
         comparison_df = comparison_reporter.generate_comparisons(results_path=property_results_path)
 
         if comparison_df is None or comparison_df.empty or not comparison_csv.exists():
@@ -747,14 +1506,25 @@ def ensure_hp_hn_comparison_outputs(df=None, analysis_logger: AnalysisLogger = N
             if comparison_snippet.exists():
                 analysis_logger.add_output(str(comparison_snippet), "md", "HP vs HN markdown snippet")
 
-        return {
+        result = {
             "comparison_csv": comparison_csv,
             "comparison_snippet": comparison_snippet if comparison_snippet.exists() else None,
             "rebuilt": True,
         }
+        _hp_hn_comparison_outputs_cache = {
+            "status": "success",
+            "result": result,
+        }
+        return result
     except Exception as e:
-        console.print(f"[yellow]⚠ Could not rebuild HP vs HN comparison outputs: {e}[/yellow]")
-        logger.exception("HP vs HN comparison rebuild failed")
+        _hp_hn_comparison_outputs_cache = {
+            "status": "failed",
+            "error": str(e),
+        }
+        console.print(
+            f"[yellow]Warning: HP vs HN comparison artefacts could not be regenerated from pathway modeling: {e}[/yellow]"
+        )
+        logger.exception("HP vs HN comparison artefacts could not be regenerated from pathway modeling")
         return None
 
 
@@ -1053,22 +1823,64 @@ def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None, one_stop_on
 
         return missing, available_backends
 
-    def get_spatial_install_command() -> tuple[str, str]:
-        """Return the preferred install mode and command for this environment."""
-        is_windows = platform.system() == "Windows"
-        conda_env = os.getenv("CONDA_DEFAULT_ENV")
+    def get_windows_conda_shell_status() -> tuple[list[str], list[str], str]:
+        """Inspect whether the current Windows shell is a clean Conda spatial environment."""
+        issues = []
+        warnings = []
+        conda_env = os.getenv("CONDA_DEFAULT_ENV", "")
+        conda_prefix = os.getenv("CONDA_PREFIX", "")
+        python_on_path = shutil.which("python") or ""
+        pip_on_path = shutil.which("pip") or ""
+        python_executable = str(Path(sys.executable).resolve())
+        prefix_path = str(Path(conda_prefix).resolve()) if conda_prefix else ""
 
-        if is_windows and conda_env and conda_env.lower() != "base":
-            command = (
-                f"conda install -n {conda_env} -c conda-forge "
-                "geopandas pyogrio pyproj shapely rtree"
+        if not shutil.which("conda"):
+            issues.append("conda is not available on PATH")
+        if not conda_env or conda_env.lower() == "base":
+            issues.append("no dedicated Conda environment is active")
+        if not conda_prefix:
+            issues.append("CONDA_PREFIX is not set")
+        if prefix_path and not python_executable.lower().startswith(prefix_path.lower()):
+            issues.append(
+                f"python is running from {python_executable}, not from the active Conda prefix {prefix_path}"
             )
-            return "conda", command
+        if prefix_path and python_on_path:
+            resolved_python = str(Path(python_on_path).resolve())
+            if not resolved_python.lower().startswith(prefix_path.lower()):
+                issues.append(f"python on PATH resolves to {resolved_python}, not to {prefix_path}")
+        if prefix_path and pip_on_path:
+            resolved_pip = str(Path(pip_on_path).resolve())
+            if not resolved_pip.lower().startswith(prefix_path.lower()):
+                issues.append(f"pip on PATH resolves to {resolved_pip}, not to {prefix_path}")
 
-        if is_windows:
-            return "conda", "conda install -c conda-forge geopandas pyogrio pyproj shapely rtree"
+        if sys.version_info[:2] not in {(3, 11), (3, 12)}:
+            issues.append(
+                f"Python {sys.version_info.major}.{sys.version_info.minor} is unsupported for the Windows spatial workflow"
+            )
 
-        return "pip", "pip install -r requirements-spatial.txt"
+        for label, candidate in (("python", python_on_path), ("pip", pip_on_path)):
+            if candidate and "appdata\\roaming\\python" in candidate.lower():
+                warnings.append(f"{label} is resolving from user site: {candidate}")
+
+        return issues, warnings, conda_env
+
+    def print_windows_spatial_guidance():
+        """Print the supported Windows recovery path and diagnosis commands."""
+        console.print("[cyan]Supported Windows fix:[/cyan]")
+        console.print("  conda env create -f environment.yml")
+        console.print("  conda activate heatstreet")
+        console.print(r"  .\run-conda.ps1")
+        console.print()
+        console.print("[cyan]Diagnosis commands:[/cyan]")
+        console.print("  where python")
+        console.print("  where pip")
+        console.print("  conda info")
+        console.print(r'  conda list | findstr /i "python geopandas fiona gdal shapely"')
+        console.print()
+        console.print(
+            "If pip is trying to build Fiona/GDAL and asks for GDAL_VERSION or gdal-config, "
+            "you are on the unsupported Windows pip path."
+        )
 
     def check_spatial_dependencies():
         """Check for required spatial libraries before running analysis."""
@@ -1076,79 +1888,89 @@ def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None, one_stop_on
         if not missing_modules:
             return True
 
-        install_mode, install_command = get_spatial_install_command()
-
         console.print()
         console.print("[yellow]⚠ Spatial libraries missing[/yellow]")
         console.print(f"Missing modules/backend: {', '.join(missing_modules)}")
         if available_backends:
             console.print(f"Detected spatial IO backend(s): {', '.join(available_backends)}")
         console.print("Map outputs require the spatial stack to be available.")
-        console.print(f"Recommended fix for this environment: [bold]{install_command}[/bold]")
         console.print()
 
-        choice = questionary.select(
-            "How would you like to proceed?",
-            choices=[
-                questionary.Choice(f"Attempt to install spatial dependencies now ({install_mode})", value="install"),
-                questionary.Choice("Pause/abort to install manually", value="abort"),
-                questionary.Choice("Continue without spatial results", value="skip"),
-            ],
-        ).ask()
+        if platform.system() == "Windows":
+            issues, warnings, conda_env = get_windows_conda_shell_status()
+            for warning in warnings:
+                console.print(f"[yellow]⚠ {warning}[/yellow]")
 
-        if choice == "install":
-            console.print()
-            console.print("[cyan]Attempting to install spatial dependencies...[/cyan]")
-            if install_mode == "conda":
-                conda_env = os.getenv("CONDA_DEFAULT_ENV")
-                install_args = ["conda", "install", "-c", "conda-forge"]
-                if conda_env and conda_env.lower() != "base":
-                    install_args.extend(["-n", conda_env])
-                install_args.extend(["geopandas", "pyogrio", "pyproj", "shapely", "rtree", "-y"])
-                result = subprocess.run(install_args, capture_output=True, text=True)
+            if issues:
+                console.print("[yellow]This shell is not a supported Windows spatial environment.[/yellow]")
+                for issue in issues:
+                    console.print(f"  - {issue}")
+                console.print()
+                print_windows_spatial_guidance()
+
+                choice = questionary.select(
+                    "How would you like to proceed?",
+                    choices=[
+                        questionary.Choice("Pause/abort so I can fix the Conda environment", value="abort"),
+                        questionary.Choice("Continue without spatial results", value="skip"),
+                    ],
+                ).ask()
             else:
-                result = subprocess.run(
-                    [sys.executable, "-m", "pip", "install", "-r", "requirements-spatial.txt"],
-                    capture_output=True,
-                    text=True,
+                install_command = (
+                    f"conda install -n {conda_env} -c conda-forge "
+                    "geopandas fiona gdal pyproj shapely rtree pyogrio folium"
                 )
+                console.print(f"Recommended Windows fix: [bold]{install_command}[/bold]")
+                console.print()
+                choice = questionary.select(
+                    "How would you like to proceed?",
+                    choices=[
+                        questionary.Choice("Attempt to install spatial dependencies now (conda)", value="install"),
+                        questionary.Choice("Pause/abort to install manually", value="abort"),
+                        questionary.Choice("Continue without spatial results", value="skip"),
+                    ],
+                ).ask()
 
-            if result.returncode == 0:
-                console.print("[green]✓[/green] Spatial dependencies installed. Re-checking...")
-                return check_spatial_dependencies()
+                if choice == "install":
+                    console.print()
+                    console.print("[cyan]Attempting to install spatial dependencies from conda-forge...[/cyan]")
+                    result = subprocess.run(
+                        [
+                            "conda",
+                            "install",
+                            "-n",
+                            conda_env,
+                            "-c",
+                            "conda-forge",
+                            "geopandas",
+                            "fiona",
+                            "gdal",
+                            "pyproj",
+                            "shapely",
+                            "rtree",
+                            "pyogrio",
+                            "folium",
+                            "-y",
+                        ],
+                        capture_output=True,
+                        text=True,
+                    )
 
-            console.print("[yellow]⚠ Could not install spatial dependencies automatically.[/yellow]")
-            console.print(f"Install manually with: {install_command}")
+                    if result.returncode == 0:
+                        console.print("[green]✓[/green] Spatial dependencies installed. Re-checking...")
+                        return check_spatial_dependencies()
 
-        if choice == "abort":
-            console.print("[yellow]Analysis paused. Install the spatial dependencies and re-run the spatial phase.[/yellow]")
-            if analysis_logger:
-                analysis_logger.skip_phase(
-                    "Spatial Analysis", "User paused to install GIS dependencies before continuing",
-                )
-            raise SystemExit(0)
-
-        console.print("[yellow]Continuing without spatial analysis. Map outputs will be absent.[/yellow]")
-        if analysis_logger:
-            analysis_logger.skip_phase(
-                "Spatial Analysis", "Spatial dependencies missing; map outputs will not be generated",
-            )
-        return False
-
-        if False:
-            console.print("[yellow]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/yellow]")
-            console.print("[yellow]⚠ Spatial libraries missing[/yellow]")
-            console.print("[yellow]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/yellow]")
+                    console.print("[yellow]⚠ Could not install spatial dependencies automatically.[/yellow]")
+                    print_windows_spatial_guidance()
+        else:
+            install_command = "pip install -r requirements-spatial.txt"
+            console.print(f"Recommended fix for this environment: [bold]{install_command}[/bold]")
             console.print()
-            console.print("Map outputs require installing [bold]requirements-spatial.txt[/bold] or using the Conda launcher.")
-            console.print("Without these libraries, the spatial phase will be skipped and maps will be absent.")
-            console.print()
-
             choice = questionary.select(
                 "How would you like to proceed?",
                 choices=[
                     questionary.Choice("Attempt to install requirements-spatial.txt now (pip)", value="install"),
-                    questionary.Choice("Pause/abort to install manually (e.g., via Conda launcher)", value="abort"),
+                    questionary.Choice("Pause/abort to install manually", value="abort"),
                     questionary.Choice("Continue without spatial results", value="skip"),
                 ],
             ).ask()
@@ -1167,24 +1989,22 @@ def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None, one_stop_on
                     return check_spatial_dependencies()
 
                 console.print("[yellow]⚠ Could not install spatial dependencies automatically.[/yellow]")
-                console.print("Install manually with: pip install -r requirements-spatial.txt or use the Conda launcher.")
+                console.print("Install manually with: pip install -r requirements-spatial.txt")
 
-            if choice == "abort":
-                console.print("[yellow]Analysis paused. Install the spatial dependencies and re-run the spatial phase.[/yellow]")
-                if analysis_logger:
-                    analysis_logger.skip_phase(
-                        "Spatial Analysis", "User paused to install GIS dependencies before continuing",
-                    )
-                raise SystemExit(0)
-
-            console.print("[yellow]Continuing without spatial analysis. Map outputs will be absent.[/yellow]")
+        if choice == "abort":
+            console.print("[yellow]Analysis paused. Install the spatial dependencies and re-run the spatial phase.[/yellow]")
             if analysis_logger:
                 analysis_logger.skip_phase(
-                    "Spatial Analysis", "Spatial dependencies missing; map outputs will not be generated",
+                    "Spatial Analysis", "User paused to install GIS dependencies before continuing",
                 )
-            return False
+            raise SystemExit(EXIT_CANCELLED)
 
-        return True
+        console.print("[yellow]Continuing without spatial analysis. Map outputs will be absent.[/yellow]")
+        if analysis_logger:
+            analysis_logger.skip_phase(
+                "Spatial Analysis", "Spatial dependencies missing; map outputs will not be generated",
+            )
+        return False
 
     if not check_spatial_dependencies():
         return None, None
@@ -1262,11 +2082,23 @@ def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None, one_stop_on
         console.print("[yellow]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/yellow]")
         console.print()
         console.print("[cyan]To enable spatial analysis:[/cyan]")
-        console.print("  [bold]Windows (Recommended):[/bold]")
-        console.print("    conda install -c conda-forge geopandas pyogrio pyproj shapely rtree")
-        console.print()
-        console.print("  [bold]Linux/Mac:[/bold]")
-        console.print("    pip install -r requirements-spatial.txt")
+        if platform.system() == "Windows":
+            console.print("  [bold]Windows (Supported path):[/bold]")
+            console.print("    conda env create -f environment.yml")
+            console.print("    conda activate heatstreet")
+            console.print(r"    .\run-conda.ps1")
+            console.print()
+            console.print("  [bold]Diagnosis:[/bold]")
+            console.print("    where python")
+            console.print("    where pip")
+            console.print("    conda info")
+            console.print(r'    conda list | findstr /i "python geopandas fiona gdal shapely"')
+            console.print()
+            console.print("  Python 3.11 or 3.12 is supported on Windows for the spatial stack.")
+            console.print("  Python 3.13 and 3.14 are not a supported default here yet.")
+        else:
+            console.print("  [bold]Linux/Mac:[/bold]")
+            console.print("    pip install -r requirements-spatial.txt")
         console.print()
         console.print("[cyan]The rest of the analysis will continue without spatial features.[/cyan]")
         console.print()
@@ -1863,7 +2695,10 @@ def _describe_existing_file(file_path: Path, title: str, include_records: bool =
         record_line = ""
         if include_records:
             try:
-                record_count = max(sum(1 for _ in open(file_path, encoding="utf-8")) - 1, 0)
+                if file_path.suffix.lower() == ".parquet":
+                    record_count = parquet_row_count(file_path)
+                else:
+                    record_count = max(sum(1 for _ in open(file_path, encoding="utf-8")) - 1, 0)
                 record_line = f"Records: ~{record_count:,}\n"
             except Exception as e:
                 logger.debug(f"Could not count records in {file_path}: {e}")
@@ -1895,17 +2730,38 @@ def prompt_use_existing_dataframe(
 
     Returns a DataFrame if loaded, otherwise None.
     """
-    if not file_path.exists():
+    candidate_paths = []
+    for candidate in (file_path, file_path.with_suffix(".parquet")):
+        if candidate not in candidate_paths and candidate.exists():
+            candidate_paths.append(candidate)
+
+    if not candidate_paths:
         return None
 
-    if sample_start_date and sample_end_date and not sample_window_matches(file_path, sample_start_date, sample_end_date):
+    selected_path = candidate_paths[0]
+    if sample_start_date and sample_end_date:
+        selected_path = None
+        for candidate in candidate_paths:
+            if sample_window_matches(candidate, sample_start_date, sample_end_date):
+                selected_path = candidate
+                break
+        if selected_path is None:
+            checked = ", ".join(path.name for path in candidate_paths)
+            console.print(
+                f"[yellow]⚠ Existing {description} does not match requested sample window "
+                f"{sample_start_date.isoformat()} to {sample_end_date.isoformat()} "
+                f"- regenerating (checked: {checked})[/yellow]"
+            )
+            return None
+
+    if sample_start_date and sample_end_date and not sample_window_matches(selected_path, sample_start_date, sample_end_date):
         console.print(
             f"[yellow]⚠ Existing {description} does not match requested sample window "
             f"{sample_start_date.isoformat()} to {sample_end_date.isoformat()} - regenerating[/yellow]"
         )
         return None
 
-    _describe_existing_file(file_path, f"Existing {description}", include_records)
+    _describe_existing_file(selected_path, f"Existing {description}", include_records)
 
     use_existing = True  # Automatically use existing processed datasets
 
@@ -1921,12 +2777,20 @@ def prompt_use_existing_dataframe(
     try:
         import pandas as pd
 
-        df_existing = pd.read_csv(file_path)
-        console.print(f"[green]✓[/green] Loaded existing {description} ({len(df_existing):,} records)")
+        if selected_path.suffix.lower() == ".parquet":
+            df_existing = pd.read_parquet(selected_path)
+            output_type = "parquet"
+        else:
+            df_existing = pd.read_csv(selected_path)
+            output_type = "csv"
+        console.print(
+            f"[green]✓[/green] Loaded existing {description} "
+            f"({len(df_existing):,} records) from {selected_path.name}"
+        )
 
         if analysis_logger:
             analysis_logger.add_metric("records_loaded", len(df_existing), f"{description} records loaded from disk")
-            analysis_logger.add_output(str(file_path), "csv", f"Existing {description}")
+            add_analysis_output_if_exists(analysis_logger, selected_path, output_type, f"Existing {description}")
             analysis_logger.complete_phase(success=True, message=f"Loaded existing {description}")
 
         return df_existing
@@ -1973,7 +2837,20 @@ def check_existing_data(sample_start_date: date_cls = None, sample_end_date: dat
             # Quick count of records
             import pandas as pd
             try:
-                df = pd.read_csv(filtered_csv, nrows=0)
+                header_df = pd.read_csv(filtered_csv, nrows=0)
+                missing_columns = EPCAPIDownloader.get_missing_stock_definition_columns(header_df)
+                if missing_columns:
+                    missing = ", ".join(missing_columns)
+                    console.print()
+                    console.print(Panel(
+                        f"[bold yellow]Existing Filtered Data Ignored[/bold yellow]\n\n"
+                        f"File: epc_london_filtered.csv\n"
+                        f"Reason: missing stock-definition columns ({missing})\n"
+                        f"A fresh full-load download is required to rebuild the London pre-1930 terraced house subset.",
+                        border_style="yellow"
+                    ))
+                    console.print()
+                    return False, None, 0
                 line_count = sum(1 for _ in open(filtered_csv)) - 1  # Subtract header
 
                 console.print()
@@ -1981,7 +2858,7 @@ def check_existing_data(sample_start_date: date_cls = None, sample_end_date: dat
                     f"[bold cyan]Existing Data Found[/bold cyan]\n\n"
                     f"File: epc_london_filtered.csv\n"
                     f"Size: {file_size:.1f} MB\n"
-                    f"Records: ~{line_count:,}\n"
+                    f"Records: ~{line_count:,} London pre-1930 terraced house records\n"
                     f"Last modified: {mod_date}",
                     border_style="green"
                 ))
@@ -2004,6 +2881,7 @@ def check_existing_data(sample_start_date: date_cls = None, sample_end_date: dat
                 f"[bold cyan]Existing Data Found[/bold cyan]\n\n"
                 f"File: epc_london_raw.csv\n"
                 f"Size: {file_size:.1f} MB\n"
+                f"Dataset: London house records before pre-1930 terraced filtering\n"
                 f"Last modified: {mod_date}",
                 border_style="green"
             ))
@@ -2036,7 +2914,12 @@ def load_existing_data(file_path, analysis_logger: AnalysisLogger = None):
             "Load previously downloaded EPC data from file"
         )
 
-    console.print(f"[cyan]Loading data from {file_path.name}...[/cyan]")
+    dataset_label = (
+        "London pre-1930 terraced house data"
+        if file_path.name == "epc_london_filtered.csv"
+        else "London house data"
+    )
+    console.print(f"[cyan]Loading {dataset_label} from {file_path.name}...[/cyan]")
 
     import pandas as pd
     df = pd.read_csv(file_path)
@@ -2055,10 +2938,23 @@ def main():
     """Main execution function."""
     print_header()
 
+    analysis_logger = AnalysisLogger()
+    runtime_identity, preflight = emit_startup_diagnostics(analysis_logger)
+    if not preflight.get("ok"):
+        analysis_logger.set_metadata(
+            "startup_failure",
+            "Startup preflight failed before prompts or Phase 1.",
+        )
+        log_path = save_startup_failure_log(analysis_logger)
+        if log_path:
+            console.print(f"[yellow]Startup diagnostics log saved to:[/yellow] {log_path}")
+            console.print()
+        return EXIT_ANALYSIS_FAILED
+
     # Check credentials
     if not check_credentials():
         console.print("[red]Cannot proceed without API credentials[/red]")
-        return
+        return EXIT_ANALYSIS_FAILED
 
     console.print("[green]✓[/green] API credentials configured")
     console.print()
@@ -2069,8 +2965,6 @@ def main():
     config = load_config()
     one_stop_only = is_one_stop_only(config)
 
-    # Initialize analysis logger
-    analysis_logger = AnalysisLogger()
     console.print("[green]✓[/green] Analysis logger initialized")
     console.print()
 
@@ -2085,7 +2979,7 @@ def main():
         sample_start_date, sample_end_date = prompt_sample_window()
     except KeyboardInterrupt:
         console.print("[yellow]Analysis cancelled by user[/yellow]")
-        return
+        return EXIT_CANCELLED
 
     analysis_logger.set_metadata("sample_start_date", sample_start_date.isoformat())
     analysis_logger.set_metadata("sample_end_date", sample_end_date.isoformat())
@@ -2111,7 +3005,7 @@ def main():
 
         if use_existing is None:
             console.print("[yellow]Analysis cancelled by user[/yellow]")
-            return
+            return EXIT_CANCELLED
 
         if use_existing:
             df = load_existing_data(existing_file, analysis_logger)
@@ -2122,7 +3016,7 @@ def main():
             fresh_data_downloaded = True  # Flag that we're downloading fresh data
 
     # If not using existing data, download new
-    if df is None or df.empty:
+    if df is None or dataset_is_empty(df):
         fresh_data_downloaded = True  # Flag that we're downloading fresh data
 
         # Show summary
@@ -2140,20 +3034,24 @@ def main():
 
         if not proceed:
             console.print("[yellow]Analysis cancelled[/yellow]")
-            return
+            return EXIT_CANCELLED
 
         # Run pipeline
         start_time = time.time()
 
         # Phase 1: Download
-        df = download_data(
-            analysis_logger,
-            sample_start_date=sample_start_date,
-            sample_end_date=sample_end_date,
-        )
-        if df is None or df.empty:
+        try:
+            df = download_data(
+                analysis_logger,
+                sample_start_date=sample_start_date,
+                sample_end_date=sample_end_date,
+            )
+        except AnalysisCancelled as e:
+            console.print(f"[yellow]{e}[/yellow]")
+            return EXIT_CANCELLED
+        if df is None or dataset_is_empty(df):
             console.print("[red]✗ Analysis stopped - no data available[/red]")
-            return
+            return EXIT_ANALYSIS_FAILED
         gc.collect()  # Cleanup API response objects
     else:
         start_time = time.time()
@@ -2161,7 +3059,7 @@ def main():
         console.print("[cyan]Proceeding with existing data...[/cyan]")
         console.print()
 
-    df_raw = df.copy()
+    df_raw = df if is_dataset_reference(df) else df.copy()
 
     # Phase 2: Check for existing validated data before running validation
     # If we just downloaded fresh data, force re-validation instead of using old validated data
@@ -2184,22 +3082,24 @@ def main():
             console.print("[cyan]Loaded validation report from previous run[/cyan]")
         else:
             console.print("[yellow]⚠ Validation report JSON not found; generating from validated data...[/yellow]")
-            # Generate a minimal validation report from the validated data and raw data
-            validation_report = {
-                "total_records": len(df),
-                "duplicates_removed": 0,  # Unknown from pre-validated data
-                "invalid_records": len(df) - len(df_validated),
-                "valid_records": len(df_validated),
-                "negative_energy_values": 0,  # Unknown
-                "negative_co2_values": 0,  # Unknown
-                "note": "Generated retroactively from validated dataset"
-            }
+            validation_report = normalize_validation_report(
+                {
+                    "duplicates_removed": 0,  # Unknown from pre-validated data
+                    "negative_energy_values": 0,  # Unknown
+                    "negative_co2_values": 0,  # Unknown
+                    "note": "Generated retroactively from validated dataset",
+                },
+                input_dataset=df,
+                validated_dataset=df_validated,
+            )
             # Save it for future use
             try:
                 validation_report_path = DATA_PROCESSED_DIR / "validation_report.json"
-                with open(validation_report_path, "w", encoding="utf-8") as f:
-                    json.dump(validation_report, f, indent=2)
-                console.print(f"[green]✓ Created validation_report.json with {len(df_validated):,} valid records[/green]")
+                write_json_report(validation_report_path, validation_report)
+                console.print(
+                    f"[green]✓ Created validation_report.json with "
+                    f"{validation_report['records_passed']:,} valid records[/green]"
+                )
             except Exception as e:
                 logger.warning(f"Could not save validation report: {e}")
     else:
@@ -2211,15 +3111,16 @@ def main():
             sample_end_date=sample_end_date,
         )
         # Cleanup raw dataframe since we now use df_validated
-        del df
+        if not is_dataset_reference(df):
+            del df
         gc.collect()
 
     # Set metadata
-    analysis_logger.set_metadata("total_properties", len(df_validated))
+    analysis_logger.set_metadata("total_properties", dataset_record_count(df_validated))
 
-    if df_validated.empty:
+    if dataset_is_empty(df_validated):
         console.print("[red]✗ Analysis stopped - no valid data[/red]")
-        return
+        return EXIT_ANALYSIS_FAILED
 
     # Phase 2.5: Methodological Adjustments (check for existing adjusted data)
     # If we just downloaded fresh data, force re-adjustment instead of using old adjusted data
@@ -2253,17 +3154,23 @@ def main():
             del df_validated
         gc.collect()
 
+    try:
+        df_adjusted_frame = ensure_dataframe(df_adjusted, stage_name="adjusted EPC dataset")
+    except RuntimeError as e:
+        console.print(f"[red]x[/red] {e}")
+        return EXIT_ANALYSIS_FAILED
+
     # Phase 3: Analyze (use adjusted data)
-    archetype_results = analyze_archetype(df_adjusted, analysis_logger)
+    archetype_results = analyze_archetype(df_adjusted_frame, analysis_logger)
     gc.collect()  # Cleanup analysis intermediate results
 
     # Phase 4: Model (use adjusted data for realistic baselines)
-    scenario_results, subsidy_results = model_scenarios(df_adjusted, analysis_logger)
+    scenario_results, subsidy_results = model_scenarios(df_adjusted_frame, analysis_logger)
     gc.collect()  # Major cleanup after expensive modeling phase
 
     # Phase 4.3: Retrofit Readiness
     df_readiness, readiness_summary = analyze_retrofit_readiness(
-        df_adjusted,
+        df_adjusted_frame,
         analysis_logger,
         one_stop_only=one_stop_only,
     )
@@ -2271,16 +3178,22 @@ def main():
 
     # Phase 4.5: Spatial Analysis (optional)
     properties_with_tiers, pathway_summary = run_spatial_analysis(
-        df_adjusted,
+        df_adjusted_frame,
         analysis_logger,
         one_stop_only=one_stop_only,
     )
     gc.collect()  # Cleanup GIS objects and geocoding cache
 
     # Phase 5.5: Additional reports and supporting tables
+    try:
+        df_raw_for_reports = ensure_dataframe(df_raw, stage_name="raw EPC dataset for reporting")
+    except RuntimeError as e:
+        console.print(f"[yellow]âš  Could not materialize raw dataset for additional reports: {e}[/yellow]")
+        df_raw_for_reports = df_adjusted_frame
+
     additional_outputs = generate_additional_reports(
-        df_raw,
-        df_adjusted,
+        df_raw_for_reports,
+        df_adjusted_frame,
         validation_report,
         archetype_results,
         scenario_results,
@@ -2289,10 +3202,10 @@ def main():
 
     # Phase 5: Report
     if one_stop_only:
-        generate_one_stop_report(df_adjusted, analysis_logger)
+        generate_one_stop_report(df_adjusted_frame, analysis_logger)
         gc.collect()  # Cleanup report generation objects
     else:
-        generate_reports(archetype_results, scenario_results, subsidy_results, df_adjusted, pathway_summary, analysis_logger)
+        generate_reports(archetype_results, scenario_results, subsidy_results, df_adjusted_frame, pathway_summary, analysis_logger)
         gc.collect()  # Cleanup matplotlib figures and Excel writer objects
 
     # Phase 6: Package dashboard
@@ -2303,7 +3216,7 @@ def main():
         pathway_summary,
         additional_outputs,
         subsidy_results,
-        df_adjusted,
+        df_adjusted_frame,
         analysis_logger,
     )
     gc.collect()  # Final cleanup after dashboard packaging
@@ -2370,7 +3283,7 @@ def main():
     console.print(Panel.fit(
         f"[bold green]✓ Analysis Complete![/bold green]\n\n"
         f"Time elapsed: {elapsed/60:.1f} minutes\n"
-        f"Properties analyzed: {len(df_adjusted):,}\n\n"
+        f"Properties analyzed: {len(df_adjusted_frame):,}\n\n"
         f"[cyan]Results saved to:[/cyan]\n"
         f"  • data/processed/ (validated data)\n"
         f"  • data/outputs/ ({outputs_label})\n"
@@ -2394,12 +3307,18 @@ def main():
         else:  # Linux
             subprocess.run(['xdg-open', 'data/outputs'])
 
+    return EXIT_SUCCESS
+
 
 if __name__ == "__main__":
     try:
-        main()
+        sys.exit(main())
     except KeyboardInterrupt:
         console.print("\n[yellow]Analysis interrupted by user[/yellow]")
+        sys.exit(EXIT_CANCELLED)
+    except SystemExit:
+        raise
     except Exception as e:
         console.print(f"\n[red]Error: {e}[/red]")
         logger.exception("Unexpected error in main pipeline")
+        sys.exit(EXIT_ANALYSIS_FAILED)
