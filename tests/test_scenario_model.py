@@ -206,3 +206,76 @@ def test_negative_energy_intensity_rejected(scenario_modeler_factory):
 
     with pytest.raises(ValueError):
         modeler.model_all_scenarios(df)
+
+
+def test_aggregate_cost_per_tco2_and_diagnostic_abatement_aliases(scenario_modeler_factory):
+    modeler = scenario_modeler_factory()
+    property_df = pd.DataFrame(
+        [
+            {
+                "capital_cost": 10000,
+                "annual_energy_reduction_kwh": 1000,
+                "annual_co2_reduction_kg": 500,
+                "annual_bill_savings": 500,
+                "baseline_bill": 1200,
+                "post_measure_bill": 700,
+                "baseline_co2_kg": 1000,
+                "post_measure_co2_kg": 500,
+                "payback_years": 20,
+                "new_epc_band": "C",
+                "carbon_abatement_cost": 1000,
+                "upgrade_recommended": True,
+            },
+            {
+                "capital_cost": 20000,
+                "annual_energy_reduction_kwh": 1500,
+                "annual_co2_reduction_kg": 1000,
+                "annual_bill_savings": 1000,
+                "baseline_bill": 1600,
+                "post_measure_bill": 600,
+                "baseline_co2_kg": 2000,
+                "post_measure_co2_kg": 1000,
+                "payback_years": 20,
+                "new_epc_band": "B",
+                "carbon_abatement_cost": 2000,
+                "upgrade_recommended": True,
+            },
+        ]
+    )
+    source_df = pd.DataFrame({"CURRENT_ENERGY_RATING": ["D", "E"]})
+
+    results = modeler._aggregate_scenario_results(property_df, source_df)
+
+    assert results["cost_per_tco2_20yr_gbp"] == 1000
+    assert "capital_cost_total / ((annual_co2_reduction_kg / 1000) * 20" in results[
+        "cost_per_tco2_20yr_definition"
+    ]
+    assert results["carbon_abatement_cost_property_mean"] == 1500
+    assert results["carbon_abatement_cost_property_median"] == 1500
+    assert results["carbon_abatement_cost_property_p10"] == pytest.approx(1100)
+    assert results["carbon_abatement_cost_property_p90"] == pytest.approx(1900)
+    assert results["carbon_abatement_cost_mean"] == results["carbon_abatement_cost_property_mean"]
+    assert results["carbon_abatement_cost_median"] == results["carbon_abatement_cost_property_median"]
+
+
+def test_subsidy_sensitivity_includes_configured_50_percent_narrative(scenario_modeler_factory):
+    modeler = scenario_modeler_factory()
+    modeler.results = {
+        "heat_pump": {
+            "capital_cost_total": 1_000_000,
+            "capital_cost_per_property": 10_000,
+            "annual_bill_savings": 100_000,
+            "annual_co2_reduction_kg": 50_000,
+            "total_properties": 100,
+        }
+    }
+
+    results = modeler.model_subsidy_sensitivity(pd.DataFrame({"value": [1]}), "heat_pump")
+
+    assert "50%" in results
+    line = results["50%"]["narrative_line"]
+    assert "50% subsidy" in line
+    assert "payback" in line
+    assert "uptake" in line
+    assert "public spend" in line
+    assert "abatement cost" in line

@@ -2,6 +2,8 @@ import json
 from pathlib import Path
 
 from src.utils.analysis_logger import AnalysisLogger
+from src.reporting.dashboard_data_builder import DashboardDataBuilder
+from config.config import get_cost_reduction_levers
 
 import run_analysis
 
@@ -52,3 +54,16 @@ def test_package_dashboard_assets_still_exports_when_one_stop_only(monkeypatch, 
     assert json.loads(outputs_dataset.read_text(encoding="utf-8")) == json.loads(
         public_dataset.read_text(encoding="utf-8")
     )
+
+
+def test_dashboard_cost_levers_are_config_backed(tmp_path):
+    builder = DashboardDataBuilder(output_dir=tmp_path)
+    formatted = builder._format_cost_levers()
+    configured = get_cost_reduction_levers()
+    configured_total = sum(float(row["impact_gbp"]) for row in configured)
+
+    assert formatted["total"] == configured_total
+    assert formatted["conservative_combined_estimate"]["low_gbp"] == configured_total * 0.5
+    assert formatted["conservative_combined_estimate"]["high_gbp"] == configured_total * 0.8
+    assert formatted["note"]
+    assert all(row.get("source_note") for row in formatted["levers"])

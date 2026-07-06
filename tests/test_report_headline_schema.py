@@ -53,6 +53,7 @@ def test_report_headline_dataframe_includes_required_keys():
     dataframe = build_report_headline_dataframe(archetype_results, scenario_results)
 
     assert list(dataframe.columns) == REPORT_HEADLINE_COLUMNS
+    assert "definition" in dataframe.columns
 
     metric_keys = set(dataframe["metric_key"].dropna())
     assert REQUIRED_BASE_METRIC_KEYS.issubset(metric_keys)
@@ -65,3 +66,15 @@ def test_report_headline_dataframe_includes_required_keys():
             dataframe.loc[dataframe["scenario"] == scenario_name, "metric_key"].dropna()
         )
         assert REQUIRED_SCENARIO_METRIC_KEYS.issubset(scenario_keys)
+
+        cost_row = dataframe[
+            (dataframe["scenario"] == scenario_name)
+            & (dataframe["metric_key"] == "scenario_cost_per_tco2_20yr_gbp")
+        ].iloc[0]
+        assert "capital_cost_total / ((annual_co2_reduction_kg / 1000) * 20" in cost_row["definition"]
+
+        diagnostic_row = dataframe[
+            (dataframe["scenario"] == scenario_name)
+            & (dataframe["metric_key"] == "scenario_carbon_abatement_cost_median")
+        ].iloc[0]
+        assert "Diagnostic property-level median" in diagnostic_row["definition"]

@@ -2,6 +2,7 @@ import io
 import json
 import re
 import shutil
+import ssl
 import urllib.error
 import zipfile
 from datetime import date as date_cls
@@ -14,6 +15,7 @@ import pytest
 from src.acquisition.epc_api_downloader import (
     EPCAPIDownloader,
     EPCDownloadError,
+    EPCRequestContext,
     EPCStockDefinitionError,
 )
 
@@ -160,6 +162,24 @@ def test_bearer_auth_header_construction():
     headers = downloader._headers()
     assert headers["Authorization"] == "Bearer abc123"
     assert headers["Accept"] == "application/json"
+
+
+def test_ssl_context_uses_certifi_bundle(monkeypatch):
+    expected_context = object()
+    calls = []
+
+    monkeypatch.setattr("certifi.where", lambda: "C:/certifi/cacert.pem")
+
+    def fake_create_default_context(*, cafile=None, **_kwargs):
+        calls.append(cafile)
+        if cafile is None:
+            raise ssl.SSLError("[ASN1: NOT_ENOUGH_DATA] not enough data")
+        return expected_context
+
+    monkeypatch.setattr("ssl.create_default_context", fake_create_default_context)
+
+    assert EPCAPIDownloader(token="abc123")._create_ssl_context() is expected_context
+    assert calls == ["C:/certifi/cacert.pem"]
 
 
 def test_normalize_api_records_maps_search_fields():
@@ -681,6 +701,33 @@ def test_download_national_domestic_dataset_raises_clear_error_when_redirect_loc
 
     assert exc_info.value.failure_kind == "unexpected"
     assert requests_seen[0]["headers"]["Authorization"] == "Bearer abc123"
+
+
+def test_download_file_to_path_reports_tls_error_separately(monkeypatch, tmp_path):
+    downloader = EPCAPIDownloader(token="abc123", download_mode="full_load")
+    context = EPCRequestContext(
+        borough_name="National",
+        property_type="domestic",
+        sample_start_date=date_cls(2024, 1, 1),
+        sample_end_date=date_cls(2024, 12, 31),
+        request_mode="full_load",
+    )
+
+    def raise_ssl_error(*_args, **_kwargs):
+        raise ssl.SSLError("[ASN1: NOT_ENOUGH_DATA] not enough data")
+
+    monkeypatch.setattr(downloader, "_open_download_response", raise_ssl_error)
+
+    with pytest.raises(EPCDownloadError) as exc_info:
+        downloader._download_file_to_path(
+            downloader.FULL_LOAD_URL,
+            tmp_path / "domestic_full_load.zip",
+            request_context=context,
+        )
+
+    assert exc_info.value.failure_kind == "unexpected"
+    assert "TLS error while streaming EPC full-load download" in str(exc_info.value)
+    assert "Filesystem error" not in str(exc_info.value)
 
 
 def test_download_borough_data_stops_when_next_page_overshoots_reported_last_page(monkeypatch):

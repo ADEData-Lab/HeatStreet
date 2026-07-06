@@ -92,6 +92,9 @@ export default function HeatStreetDashboard() {
   const caseStreetSummary = caseStreetData?.summary || {};
   const caseStreetSample = caseStreetData?.sample || [];
   const topPriorityBorough = boroughPriorityData[0];
+  const costLeverRows = Array.isArray(costLeversData) ? costLeversData : costLeversData?.levers || [];
+  const costLeverTotal = !Array.isArray(costLeversData) ? costLeversData?.total : null;
+  const costLeverEstimate = !Array.isArray(costLeversData) ? costLeversData?.conservative_combined_estimate : null;
   const thresholdSummaryRows = [...heatNetworkThresholdData]
     .sort((a, b) => Number(a.connectionRatePct || 0) - Number(b.connectionRatePct || 0))
     .reduce((acc, row) => {
@@ -292,6 +295,12 @@ export default function HeatStreetDashboard() {
                     </Bar>
                   </BarChart>
                 </ResponsiveContainer>
+                {/*
+                  <p style={{ margin: '8px 0 0', color: COLORS.muted, fontSize: '0.85rem' }}>
+                    Arithmetic sum Â£{Math.round(costLeverTotal).toLocaleString()}
+                    {costLeverEstimate && `; conservative combined estimate Â£${Math.round(costLeverEstimate.low_gbp).toLocaleString()}-Â£${Math.round(costLeverEstimate.high_gbp).toLocaleString()}`}
+                  </p>
+                */}
               </div>
 
               <div style={styles.card}>
@@ -578,8 +587,14 @@ export default function HeatStreetDashboard() {
               </div>
               <div style={styles.card}>
                 <h3 style={styles.cardTitle}>Cost levers</h3>
+                {costLeverTotal !== null && (
+                  <p style={{ margin: '0 0 8px', color: COLORS.muted, fontSize: '0.85rem' }}>
+                    Arithmetic sum GBP {Math.round(costLeverTotal).toLocaleString()}
+                    {costLeverEstimate && `; conservative combined estimate GBP ${Math.round(costLeverEstimate.low_gbp).toLocaleString()}-GBP ${Math.round(costLeverEstimate.high_gbp).toLocaleString()}`}
+                  </p>
+                )}
                 <ResponsiveContainer width="100%" height={260}>
-                  <BarChart data={costLeversData}>
+                  <BarChart data={costLeverRows}>
                     <CartesianGrid strokeDasharray="3 3" />
                     <XAxis dataKey="lever" />
                     <YAxis />

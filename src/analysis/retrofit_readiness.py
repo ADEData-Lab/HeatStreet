@@ -190,7 +190,18 @@ class RetrofitReadinessAnalyzer:
 
         # Calculate costs
         df_readiness['fabric_prerequisite_cost'] = self._calculate_fabric_costs(df_readiness)
-        df_readiness['total_retrofit_cost'] = self._calculate_total_retrofit_cost(df_readiness)
+        df_readiness['system_technology'] = self._system_technology_for_tier(df_readiness)
+        df_readiness['system_cost'] = self._calculate_system_costs(df_readiness)
+        df_readiness['total_cost'] = (
+            df_readiness['fabric_prerequisite_cost'].astype(float)
+            + df_readiness['system_cost'].astype(float)
+        )
+        df_readiness['total_cost_full_ashp'] = (
+            df_readiness['fabric_prerequisite_cost'].astype(float)
+            + self._calculate_system_costs(df_readiness, force_full_ashp=True).astype(float)
+        )
+        # Backwards-compatible alias for one release: mixed-technology total.
+        df_readiness['total_retrofit_cost'] = df_readiness['total_cost']
 
         # Estimate heat pump size needed
         df_readiness['estimated_hp_size_kw'] = self._estimate_heat_pump_size(df_readiness)
@@ -517,9 +528,20 @@ class RetrofitReadinessAnalyzer:
 
         return costs
 
-    def _calculate_total_retrofit_cost(self, df: pd.DataFrame) -> pd.Series:
+    def _system_technology_for_tier(self, df: pd.DataFrame) -> pd.Series:
+        """Return the assumed heat technology by readiness tier."""
+        return pd.Series(
+            np.where(df['hp_readiness_tier'] == 4, 'hybrid_ashp', 'ashp'),
+            index=df.index,
+        )
+
+    def _calculate_system_costs(
+        self,
+        df: pd.DataFrame,
+        force_full_ashp: bool = False,
+    ) -> pd.Series:
         """
-        Calculate total cost including fabric + heat pump + ancillaries.
+        Calculate system cost: emitters + hot water cylinder + selected heating system.
 
         AUDIT FIX: Added documentation for Tier 3/4 cost anomaly.
 
@@ -540,21 +562,36 @@ class RetrofitReadinessAnalyzer:
         a hybrid approach may be more cost-effective than pursuing
         maximum fabric efficiency for a pure ASHP in challenging homes.
         """
-        total_cost = df['fabric_prerequisite_cost'].astype(float).copy()
+        system_cost = pd.Series(0.0, index=df.index, dtype=float)
 
-        total_cost += self._cost_series(df, 'emitter_upgrades', df['needs_radiator_upsizing'])
-        total_cost += self._cost_series(df, 'hot_water_cylinder')
+        system_cost += self._cost_series(df, 'emitter_upgrades', df['needs_radiator_upsizing'])
+        system_cost += self._cost_series(df, 'hot_water_cylinder')
 
-        # Tier 4 properties get hybrid heat pumps (pragmatic approach for
-        # homes where full ASHP readiness would be cost-prohibitive)
-        hp_cost = df.apply(
+        # Tier 4 properties get hybrid heat pumps in the mixed-technology view.
+        # The full-ASHP view is calculated separately for direct tier comparison.
+        heating_cost = df.apply(
             lambda row: self.cost_calculator.measure_cost(
-                'hybrid_heat_pump' if row.get('hp_readiness_tier') == 4 else 'ashp_installation',
+                (
+                    'ashp_installation'
+                    if force_full_ashp
+                    else ('hybrid_heat_pump' if row.get('hp_readiness_tier') == 4 else 'ashp_installation')
+                ),
                 row
             )[0],
             axis=1
         )
-        total_cost += hp_cost
+        system_cost += heating_cost
+
+        return system_cost
+
+    def _calculate_total_retrofit_cost(self, df: pd.DataFrame) -> pd.Series:
+        """Calculate mixed-technology total cost including fabric and system costs."""
+        if 'system_cost' in df.columns:
+            system_cost = df['system_cost'].astype(float)
+        else:
+            system_cost = self._calculate_system_costs(df)
+
+        total_cost = df['fabric_prerequisite_cost'].astype(float) + system_cost
 
         return total_cost
 
@@ -605,6 +642,13 @@ class RetrofitReadinessAnalyzer:
         logger.info("Generating heat pump readiness summary...")
 
         total_properties = len(df_readiness)
+        total_cost_col = 'total_cost' if 'total_cost' in df_readiness.columns else 'total_retrofit_cost'
+
+        def _dominant_technology(series: pd.Series) -> str:
+            cleaned = series.dropna().astype(str)
+            if cleaned.empty:
+                return ''
+            return cleaned.mode().iloc[0]
 
         summary = {
             'total_properties': total_properties,
@@ -625,9 +669,15 @@ class RetrofitReadinessAnalyzer:
             'mean_fabric_cost': df_readiness['fabric_prerequisite_cost'].mean(),
             'median_fabric_cost': df_readiness['fabric_prerequisite_cost'].median(),
             'total_fabric_cost': df_readiness['fabric_prerequisite_cost'].sum(),
-            'mean_total_retrofit_cost': df_readiness['total_retrofit_cost'].mean(),
-            'median_total_retrofit_cost': df_readiness['total_retrofit_cost'].median(),
-            'total_retrofit_cost': df_readiness['total_retrofit_cost'].sum(),
+            'mean_system_cost': df_readiness['system_cost'].mean() if 'system_cost' in df_readiness.columns else None,
+            'median_system_cost': df_readiness['system_cost'].median() if 'system_cost' in df_readiness.columns else None,
+            'total_system_cost': df_readiness['system_cost'].sum() if 'system_cost' in df_readiness.columns else None,
+            'mean_total_retrofit_cost': df_readiness[total_cost_col].mean(),
+            'median_total_retrofit_cost': df_readiness[total_cost_col].median(),
+            'total_retrofit_cost': df_readiness[total_cost_col].sum(),
+            'mean_total_cost_full_ashp': df_readiness['total_cost_full_ashp'].mean() if 'total_cost_full_ashp' in df_readiness.columns else None,
+            'median_total_cost_full_ashp': df_readiness['total_cost_full_ashp'].median() if 'total_cost_full_ashp' in df_readiness.columns else None,
+            'total_cost_full_ashp': df_readiness['total_cost_full_ashp'].sum() if 'total_cost_full_ashp' in df_readiness.columns else None,
 
             # Heat demand statistics
             'mean_current_heat_demand': df_readiness['heat_demand_kwh_m2'].mean(),
@@ -642,7 +692,10 @@ class RetrofitReadinessAnalyzer:
 
             # Cost distribution by tier
             'fabric_cost_by_tier': df_readiness.groupby('hp_readiness_tier')['fabric_prerequisite_cost'].mean().to_dict(),
-            'total_cost_by_tier': df_readiness.groupby('hp_readiness_tier')['total_retrofit_cost'].mean().to_dict(),
+            'system_cost_by_tier': df_readiness.groupby('hp_readiness_tier')['system_cost'].mean().to_dict() if 'system_cost' in df_readiness.columns else {},
+            'total_cost_by_tier': df_readiness.groupby('hp_readiness_tier')[total_cost_col].mean().to_dict(),
+            'total_cost_full_ashp_by_tier': df_readiness.groupby('hp_readiness_tier')['total_cost_full_ashp'].mean().to_dict() if 'total_cost_full_ashp' in df_readiness.columns else {},
+            'system_technology_by_tier': df_readiness.groupby('hp_readiness_tier')['system_technology'].agg(_dominant_technology).to_dict() if 'system_technology' in df_readiness.columns else {},
         }
 
         return summary
@@ -766,12 +819,46 @@ class RetrofitReadinessAnalyzer:
             f.write(f"Median total retrofit cost: £{summary['median_total_retrofit_cost']:,.0f}\n")
             f.write(f"Total retrofit investment needed: £{summary['total_retrofit_cost']/1e6:.1f}M\n\n")
 
+            if summary.get('mean_system_cost') is not None:
+                f.write(f"Mean system cost: GBP {summary['mean_system_cost']:,.0f}\n")
+                f.write(f"Median system cost: GBP {summary['median_system_cost']:,.0f}\n")
+                f.write(f"Total system investment needed: GBP {summary['total_system_cost']/1e6:.1f}M\n\n")
+            if summary.get('mean_total_cost_full_ashp') is not None:
+                f.write(f"Mean total cost (full ASHP): GBP {summary['mean_total_cost_full_ashp']:,.0f}\n")
+                f.write(f"Median total cost (full ASHP): GBP {summary['median_total_cost_full_ashp']:,.0f}\n")
+                f.write(f"Total investment (full ASHP): GBP {summary['total_cost_full_ashp']/1e6:.1f}M\n\n")
+            f.write(
+                "Note: Tier 4 uses a hybrid ASHP in the mixed-technology total; "
+                "this can make mixed totals lower than Tier 3, while the full-ASHP total "
+                "shows the like-for-like ASHP envelope.\n\n"
+            )
+
             f.write("HEAT DEMAND ANALYSIS:\n")
             f.write("-" * 80 + "\n")
             f.write("All energy figures are annual delivered (final) energy unless stated otherwise; not primary energy.\n")
             f.write(f"Mean current heat demand: {summary['mean_current_heat_demand']:.0f} kWh/m²/year\n")
             f.write(f"Mean post-fabric heat demand: {summary['mean_post_fabric_heat_demand']:.0f} kWh/m²/year\n")
             f.write(f"Heat demand reduction: {summary['heat_demand_reduction_percent']:.1f}%\n\n")
+
+            f.write("READINESS TIER COSTS:\n")
+            f.write("-" * 80 + "\n")
+            fabric_by_tier = summary.get('fabric_cost_by_tier', {})
+            system_by_tier = summary.get('system_cost_by_tier', {})
+            total_by_tier = summary.get('total_cost_by_tier', {})
+            full_ashp_by_tier = summary.get('total_cost_full_ashp_by_tier', {})
+            tech_by_tier = summary.get('system_technology_by_tier', {})
+            for tier in range(1, 6):
+                fabric_cost = fabric_by_tier.get(tier, 0)
+                system_cost = system_by_tier.get(tier, 0)
+                total_cost = total_by_tier.get(tier, 0)
+                full_ashp_cost = full_ashp_by_tier.get(tier, 0)
+                technology = tech_by_tier.get(tier, "n/a")
+                f.write(
+                    f"Tier {tier}: fabric GBP {fabric_cost:,.0f} | "
+                    f"system GBP {system_cost:,.0f} | total GBP {total_cost:,.0f} | "
+                    f"full ASHP total GBP {full_ashp_cost:,.0f} | technology {technology}\n"
+                )
+            f.write("\n")
 
             f.write("FABRIC COST BY READINESS TIER:\n")
             f.write("-" * 80 + "\n")

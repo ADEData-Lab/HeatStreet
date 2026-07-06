@@ -315,13 +315,21 @@ class AdditionalReports:
             top_ten = borough_ranking.head(10)
             top_five = borough_ranking.head(5)
             top_five_count = int(top_five['property_count'].sum())
+            total_target_properties = int(borough_ranking['property_count'].sum())
+            top_five_share = (
+                top_five_count / total_target_properties * 100
+                if total_target_properties > 0
+                else 0.0
+            )
             top_five_investment = top_five_count * fabric_cost_per_property
+            generated_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            source_text = source_label or 'corrected validated pipeline dataset'
             lines = [
                 "=" * 80,
                 "BOROUGH PRIORITY RANKING SUMMARY",
                 "=" * 80,
-                f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-                f"Source dataset: {source_label or 'corrected validated pipeline dataset'}",
+                f"Generated: {generated_at}",
+                f"Source dataset: {source_text}",
                 "",
                 "TOP 10 BOROUGHS",
                 "-" * 80,
@@ -341,6 +349,21 @@ class AdditionalReports:
                 "TOP 5 COMBINED",
                 "-" * 80,
                 f"Property count: {top_five_count:,}",
+                f"Share of target-archetype properties: {top_five_share:.1f}%",
+                "",
+                "READY-TO-PASTE TOP-FIVE NARRATIVE",
+                "-" * 80,
+                (
+                    f"As of {generated_at}, using {source_text}, the top five priority boroughs are "
+                    + "; ".join(
+                        f"{row.borough} ({int(row.property_count):,} properties, mean EPC {row.mean_epc_score:.2f}, "
+                        f"energy intensity {row.mean_energy_intensity_kwh_m2_year:.2f} kWh/m2/year, "
+                        f"priority score {row.composite_priority_score:.4f})"
+                        for row in top_five.itertuples(index=False)
+                    )
+                    + f". Together they account for {top_five_count:,} target-archetype properties, "
+                    f"{top_five_share:.1f}% of the ranked total."
+                ),
                 f"Investment estimate (@ £{fabric_cost_per_property:,.0f}/property): £{top_five_investment:,.0f}",
             ])
 

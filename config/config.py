@@ -88,6 +88,12 @@ def get_cost_assumptions() -> Dict[str, float]:
     return config['costs']
 
 
+def get_cost_reduction_levers() -> list:
+    """Get configured retrofit cost reduction levers."""
+    config = load_config()
+    return config.get('cost_reduction_levers', [])
+
+
 def get_cost_rules() -> Dict[str, Any]:
     """Get structured costing rules (basis, caps, rationale) from config."""
     config = load_config()

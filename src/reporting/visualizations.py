@@ -44,7 +44,7 @@ class ReportGenerator:
         sns.set_style("whitegrid")
         sns.set_palette("husl")
         plt.rcParams['figure.figsize'] = (12, 8)
-        plt.rcParams['font.size'] = 11
+        plt.rcParams['font.size'] = 12
 
         logger.info("Initialized Report Generator")
 
@@ -58,6 +58,8 @@ class ReportGenerator:
 
     def _cost_per_tco2_20yr_gbp(self, results: Dict) -> Optional[float]:
         """Calculate cost per tCO2 using total abatement over the analysis horizon."""
+        if results.get("cost_per_tco2_20yr_gbp") is not None:
+            return results.get("cost_per_tco2_20yr_gbp")
         annual_co2_reduction_kg = results.get("annual_co2_reduction_kg")
         capital_cost_total = results.get("capital_cost_total")
         if capital_cost_total is None or not annual_co2_reduction_kg:
@@ -100,8 +102,8 @@ class ReportGenerator:
                    f'{pct:.1f}%',
                    ha='center', va='bottom', fontsize=10, fontweight='bold')
 
-        ax.set_xlabel('EPC Band', fontsize=12, fontweight='bold')
-        ax.set_ylabel('Number of Properties', fontsize=12, fontweight='bold')
+        ax.set_xlabel('EPC Band', fontsize=13, fontweight='bold')
+        ax.set_ylabel('Number of Properties', fontsize=13, fontweight='bold')
         ax.set_title('Current EPC Band Distribution\nEdwardian Terraced Housing, London',
                     fontsize=14, fontweight='bold', pad=20)
 
@@ -193,8 +195,8 @@ class ReportGenerator:
         fig, ax = plt.subplots(figsize=(12, 6))
         wide[cols].plot(kind="bar", stacked=True, ax=ax, color=[colors[c] for c in cols], width=0.9)
         ax.set_title("EPC lodgements by year (counts; A-D segments labelled % of year)")
-        ax.set_xlabel("Lodgement year (LODGEMENT_DATE; fallback INSPECTION_DATE)")
-        ax.set_ylabel("Number of EPCs")
+        ax.set_xlabel("Lodgement year", fontsize=13)
+        ax.set_ylabel("Number of EPCs", fontsize=13)
         ax.tick_params(axis="x", rotation=0)
         ax.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda x, _: f"{int(x):,}"))
         ax.legend(title="EPC band", bbox_to_anchor=(1.02, 1), loc="upper left")
@@ -235,8 +237,8 @@ class ReportGenerator:
             fig, ax = plt.subplots(figsize=(12, 6))
             share.plot(kind="bar", stacked=True, ax=ax, color=[colors[c] for c in cols], width=0.9)
             ax.set_title("EPC lodgements by year (share, stacked by EPC band)")
-            ax.set_xlabel("Lodgement year (LODGEMENT_DATE; fallback INSPECTION_DATE)")
-            ax.set_ylabel("% of EPCs (within each year)")
+            ax.set_xlabel("Lodgement year", fontsize=13)
+            ax.set_ylabel("% of EPCs (within each year)", fontsize=13)
             ax.tick_params(axis="x", rotation=0)
             ax.set_ylim(0, 100)
             ax.legend(title="EPC band", bbox_to_anchor=(1.02, 1), loc="upper left")
@@ -286,8 +288,8 @@ class ReportGenerator:
         median_sap = sap_data.median()
         ax.axvline(median_sap, color='darkred', linestyle=':', linewidth=2, label=f'Median: {median_sap:.1f}')
 
-        ax.set_xlabel('SAP Score', fontsize=12, fontweight='bold')
-        ax.set_ylabel('Number of Properties', fontsize=12, fontweight='bold')
+        ax.set_xlabel('SAP Score', fontsize=13, fontweight='bold')
+        ax.set_ylabel('Number of Properties', fontsize=13, fontweight='bold')
         ax.set_title('SAP Score Distribution\nEdwardian Terraced Housing, London',
                     fontsize=14, fontweight='bold', pad=20)
 
@@ -339,7 +341,7 @@ class ReportGenerator:
                        f'{height:.1f}',
                        ha='center', va='bottom', fontsize=10, fontweight='bold')
 
-            ax.set_ylabel(metric, fontsize=11, fontweight='bold')
+            ax.set_ylabel(metric, fontsize=13, fontweight='bold')
             ax.set_title(metric, fontsize=12, fontweight='bold', pad=10)
             ax.tick_params(axis='x', rotation=45)
             ax.yaxis.grid(True, alpha=0.3)
@@ -384,23 +386,23 @@ class ReportGenerator:
 
         # Uptake rate vs subsidy
         axes[0, 0].plot(subsidy_levels, uptake_rates, marker='o', linewidth=2, markersize=8, color='steelblue')
-        axes[0, 0].set_xlabel('Subsidy Level (%)', fontweight='bold')
-        axes[0, 0].set_ylabel('Estimated Uptake Rate (%)', fontweight='bold')
+        axes[0, 0].set_xlabel('Subsidy Level (%)', fontsize=13, fontweight='bold')
+        axes[0, 0].set_ylabel('Estimated Uptake Rate (%)', fontsize=13, fontweight='bold')
         axes[0, 0].set_title('Uptake Rate vs Subsidy Level', fontweight='bold', pad=10)
         axes[0, 0].grid(True, alpha=0.3)
         axes[0, 0].set_ylim(0, 100)
 
         # Payback vs subsidy
         axes[0, 1].plot(subsidy_levels, payback_years, marker='s', linewidth=2, markersize=8, color='coral')
-        axes[0, 1].set_xlabel('Subsidy Level (%)', fontweight='bold')
-        axes[0, 1].set_ylabel('Payback Period (years)', fontweight='bold')
+        axes[0, 1].set_xlabel('Subsidy Level (%)', fontsize=13, fontweight='bold')
+        axes[0, 1].set_ylabel('Payback Period (years)', fontsize=13, fontweight='bold')
         axes[0, 1].set_title('Payback Period vs Subsidy Level', fontweight='bold', pad=10)
         axes[0, 1].grid(True, alpha=0.3)
 
         # Carbon abatement cost
         axes[1, 0].plot(subsidy_levels, carbon_costs, marker='^', linewidth=2, markersize=8, color='green')
-        axes[1, 0].set_xlabel('Subsidy Level (%)', fontweight='bold')
-        axes[1, 0].set_ylabel('Carbon Abatement Cost (£/tCO₂)', fontweight='bold')
+        axes[1, 0].set_xlabel('Subsidy Level (%)', fontsize=13, fontweight='bold')
+        axes[1, 0].set_ylabel('Carbon Abatement Cost (£/tCO₂)', fontsize=13, fontweight='bold')
         axes[1, 0].set_title('Carbon Abatement Cost vs Subsidy Level', fontweight='bold', pad=10)
         axes[1, 0].grid(True, alpha=0.3)
 
@@ -408,8 +410,8 @@ class ReportGenerator:
         public_exp = [subsidy_results[level]['public_expenditure_total']/1_000_000
                      for level in subsidy_results.keys()]
         axes[1, 1].bar(subsidy_levels, public_exp, color='purple', edgecolor='black', alpha=0.7)
-        axes[1, 1].set_xlabel('Subsidy Level (%)', fontweight='bold')
-        axes[1, 1].set_ylabel('Public Expenditure (£M)', fontweight='bold')
+        axes[1, 1].set_xlabel('Subsidy Level (%)', fontsize=13, fontweight='bold')
+        axes[1, 1].set_ylabel('Public Expenditure (£M)', fontsize=13, fontweight='bold')
         axes[1, 1].set_title('Total Public Expenditure vs Subsidy Level', fontweight='bold', pad=10)
         axes[1, 1].grid(True, alpha=0.3, axis='y')
 
@@ -458,8 +460,8 @@ class ReportGenerator:
         bars2 = ax1.bar(x + width/2, after_counts, width, label='After',
                        color=colors, edgecolor='black', linewidth=1.2)
 
-        ax1.set_xlabel('EPC Band', fontsize=12, fontweight='bold')
-        ax1.set_ylabel('Number of Properties', fontsize=12, fontweight='bold')
+        ax1.set_xlabel('EPC Band', fontsize=13, fontweight='bold')
+        ax1.set_ylabel('Number of Properties', fontsize=13, fontweight='bold')
         ax1.set_title('Band Distribution Before vs After', fontsize=13, fontweight='bold')
         ax1.set_xticks(x)
         ax1.set_xticklabels(bands)
@@ -482,8 +484,8 @@ class ReportGenerator:
                     ha='center', va=va, fontsize=10, fontweight='bold')
 
         ax2.axhline(y=0, color='black', linewidth=1)
-        ax2.set_xlabel('EPC Band', fontsize=12, fontweight='bold')
-        ax2.set_ylabel('Net Change in Properties', fontsize=12, fontweight='bold')
+        ax2.set_xlabel('EPC Band', fontsize=13, fontweight='bold')
+        ax2.set_ylabel('Net Change in Properties', fontsize=13, fontweight='bold')
         ax2.set_title('Net Change by Band', fontsize=13, fontweight='bold')
         ax2.yaxis.grid(True, alpha=0.3)
         ax2.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{int(x):+,}'))
@@ -568,7 +570,7 @@ class ReportGenerator:
         }
 
         bars = ax2.bar(metrics.keys(), metrics.values(), color='steelblue', edgecolor='black')
-        ax2.set_ylabel('Value', fontsize=12, fontweight='bold')
+        ax2.set_ylabel('Value', fontsize=13, fontweight='bold')
         ax2.set_title('Cost-Effectiveness Metrics', fontsize=13, fontweight='bold')
         ax2.yaxis.grid(True, alpha=0.3)
 
@@ -721,7 +723,7 @@ class ReportGenerator:
         y_max = max(3500.0, max(efficiency) * 1.8 if efficiency else 3500.0)
         right_max = max(cumulative_capex) * 1.15 if cumulative_capex else 1.0
 
-        fig, ax = plt.subplots(figsize=(16, 7))
+        fig, ax = plt.subplots(figsize=(17, 8))
         ax.set_axisbelow(True)
         ax.yaxis.grid(True, color=colors["grid"], linewidth=1)
 
@@ -733,10 +735,10 @@ class ReportGenerator:
             fontweight="bold",
             pad=15,
         )
-        ax.set_xlabel("Retrofit Measure (sequential application)", fontsize=12, fontweight="bold")
+        ax.set_xlabel("Retrofit Measure (sequential application)", fontsize=13, fontweight="bold")
         ax.set_ylabel(
             "Marginal Efficiency (kWh saved per £1,000 invested)",
-            fontsize=12,
+            fontsize=13,
             fontweight="bold",
             color=colors["high"],
         )
@@ -774,7 +776,7 @@ class ReportGenerator:
         # Secondary axis for cumulative capex
         ax2 = ax.twinx()
         ax2.plot(x, cumulative_capex, color=colors["line"], marker="o", linewidth=3)
-        ax2.set_ylabel("Cumulative Investment (£)", fontsize=12, fontweight="bold", color=colors["line"])
+        ax2.set_ylabel("Cumulative Investment (£)", fontsize=13, fontweight="bold", color=colors["line"])
         ax2.tick_params(axis="y", labelcolor=colors["line"])
         ax2.set_ylim(0, right_max)
         ax2.get_yaxis().set_major_formatter(plt.FuncFormatter(lambda v, _: f"{int(v):,}"))
@@ -800,15 +802,20 @@ class ReportGenerator:
 
         # Tipping point callouts
         pre_tipping = df[~df["is_beyond_tipping_point"] & (df["step"] > 0)]
+        pre_text_x = None
+        pre_text_y = None
         if not pre_tipping.empty:
             tp1 = pre_tipping.iloc[-1]
             tp1_x = int(pre_tipping.index[-1])
             tp1_cost = float(tp1["cumulative_capex"])
             tp1_reduction = 100.0 - float(tp1["remaining_demand_pct"])
+            pre_anchor_y = min(threshold_eff, y_max * 0.95)
+            pre_text_x = min(tp1_x + 0.8, n - 0.2)
+            pre_text_y = min(y_max * 0.92, max(pre_anchor_y + y_max * 0.20, y_max * 0.72))
             ax.annotate(
                 f"TIPPING POINT 1\n{_format_gbp(tp1_cost)} cumulative\n{tp1_reduction:.0f}% demand reduction",
-                xy=(tp1_x, threshold_eff),
-                xytext=(min(tp1_x + 0.8, n - 0.2), y_max * 0.88),
+                xy=(tp1_x, pre_anchor_y),
+                xytext=(pre_text_x, pre_text_y),
                 ha="left",
                 va="top",
                 fontsize=10,
@@ -823,12 +830,19 @@ class ReportGenerator:
             tp2 = post_tipping.iloc[0]
             tp2_x = int(post_tipping.index[0])
             tp2_cost = float(tp2["cumulative_capex"])
+            post_anchor_y = float(tp2["marginal_efficiency_kwh_per_1k"])
+            post_text_x = min(tp2_x + 2.0, n - 0.2)
+            if pre_text_x is not None and abs(post_text_x - pre_text_x) < 1.0:
+                post_text_x = min(max(post_text_x, pre_text_x + 1.2), n - 0.2)
+            post_text_y = max(y_max * 0.18, min(post_anchor_y - y_max * 0.18, y_max * 0.48))
+            if pre_text_y is not None and abs(post_text_y - pre_text_y) < y_max * 0.18:
+                post_text_y = max(y_max * 0.18, pre_text_y - y_max * 0.30)
             ax.annotate(
                 f"TIPPING POINT 2\n{_format_gbp(tp2_cost)} cumulative\nMarginal returns collapse",
-                xy=(tp2_x, float(tp2["marginal_efficiency_kwh_per_1k"])),
-                xytext=(min(tp2_x + 2.0, n - 0.2), y_max * 0.62),
+                xy=(tp2_x, post_anchor_y),
+                xytext=(post_text_x, post_text_y),
                 ha="left",
-                va="top",
+                va="bottom",
                 fontsize=10,
                 fontweight="bold",
                 color="#e65100",
@@ -894,7 +908,7 @@ class ReportGenerator:
 
             # Bar chart with recommended pathways
             ax2.barh(tier_data['Tier'], tier_data['Property Count'], color=colors, edgecolor='black')
-            ax2.set_xlabel('Number of Properties', fontsize=11, fontweight='bold')
+            ax2.set_xlabel('Number of Properties', fontsize=13, fontweight='bold')
             ax2.set_title('Properties by Heat Network Tier', fontsize=12, fontweight='bold', pad=20)
             ax2.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'{int(x):,}'))
             ax2.grid(True, alpha=0.3, axis='x')
@@ -1522,7 +1536,7 @@ class ReportGenerator:
         tier_colors = ['#2ecc71', '#3498db', '#f39c12', '#e74c3c', '#95a5a6']
 
         bars1 = ax1.bar(tier_labels, tier_counts, color=tier_colors, edgecolor='black', linewidth=1.5)
-        ax1.set_ylabel('Number of Properties', fontsize=12)
+        ax1.set_ylabel('Number of Properties', fontsize=13)
         ax1.set_title('Heat Pump Readiness Distribution', fontsize=13, fontweight='bold')
         ax1.grid(axis='y', alpha=0.3)
 
@@ -1550,7 +1564,7 @@ class ReportGenerator:
         ]
 
         bars2 = ax2.barh(interventions, intervention_counts, color='#e74c3c', edgecolor='black', linewidth=1.5)
-        ax2.set_xlabel('Number of Properties', fontsize=12)
+        ax2.set_xlabel('Number of Properties', fontsize=13)
         ax2.set_title('Required Interventions Before Heat Pump', fontsize=13, fontweight='bold')
         ax2.grid(axis='x', alpha=0.3)
 
@@ -1575,8 +1589,8 @@ class ReportGenerator:
         bars3b = ax3.bar(x + width/2, total_costs, width, label='Total Retrofit Cost',
                         color='#e67e22', edgecolor='black', linewidth=1.5)
 
-        ax3.set_xlabel('Readiness Tier', fontsize=12)
-        ax3.set_ylabel('Average Cost (£k)', fontsize=12)
+        ax3.set_xlabel('Readiness Tier', fontsize=13)
+        ax3.set_ylabel('Average Cost (£k)', fontsize=13)
         ax3.set_title('Retrofit Costs by Readiness Tier', fontsize=13, fontweight='bold')
         ax3.set_xticks(x)
         ax3.set_xticklabels([f'Tier {i}' for i in tiers])
@@ -1591,7 +1605,7 @@ class ReportGenerator:
 
         bars4 = ax4.bar(demand_data.keys(), demand_data.values(),
                        color=['#e74c3c', '#2ecc71'], edgecolor='black', linewidth=1.5)
-        ax4.set_ylabel('Heat Demand (kWh/m²/year)', fontsize=12)
+        ax4.set_ylabel('Heat Demand (kWh/m²/year)', fontsize=13)
         ax4.set_title('Mean Heat Demand Reduction', fontsize=13, fontweight='bold')
         ax4.grid(axis='y', alpha=0.3)
 
@@ -1639,8 +1653,8 @@ class ReportGenerator:
         ax1.hist(costs, bins=30, color='#3498db', edgecolor='black', alpha=0.7)
         ax1.axvline(costs.median(), color='#e74c3c', linestyle='--', linewidth=2, label=f'Median: £{costs.median():.1f}k')
         ax1.axvline(costs.mean(), color='#2ecc71', linestyle='--', linewidth=2, label=f'Mean: £{costs.mean():.1f}k')
-        ax1.set_xlabel('Fabric Pre-requisite Cost (£k)', fontsize=12)
-        ax1.set_ylabel('Number of Properties', fontsize=12)
+        ax1.set_xlabel('Fabric Pre-requisite Cost (£k)', fontsize=13)
+        ax1.set_ylabel('Number of Properties', fontsize=13)
         ax1.set_title('Cost Distribution', fontsize=13)
         ax1.legend(fontsize=11)
         ax1.grid(axis='y', alpha=0.3)
@@ -1652,8 +1666,8 @@ class ReportGenerator:
         ax2.plot(sorted_costs, cumulative, color='#3498db', linewidth=2)
         ax2.axhline(50, color='#e74c3c', linestyle='--', linewidth=1.5, label='50%')
         ax2.axhline(80, color='#f39c12', linestyle='--', linewidth=1.5, label='80%')
-        ax2.set_xlabel('Fabric Pre-requisite Cost (£k)', fontsize=12)
-        ax2.set_ylabel('Cumulative Percentage (%)', fontsize=12)
+        ax2.set_xlabel('Fabric Pre-requisite Cost (£k)', fontsize=13)
+        ax2.set_ylabel('Cumulative Percentage (%)', fontsize=13)
         ax2.set_title('Cumulative Distribution', fontsize=13)
         ax2.legend(fontsize=11)
         ax2.grid(True, alpha=0.3)
@@ -1736,8 +1750,8 @@ class ReportGenerator:
         ax.axvline(100, color='#2ecc71', linestyle=':', linewidth=2, alpha=0.7)
         ax.axvline(150, color='#f39c12', linestyle=':', linewidth=2, alpha=0.7)
 
-        ax.set_xlabel('Current Heat Demand (kWh/m²/year)', fontsize=12)
-        ax.set_ylabel('Post-Fabric Heat Demand (kWh/m²/year)', fontsize=12)
+        ax.set_xlabel('Current Heat Demand (kWh/m²/year)', fontsize=13)
+        ax.set_ylabel('Post-Fabric Heat Demand (kWh/m²/year)', fontsize=13)
         ax.set_title('Heat Demand: Current vs After Fabric Improvements', fontsize=14, fontweight='bold')
         ax.legend(fontsize=10, loc='upper left')
         ax.grid(True, alpha=0.3)

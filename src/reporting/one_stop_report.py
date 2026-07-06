@@ -738,6 +738,53 @@ class OneStopReportGenerator:
                 usage="Readiness tier breakdown",
             ))
 
+        tier_cost_fields = {
+            "fabric_prerequisite_cost": ("Fabric prerequisite cost", "Average fabric prerequisite cost by readiness tier (GBP per property)."),
+            "system_cost": ("System cost", "Average system cost by readiness tier: emitters, hot water cylinder, and selected heating system (GBP per property)."),
+            "total_cost": ("Total mixed-technology cost", "Average fabric plus selected system cost by readiness tier (GBP per property)."),
+            "total_cost_full_ashp": ("Total full-ASHP cost", "Average fabric plus full-ASHP system cost by readiness tier (GBP per property)."),
+        }
+        for tier in range(1, 6):
+            tier_df = readiness_df[readiness_df["hp_readiness_tier"] == tier] if "hp_readiness_tier" in readiness_df.columns else pd.DataFrame()
+            if tier_df.empty:
+                continue
+
+            if "system_technology" in tier_df.columns:
+                technologies = tier_df["system_technology"].dropna().astype(str)
+                if not technologies.empty:
+                    datapoints.append(AnnotatedDatapoint(
+                        name=f"Readiness Tier {tier} assumed system technology",
+                        key=f"tier_{tier}_system_technology",
+                        value=technologies.mode().iloc[0],
+                        definition="Dominant assumed heating system technology for this readiness tier.",
+                        denominator=f"Readiness Tier {tier} properties",
+                        source="data/outputs/retrofit_readiness_analysis.csv -> system_technology",
+                        usage="Readiness tier cost interpretation",
+                    ))
+
+            for field, (label, definition) in tier_cost_fields.items():
+                if field in tier_df.columns:
+                    datapoints.append(AnnotatedDatapoint(
+                        name=f"Readiness Tier {tier} {label}",
+                        key=f"tier_{tier}_{field}_mean_gbp",
+                        value=tier_df[field].mean(),
+                        definition=definition,
+                        denominator=f"Readiness Tier {tier} properties",
+                        source=f"data/outputs/retrofit_readiness_analysis.csv -> mean({field}) where hp_readiness_tier == {tier}",
+                        usage="Readiness tier cost interpretation",
+                    ))
+
+        if "system_technology" in readiness_df.columns and (readiness_df["system_technology"] == "hybrid_ashp").any():
+            datapoints.append(AnnotatedDatapoint(
+                name="Tier 4 hybrid ASHP cost note",
+                key="tier_4_hybrid_ashp_cost_note",
+                value="Tier 4 uses a hybrid ASHP in the mixed-technology total, so mixed totals can be lower than Tier 3; total_cost_full_ashp shows the like-for-like full-ASHP envelope.",
+                definition="Interpretation note for Tier 4 mixed-technology retrofit costs.",
+                denominator="N/A",
+                source="data/outputs/retrofit_readiness_analysis.csv -> system_technology and total_cost_full_ashp",
+                usage="Readiness tier cost interpretation",
+            ))
+
         # Costs
         if "fabric_prerequisite_cost" in readiness_df.columns:
             datapoints.extend([
@@ -982,6 +1029,11 @@ class OneStopReportGenerator:
                 "annual_energy_reduction_kwh": ("Annual energy reduction", "Total annual energy reduction (kWh).", "All properties in scenario"),
                 "annual_co2_reduction_kg": ("Annual CO2 reduction", "Total annual CO₂ reduction (kg).", "All properties in scenario"),
                 "annual_bill_savings": ("Annual bill savings", "Total annual bill savings (GBP).", "All properties in scenario"),
+                "cost_per_tco2_20yr_gbp": (
+                    "Cost per tCO2 over analysis horizon",
+                    str(row.get("cost_per_tco2_20yr_definition") or "capital_cost_total / ((annual_co2_reduction_kg / 1000) * configured analysis_horizon_years)."),
+                    "Total tCO2 abated over configured analysis horizon",
+                ),
                 "baseline_bill_total": ("Baseline bill total", "Baseline annual bill total before measures (GBP).", "All properties in scenario"),
                 "post_measure_bill_total": ("Post-measure bill total", "Post-measure annual bill total (GBP).", "All properties in scenario"),
                 "baseline_co2_total_kg": ("Baseline CO2 total", "Baseline annual CO₂ total before measures (kg).", "All properties in scenario"),
@@ -1050,6 +1102,10 @@ class OneStopReportGenerator:
                     "marginal_pct": ("Marginally cost-effective properties (%)", "Share of marginally cost-effective properties (payback 15-25 years) (percent).", "All properties in scenario"),
                     "not_cost_effective_count": ("Not cost-effective (count)", "Count of non cost-effective properties (payback >25 years or no savings) (count).", "All properties in scenario"),
                     "not_cost_effective_pct": ("Not cost-effective (%)", "Share of non cost-effective properties (payback >25 years or no savings) (percent).", "All properties in scenario"),
+                    "carbon_abatement_cost_property_mean": ("Diagnostic property carbon abatement cost (mean)", "Diagnostic mean of property-level carbon abatement cost; use cost_per_tco2_20yr_gbp for headline reporting.", "Properties with finite property-level abatement cost"),
+                    "carbon_abatement_cost_property_median": ("Diagnostic property carbon abatement cost (median)", "Diagnostic median of property-level carbon abatement cost; use cost_per_tco2_20yr_gbp for headline reporting.", "Properties with finite property-level abatement cost"),
+                    "carbon_abatement_cost_property_p10": ("Diagnostic property carbon abatement cost (p10)", "Diagnostic p10 of property-level carbon abatement cost; use cost_per_tco2_20yr_gbp for headline reporting.", "Properties with finite property-level abatement cost"),
+                    "carbon_abatement_cost_property_p90": ("Diagnostic property carbon abatement cost (p90)", "Diagnostic p90 of property-level carbon abatement cost; use cost_per_tco2_20yr_gbp for headline reporting.", "Properties with finite property-level abatement cost"),
                     "carbon_abatement_cost_mean": ("Carbon abatement cost (mean)", "Mean carbon abatement cost (GBP/tCO₂).", "Cost-effective properties"),
                     "carbon_abatement_cost_median": ("Carbon abatement cost (median)", "Median carbon abatement cost (GBP/tCO₂).", "Cost-effective properties"),
                 }
@@ -1128,6 +1184,49 @@ class OneStopReportGenerator:
 
         return self._render_section(self.SECTION_TITLES[5], datapoints, tables=tables)
 
+    def _build_retrofit_cost_envelopes(self, hn_vs_hp_df: pd.DataFrame) -> pd.DataFrame:
+        """Build a pathway cost-envelope table from HN vs HP comparison outputs."""
+        pathway_notes = {
+            "fabric_only": "Fabric measures only; no heat technology capex in this pathway row.",
+            "fabric_plus_hp_only": "Fabric plus individual ASHP pathway.",
+            "fabric_plus_hn_only": "Fabric plus heat network connection pathway.",
+            "fabric_plus_hp_plus_hn": "Hybrid routing: HN where available, ASHP elsewhere.",
+        }
+        pathway_names = {
+            "fabric_only": "Fabric only",
+            "fabric_plus_hp_only": "Fabric + ASHP",
+            "fabric_plus_hn_only": "Fabric + HN",
+            "fabric_plus_hp_plus_hn": "Hybrid",
+        }
+
+        rows = []
+        if hn_vs_hp_df is None or hn_vs_hp_df.empty:
+            return pd.DataFrame(rows)
+        if "pathway_id" not in hn_vs_hp_df.columns:
+            return pd.DataFrame(rows)
+
+        for pathway_id in pathway_notes:
+            matches = hn_vs_hp_df[hn_vs_hp_df["pathway_id"].astype(str) == pathway_id]
+            if matches.empty:
+                continue
+            row = matches.iloc[0]
+            required = ["capex_p10", "capex_p90", "capex_median"]
+            if not all(field in hn_vs_hp_df.columns and not pd.isna(row.get(field)) for field in required):
+                continue
+            note = row.get("payback_note")
+            rows.append(
+                {
+                    "pathway_id": pathway_id,
+                    "pathway_name": row.get("pathway_name") or pathway_names[pathway_id],
+                    "capex_p10": row.get("capex_p10"),
+                    "capex_p90": row.get("capex_p90"),
+                    "capex_median": row.get("capex_median"),
+                    "note": note if isinstance(note, str) and note.strip() else pathway_notes[pathway_id],
+                }
+            )
+
+        return pd.DataFrame(rows)
+
     def _build_section_7(self, hn_vs_hp_df: Optional[pd.DataFrame]) -> Dict[str, Any]:
         """Section 7: Heat network vs heat pump comparison module."""
         if hn_vs_hp_df is None or hn_vs_hp_df.empty:
@@ -1173,6 +1272,7 @@ class OneStopReportGenerator:
                 "bill_saving_mean": "Mean annual bill saving",
                 "co2_saving_mean": "Mean annual CO2 saving",
                 "payback_mean": "Mean simple payback",
+                "payback_note": "Payback note",
             }
             for field, label in field_labels.items():
                 if field in hn_vs_hp_df.columns and not pd.isna(row.get(field)):
@@ -1190,6 +1290,9 @@ class OneStopReportGenerator:
 
         # Include full comparison table
         tables = [(hn_vs_hp_df, "Heat Network vs Heat Pump Comparison")]
+        envelope_df = self._build_retrofit_cost_envelopes(hn_vs_hp_df)
+        if not envelope_df.empty:
+            tables.append((envelope_df, "Retrofit Cost Envelopes"))
 
         return self._render_section(self.SECTION_TITLES[6], datapoints, tables=tables)
 

@@ -67,9 +67,17 @@ def test_comparison_outputs_created(tmp_path):
         'payback_p90',
         'payback_min',
         'payback_max',
+        'payback_note',
     }
 
     assert required_columns.issubset(set(csv.columns)), "Missing required comparison columns"
+    hn_note = csv.loc[csv['pathway_id'] == 'fabric_plus_hn_only', 'payback_note'].iloc[0]
+    assert 'HN has lower capex' in hn_note
+    assert 'HN GBP' in hn_note
+    assert 'gas GBP' in hn_note
+
+    snippet = snippet_path.read_text(encoding='utf-8')
+    assert 'Payback note' in snippet
 
 
 def test_markdown_written_utf8_on_windows_1252(tmp_path, monkeypatch):

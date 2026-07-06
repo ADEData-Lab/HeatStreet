@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional
 
+import matplotlib
+matplotlib.use("Agg", force=True)
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -41,7 +43,7 @@ class ComparisonReporter:
         sns.set_style("whitegrid")
         sns.set_palette("husl")
         plt.rcParams['figure.figsize'] = (12, 6)
-        plt.rcParams['font.size'] = 11
+        plt.rcParams['font.size'] = 12
 
         self.config = load_config()
         self.costs = get_cost_assumptions()
@@ -83,6 +85,30 @@ class ComparisonReporter:
         pathway = PATHWAYS.get(pathway_id)
         return pathway.name if pathway else pathway_id
 
+    def _payback_note(self, pathway_id: str) -> str:
+        energy_prices = self.config.get('energy_prices', {}).get('current', {})
+        carbon_factors = self.config.get('carbon_factors', {}).get('current', {})
+        hn_tariff = float(self.hn_params.get('tariff_per_kwh', energy_prices.get('heat_network', 0.08)) or 0)
+        gas_price = float(energy_prices.get('gas', 0.0) or 0)
+        hn_carbon = float(self.hn_params.get('carbon_intensity_kg_per_kwh', carbon_factors.get('heat_network', 0.0)) or 0)
+        gas_carbon = float(carbon_factors.get('gas', 0.0) or 0)
+
+        if 'hn' not in pathway_id and 'heat_network' not in pathway_id:
+            return (
+                f"Tariff context: heat network GBP {hn_tariff:.4f}/kWh vs gas GBP {gas_price:.4f}/kWh; "
+                f"carbon factors HN {hn_carbon:.3f} vs gas {gas_carbon:.3f} kgCO2/kWh."
+            )
+
+        if hn_tariff > gas_price:
+            payback_context = "HN has lower capex, but modeled payback can be longer because the HN tariff exceeds the gas price"
+        else:
+            payback_context = "HN has lower capex and the modeled tariff does not exceed the gas price"
+
+        return (
+            f"{payback_context} (HN GBP {hn_tariff:.4f}/kWh vs gas GBP {gas_price:.4f}/kWh); "
+            f"its main advantage is carbon reduction (HN {hn_carbon:.3f} vs gas {gas_carbon:.3f} kgCO2/kWh)."
+        )
+
     def load_results(self, path: Optional[Path] = None) -> pd.DataFrame:
         results_path = path or (self.outputs_dir / "pathway_results_by_property.parquet")
         logger.info(f"Loading pathway results from {results_path}")
@@ -110,11 +136,13 @@ class ComparisonReporter:
 
     def _comparison_rows(self, comparisons: List[ComparisonResult]) -> pd.DataFrame:
         records = []
+
         for comp in comparisons:
             row = {
                 'pathway_id': comp.pathway_id,
                 'pathway_name': comp.pathway_name,
                 'n_homes': comp.n_homes,
+                'payback_note': self._payback_note(comp.pathway_id),
             }
             for metric, stats in comp.stats.items():
                 for stat_name, value in stats.items():
@@ -148,6 +176,9 @@ class ComparisonReporter:
             f"- HN connection cost assumption: £{connection_cost:,.0f} per home (sensitivity available via CLI).",
             "", "## Scenario ranges (p10–p90)",
         ]
+
+        lines.insert(-1, f"**Payback note:** {self._payback_note('fabric_plus_hn_only')}")
+        lines.insert(-1, "")
 
         for comp in comparisons:
             lines.append(f"- **{comp.pathway_name}**: capex {self._format_range(comp.stats['capex'])} £, "
@@ -218,6 +249,7 @@ class ComparisonReporter:
         self._warn_if_hybrid_equals_fabric(results_df)
 
         scenario_ids = [
+            'fabric_only',
             'fabric_plus_hp_only',
             'fabric_plus_hn_only',
             'fabric_plus_hp_plus_hn',

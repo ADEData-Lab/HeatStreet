@@ -254,10 +254,40 @@ def test_one_stop_report_embeds_integrated_tables(tmp_path):
                 "pathway_name": "Heat Pump",
                 "n_homes": 10,
                 "capex_mean": 10000,
+                "capex_p10": 8000,
+                "capex_p90": 12000,
+                "capex_median": 10000,
                 "bill_saving_mean": 250,
                 "co2_saving_mean": 1.2,
                 "payback_mean": 18,
-            }
+                "payback_note": "HP comparison note",
+            },
+            {
+                "pathway_id": "fabric_plus_hn_only",
+                "pathway_name": "Heat Network",
+                "n_homes": 8,
+                "capex_mean": 9000,
+                "capex_p10": 7000,
+                "capex_p90": 11000,
+                "capex_median": 9000,
+                "bill_saving_mean": 180,
+                "co2_saving_mean": 0.9,
+                "payback_mean": 22,
+                "payback_note": "HN has lower capex but longer payback when tariff exceeds gas.",
+            },
+            {
+                "pathway_id": "fabric_plus_hp_plus_hn",
+                "pathway_name": "Hybrid",
+                "n_homes": 12,
+                "capex_mean": 9500,
+                "capex_p10": 7500,
+                "capex_p90": 11500,
+                "capex_median": 9500,
+                "bill_saving_mean": 220,
+                "co2_saving_mean": 1.0,
+                "payback_mean": 20,
+                "payback_note": "Hybrid note",
+            },
         ]
     ).to_csv(output_dir / "comparisons" / "hn_vs_hp_comparison.csv", index=False)
     pd.DataFrame(
@@ -284,6 +314,13 @@ def test_one_stop_report_embeds_integrated_tables(tmp_path):
     section_11 = payload["sections"]["section_11"]
 
     assert section_7["tables"][0]["caption"] == "Heat Network vs Heat Pump Comparison"
+    envelope_tables = [table for table in section_7["tables"] if table["caption"] == "Retrofit Cost Envelopes"]
+    assert envelope_tables
+    envelope_rows = envelope_tables[0]["data"]
+    envelope_ids = {row["pathway_id"] for row in envelope_rows}
+    assert {"fabric_plus_hp_only", "fabric_plus_hn_only", "fabric_plus_hp_plus_hn"}.issubset(envelope_ids)
+    assert all({"capex_p10", "capex_p90", "capex_median"}.issubset(row) for row in envelope_rows)
+    assert any(dp["key"].endswith("_payback_note") for dp in section_7["datapoints"])
     assert any(table["caption"] == "Borough Priority Ranking" for table in section_10["tables"])
     assert any(table["caption"] == "Tenure Segmentation" for table in section_10["tables"])
     assert any(table["caption"] == "Heat Network Connection Thresholds" for table in section_10["tables"])

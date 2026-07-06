@@ -2,205 +2,199 @@
   "epcBandData": [
     {
       "band": "A",
-      "count": 34,
+      "count": 36,
       "percentage": 0.02,
       "color": "#1a472a"
     },
     {
       "band": "B",
-      "count": 522,
+      "count": 585,
       "percentage": 0.32,
       "color": "#2d6a4f"
     },
     {
       "band": "C",
-      "count": 36759,
-      "percentage": 22.32,
+      "count": 39473,
+      "percentage": 21.67,
       "color": "#40916c"
     },
     {
       "band": "D",
-      "count": 101746,
-      "percentage": 61.79,
+      "count": 111735,
+      "percentage": 61.33,
       "color": "#f4a261"
     },
     {
       "band": "E",
-      "count": 22233,
-      "percentage": 13.5,
+      "count": 26301,
+      "percentage": 14.44,
       "color": "#e76f51"
     },
     {
       "band": "F",
-      "count": 2214,
-      "percentage": 1.34,
+      "count": 2746,
+      "percentage": 1.51,
       "color": "#d62828"
     },
     {
       "band": "G",
-      "count": 1151,
-      "percentage": 0.7,
+      "count": 1308,
+      "percentage": 0.72,
       "color": "#9d0208"
     }
   ],
   "epcComparisonData": [
     {
       "band": "A",
-      "shakespeareCrescent": 0.0,
+      "shakespeareCrescent": 0,
       "londonAverage": 0.02
     },
     {
       "band": "B",
-      "shakespeareCrescent": 0.0,
+      "shakespeareCrescent": 0,
       "londonAverage": 0.32
     },
     {
       "band": "C",
-      "shakespeareCrescent": 26.32,
-      "londonAverage": 22.32
+      "shakespeareCrescent": 27.16,
+      "londonAverage": 21.67
     },
     {
       "band": "D",
-      "shakespeareCrescent": 60.53,
-      "londonAverage": 61.79
+      "shakespeareCrescent": 60.49,
+      "londonAverage": 61.33
     },
     {
       "band": "E",
-      "shakespeareCrescent": 11.84,
-      "londonAverage": 13.5
+      "shakespeareCrescent": 11.11,
+      "londonAverage": 14.44
     },
     {
       "band": "F",
-      "shakespeareCrescent": 1.32,
-      "londonAverage": 1.34
+      "shakespeareCrescent": 1.23,
+      "londonAverage": 1.51
     },
     {
       "band": "G",
-      "shakespeareCrescent": 0.0,
-      "londonAverage": 0.7
+      "shakespeareCrescent": 0,
+      "londonAverage": 0.72
     }
   ],
   "wallTypeData": [
     {
       "type": "Solid_Brick",
-      "count": 161890,
+      "count": 179131,
       "percentage": 98.32,
       "insulated": 0.0
     },
     {
       "type": "Cavity",
-      "count": 2330,
-      "percentage": 1.42,
+      "count": 2558,
+      "percentage": 1.4,
       "insulated": 0.0
     },
     {
       "type": "Timber_Frame",
-      "count": 126,
+      "count": 139,
       "percentage": 0.08,
       "insulated": 0.0
     },
     {
       "type": "System_Built",
-      "count": 123,
+      "count": 135,
       "percentage": 0.07,
       "insulated": 0.0
     },
     {
       "type": "Stone",
-      "count": 115,
+      "count": 130,
       "percentage": 0.07,
       "insulated": 0.0
     },
     {
       "type": "Other",
-      "count": 75,
+      "count": 91,
       "percentage": 0.05,
-      "insulated": 0.0
-    },
-    {
-      "type": "Unknown",
-      "count": 0,
-      "percentage": 0.0,
       "insulated": 0.0
     }
   ],
   "heatingSystemData": [
     {
       "name": "Gas Boiler",
-      "value": 97.0,
-      "count": 159724
+      "value": 97.01,
+      "count": 176740
     },
     {
       "name": "Electric",
-      "value": 1.98,
-      "count": 3257
+      "value": 1.97,
+      "count": 3581
     },
     {
       "name": "Other",
-      "value": 0.7,
-      "count": 1145
+      "value": 0.71,
+      "count": 1286
     },
     {
       "name": "Heat Pump",
       "value": 0.25,
-      "count": 418
+      "count": 456
     },
     {
       "name": "District/Communal/Heat Network",
       "value": 0.07,
-      "count": 115
+      "count": 121
     }
   ],
   "glazingData": [
     {
       "type": "Double",
-      "count": 148553,
-      "share": 9021.86,
-      "percentage": 9021.86,
+      "count": 164098,
+      "share": 9007.27,
+      "percentage": 9007.27,
       "uValue": 2.0
     },
     {
       "type": "Single",
-      "count": 12454,
-      "share": 756.35,
-      "percentage": 756.35,
+      "count": 13944,
+      "share": 765.38,
+      "percentage": 765.38,
       "uValue": 4.8
     },
     {
       "type": "Unknown",
-      "count": 3335,
-      "share": 202.54,
-      "percentage": 202.54,
+      "count": 3812,
+      "share": 209.24,
+      "percentage": 209.24,
       "uValue": 2.8
     },
     {
       "type": "Triple",
-      "count": 317,
-      "share": 19.25,
-      "percentage": 19.25,
+      "count": 330,
+      "share": 18.11,
+      "percentage": 18.11,
       "uValue": 1.0
     }
   ],
   "loftInsulationData": [
     {
       "thickness": "Very Poor",
-      "properties": 65313
+      "properties": 71222
     },
     {
       "thickness": "Average",
-      "properties": 42000
+      "properties": 46802
     },
     {
       "thickness": "Good",
-      "properties": 41945
+      "properties": 46043
     },
     {
       "thickness": "Very Good",
-      "properties": 8602
+      "properties": 9561
     },
     {
       "thickness": "Poor",
-      "properties": 5981
+      "properties": 7565
     }
   ],
   "scenarioData": [
@@ -224,254 +218,254 @@
     },
     {
       "scenario": "Fabric improvements only",
-      "capitalCost": 3668305125.0,
-      "costPerProperty": 22278.193873398963,
-      "co2Reduction": 288775536.63120854,
-      "billSavings": 98467723.96605143,
-      "paybackYears": 39.836056912358956,
-      "ashpReady": 37363,
+      "capitalCost": 4058019248.0,
+      "costPerProperty": 22274.28999253502,
+      "co2Reduction": 319538478.76659715,
+      "billSavings": 108957382.92369215,
+      "paybackYears": 39.8181805233805,
+      "ashpReady": 40156,
       "ashpFabricAssist": 0,
-      "ashpIneligible": 127110,
-      "hnReady": 61610,
+      "ashpIneligible": 141793,
+      "hnReady": 78123,
       "hnAssignments": 0,
       "ashpAssignments": 0,
-      "baselineBill": 214257183.12585598,
-      "postMeasureBill": 115789459.15980455,
-      "baselineCo2": 628350392.8210199,
-      "postMeasureCo2": 339574856.1898114
+      "baselineBill": 237630456.530688,
+      "postMeasureBill": 128673073.60699582,
+      "baselineCo2": 696897011.9409599,
+      "postMeasureCo2": 377358533.1743628
     },
     {
       "scenario": "Fabric bundle to tipping point",
-      "capitalCost": 2601471515.0,
-      "costPerProperty": 15799.145597871966,
-      "co2Reduction": 262523215.11928046,
-      "billSavings": 89516112.69641039,
-      "paybackYears": 31.053092993832866,
-      "ashpReady": 37363,
+      "capitalCost": 2877750058.0,
+      "costPerProperty": 15795.844080709612,
+      "co2Reduction": 290489526.15145195,
+      "billSavings": 99052166.2942656,
+      "paybackYears": 31.04016260817969,
+      "ashpReady": 40156,
       "ashpFabricAssist": 0,
-      "ashpIneligible": 127110,
-      "hnReady": 61610,
+      "ashpIneligible": 141793,
+      "hnReady": 78123,
       "hnAssignments": 0,
       "ashpAssignments": 0,
-      "baselineBill": 214257183.12585598,
-      "postMeasureBill": 124741070.4294456,
-      "baselineCo2": 628350392.8210199,
-      "postMeasureCo2": 365827177.7017395
+      "baselineBill": 237630456.530688,
+      "postMeasureBill": 138578290.2364224,
+      "baselineCo2": 696897011.9409599,
+      "postMeasureCo2": 406407485.789508
     },
     {
       "scenario": "Minimum fabric + ASHP",
-      "capitalCost": 3117237415.0,
-      "costPerProperty": 18931.473013925748,
-      "co2Reduction": 296390036.37808925,
-      "billSavings": 87333065.2235774,
-      "paybackYears": 39.23246250047953,
-      "ashpReady": 37363,
-      "ashpFabricAssist": 186,
-      "ashpIneligible": 127110,
-      "hnReady": 61610,
+      "capitalCost": 3433013158.0,
+      "costPerProperty": 18843.658927238397,
+      "co2Reduction": 326820386.4223577,
+      "billSavings": 96706618.46720822,
+      "paybackYears": 38.993573422039965,
+      "ashpReady": 40156,
+      "ashpFabricAssist": 235,
+      "ashpIneligible": 141793,
+      "hnReady": 78123,
       "hnAssignments": 0,
       "ashpAssignments": 0,
-      "baselineBill": 214257183.12585598,
-      "postMeasureBill": 126924117.90227859,
-      "baselineCo2": 628350392.8210199,
-      "postMeasureCo2": 331960356.44293076
+      "baselineBill": 237630456.530688,
+      "postMeasureBill": 140923838.06347978,
+      "baselineCo2": 696897011.9409599,
+      "postMeasureCo2": 370076625.5186023
     },
     {
       "scenario": "Heat pump pathway (full deployment)",
-      "capitalCost": 4184180800.0,
-      "costPerProperty": 25411.187970290113,
-      "co2Reduction": 320046736.95324445,
-      "billSavings": 96648666.52382465,
-      "paybackYears": 46.800824799973334,
-      "ashpReady": 37363,
-      "ashpFabricAssist": 186,
-      "ashpIneligible": 127110,
-      "hnReady": 61610,
+      "capitalCost": 4613420573.0,
+      "costPerProperty": 25322.863550037324,
+      "co2Reduction": 353087852.7186425,
+      "billSavings": 107004313.37467863,
+      "paybackYears": 46.5628352802241,
+      "ashpReady": 40156,
+      "ashpFabricAssist": 235,
+      "ashpIneligible": 141793,
+      "hnReady": 78123,
       "hnAssignments": 0,
       "ashpAssignments": 0,
-      "baselineBill": 214257183.12585598,
-      "postMeasureBill": 117608516.60203135,
-      "baselineCo2": 628350392.8210199,
-      "postMeasureCo2": 308303655.86777556
+      "baselineBill": 237630456.530688,
+      "postMeasureBill": 130626143.15600936,
+      "baselineCo2": 696897011.9409599,
+      "postMeasureCo2": 343809159.22231746
     },
     {
       "scenario": "Heat network pathway (full deployment)",
-      "capitalCost": 3376606015.0,
-      "costPerProperty": 20506.659308024464,
-      "co2Reduction": 425468459.54065025,
-      "billSavings": 47153903.023504645,
-      "paybackYears": 73.98417652627143,
-      "ashpReady": 37363,
+      "capitalCost": 3734582558.0,
+      "costPerProperty": 20498.960161155755,
+      "co2Reduction": 471509885.33492684,
+      "billSavings": 51990821.00599906,
+      "paybackYears": 74.07471321644542,
+      "ashpReady": 40156,
       "ashpFabricAssist": 0,
-      "ashpIneligible": 127110,
-      "hnReady": 61610,
+      "ashpIneligible": 141793,
+      "hnReady": 78123,
       "hnAssignments": 0,
       "ashpAssignments": 0,
-      "baselineBill": 214257183.12585598,
-      "postMeasureBill": 167103280.10235134,
-      "baselineCo2": 628350392.8210199,
-      "postMeasureCo2": 202881933.28036964
+      "baselineBill": 237630456.530688,
+      "postMeasureBill": 185639635.5246889,
+      "baselineCo2": 696897011.9409599,
+      "postMeasureCo2": 225387126.60603315
     },
     {
       "scenario": "Hybrid (spatial mix: Heat Pumps + Heat Networks)",
-      "capitalCost": 3210929315.0,
-      "costPerProperty": 19500.478655888837,
-      "co2Reduction": 344939129.75386685,
-      "billSavings": 72090473.40959743,
-      "paybackYears": 51.84881085604973,
-      "ashpReady": 37363,
-      "ashpFabricAssist": 112,
-      "ashpIneligible": 127110,
-      "hnReady": 61610,
-      "hnAssignments": 61610,
-      "ashpAssignments": 103049,
-      "baselineBill": 214257183.12585598,
-      "postMeasureBill": 142166709.71625856,
-      "baselineCo2": 628350392.8210199,
-      "postMeasureCo2": 283411263.06715316
+      "capitalCost": 3557900558.0,
+      "costPerProperty": 19529.160398278662,
+      "co2Reduction": 388991112.86875784,
+      "billSavings": 77338439.90844528,
+      "paybackYears": 53.5995395237031,
+      "ashpReady": 40156,
+      "ashpFabricAssist": 123,
+      "ashpIneligible": 141793,
+      "hnReady": 78123,
+      "hnAssignments": 78123,
+      "ashpAssignments": 104061,
+      "baselineBill": 237630456.530688,
+      "postMeasureBill": 160292016.62224272,
+      "baselineCo2": 696897011.9409599,
+      "postMeasureCo2": 307905899.07220215
     }
   ],
   "tierData": [
     {
       "tier": "Tier 1: Adjacent to existing network",
-      "properties": 3067,
+      "properties": 3384,
       "percentage": 1.9,
       "recommendation": "District Heating (existing network connection)"
     },
     {
       "tier": "Tier 2: Near planned network (proxy)",
-      "properties": 18863,
-      "percentage": 11.5,
+      "properties": 20769,
+      "percentage": 11.4,
       "recommendation": "District Heating (planned network)"
     },
     {
       "tier": "Tier 3: High heat density",
-      "properties": 39680,
-      "percentage": 24.1,
+      "properties": 53970,
+      "percentage": 29.6,
       "recommendation": "District Heating (high density justifies extension)"
     },
     {
       "tier": "Tier 4: Medium heat density",
-      "properties": 77452,
-      "percentage": 47.0,
+      "properties": 78461,
+      "percentage": 43.1,
       "recommendation": "Heat Pump (moderate density, network extension marginal)"
     },
     {
       "tier": "Tier 5: Low heat density",
-      "properties": 25597,
-      "percentage": 15.5,
+      "properties": 25600,
+      "percentage": 14.1,
       "recommendation": "Heat Pump (low density, network not viable)"
     }
   ],
   "retrofitReadinessData": [
     {
       "tier": "Tier 1",
-      "properties": 4922,
-      "percentage": 2.99,
-      "avgCost": 1545.1672084518489
+      "properties": 5397,
+      "percentage": 2.96,
+      "avgCost": 1551.6173800259403
     },
     {
       "tier": "Tier 2",
-      "properties": 1783,
-      "percentage": 1.08,
-      "avgCost": 2871.3813796971394
+      "properties": 1917,
+      "percentage": 1.05,
+      "avgCost": 2890.5774647887324
     },
     {
       "tier": "Tier 3",
-      "properties": 75967,
-      "percentage": 46.14,
-      "avgCost": 10572.45156449511
+      "properties": 83433,
+      "percentage": 45.8,
+      "avgCost": 10566.224012081551
     },
     {
       "tier": "Tier 4",
-      "properties": 73812,
-      "percentage": 44.83,
-      "avgCost": 11967.392415867338
+      "properties": 82058,
+      "percentage": 45.04,
+      "avgCost": 11938.385312827511
     },
     {
       "tier": "Tier 5",
-      "properties": 8175,
-      "percentage": 4.96,
-      "avgCost": 17089.419327217125
+      "properties": 9379,
+      "percentage": 5.15,
+      "avgCost": 16964.9254717987
     }
   ],
   "interventionData": [
     {
       "intervention": "Radiator Upsizing",
-      "percentage": 85.86,
-      "count": 141373
+      "percentage": 86.07,
+      "count": 156811
     },
     {
       "intervention": "Loft Insulation",
-      "percentage": 90.32,
-      "count": 148720
+      "percentage": 90.12,
+      "count": 164193
     },
     {
       "intervention": "Wall Insulation",
-      "percentage": 96.67,
-      "count": 159171
+      "percentage": 96.72,
+      "count": 176213
     },
     {
       "intervention": "Glazing Upgrade",
-      "percentage": 7.56,
-      "count": 12454
+      "percentage": 7.65,
+      "count": 13944
     },
     {
       "intervention": "Solid Wall Insulation",
-      "percentage": 95.62,
-      "count": 157453
+      "percentage": 95.67,
+      "count": 174301
     },
     {
       "intervention": "Cavity Wall Insulation",
-      "percentage": 0.78,
-      "count": 1291
+      "percentage": 0.79,
+      "count": 1432
     }
   ],
   "costBenefitTierData": [
     {
       "tier": "Tier 1",
       "tierLabel": "Ready Now",
-      "properties": 4922,
+      "properties": 5397,
       "share": 3.0,
-      "fabricCost": 1545.0,
-      "totalCost": 15351.0,
-      "heatDemand": 95.0,
-      "reduction": 143.0,
+      "fabricCost": 1552.0,
+      "totalCost": 15370.0,
+      "heatDemand": 96.0,
+      "reduction": 144.0,
       "reductionPct": 60,
       "efficiency": 3.9
     },
     {
       "tier": "Tier 2",
       "tierLabel": "Minor Work",
-      "properties": 1783,
+      "properties": 1917,
       "share": 1.1,
-      "fabricCost": 2871.0,
-      "totalCost": 16810.0,
-      "heatDemand": 114.0,
-      "reduction": 124.0,
+      "fabricCost": 2891.0,
+      "totalCost": 16850.0,
+      "heatDemand": 115.0,
+      "reduction": 125.0,
       "reductionPct": 52,
       "efficiency": 3.1
     },
     {
       "tier": "Tier 3",
       "tierLabel": "Moderate Work",
-      "properties": 75967,
-      "share": 46.1,
-      "fabricCost": 10572.0,
-      "totalCost": 24230.0,
-      "heatDemand": 133.0,
-      "reduction": 105.0,
+      "properties": 83433,
+      "share": 45.8,
+      "fabricCost": 10566.0,
+      "totalCost": 24227.0,
+      "heatDemand": 134.0,
+      "reduction": 106.0,
       "reductionPct": 44,
       "efficiency": 1.8
     },
     {
       "tier": "Tier 4",
       "tierLabel": "Major Work",
-      "properties": 73812,
-      "share": 44.8,
-      "fabricCost": 11967.0,
-      "totalCost": 22774.0,
-      "heatDemand": 152.0,
+      "properties": 82058,
+      "share": 45.0,
+      "fabricCost": 11938.0,
+      "totalCost": 22726.0,
+      "heatDemand": 153.0,
       "reduction": 86.0,
       "reductionPct": 36,
       "efficiency": 1.6
@@ -479,179 +473,718 @@
     {
       "tier": "Tier 5",
       "tierLabel": "Extensive Work",
-      "properties": 8175,
-      "share": 5.0,
-      "fabricCost": 17089.0,
-      "totalCost": 32229.0,
-      "heatDemand": 171.0,
+      "properties": 9379,
+      "share": 5.1,
+      "fabricCost": 16965.0,
+      "totalCost": 32108.0,
+      "heatDemand": 173.0,
       "reduction": 67.0,
       "reductionPct": 28,
       "efficiency": 0.9
     }
   ],
-  "boroughData": [],
-  "boroughPriorityData": [],
+  "boroughData": [
+    {
+      "borough": "Newham",
+      "borough_name": "Newham",
+      "code": "E09000025",
+      "count": 15080,
+      "meanEPC": 61.8,
+      "energy": 240.3
+    },
+    {
+      "borough": "Waltham Forest",
+      "borough_name": "Waltham Forest",
+      "code": "E09000031",
+      "count": 13251,
+      "meanEPC": 62.5,
+      "energy": 234.3
+    },
+    {
+      "borough": "Wandsworth",
+      "borough_name": "Wandsworth",
+      "code": "E09000032",
+      "count": 11742,
+      "meanEPC": 62.0,
+      "energy": 221.9
+    },
+    {
+      "borough": "Croydon",
+      "borough_name": "Croydon",
+      "code": "E09000008",
+      "count": 9932,
+      "meanEPC": 61.2,
+      "energy": 253.3
+    },
+    {
+      "borough": "Haringey",
+      "borough_name": "Haringey",
+      "code": "E09000014",
+      "count": 9743,
+      "meanEPC": 61.6,
+      "energy": 240.4
+    },
+    {
+      "borough": "Enfield",
+      "borough_name": "Enfield",
+      "code": "E09000010",
+      "count": 8161,
+      "meanEPC": 60.8,
+      "energy": 256.0
+    },
+    {
+      "borough": "Lewisham",
+      "borough_name": "Lewisham",
+      "code": "E09000023",
+      "count": 8144,
+      "meanEPC": 61.4,
+      "energy": 232.6
+    },
+    {
+      "borough": "Redbridge",
+      "borough_name": "Redbridge",
+      "code": "E09000026",
+      "count": 8125,
+      "meanEPC": 61.6,
+      "energy": 238.9
+    },
+    {
+      "borough": "Ealing",
+      "borough_name": "Ealing",
+      "code": "E09000009",
+      "count": 7164,
+      "meanEPC": 61.7,
+      "energy": 240.7
+    },
+    {
+      "borough": "Greenwich",
+      "borough_name": "Greenwich",
+      "code": "E09000011",
+      "count": 7158,
+      "meanEPC": 61.1,
+      "energy": 248.9
+    },
+    {
+      "borough": "Hammersmith and Fulham",
+      "borough_name": "Hammersmith and Fulham",
+      "code": "E09000013",
+      "count": 7157,
+      "meanEPC": 61.8,
+      "energy": 221.4
+    },
+    {
+      "borough": "Merton",
+      "borough_name": "Merton",
+      "code": "E09000024",
+      "count": 6864,
+      "meanEPC": 62.7,
+      "energy": 228.7
+    },
+    {
+      "borough": "Lambeth",
+      "borough_name": "Lambeth",
+      "code": "E09000022",
+      "count": 6537,
+      "meanEPC": 60.3,
+      "energy": 233.3
+    },
+    {
+      "borough": "Richmond upon Thames",
+      "borough_name": "Richmond upon Thames",
+      "code": "E09000027",
+      "count": 6139,
+      "meanEPC": 61.5,
+      "energy": 237.2
+    },
+    {
+      "borough": "Southwark",
+      "borough_name": "Southwark",
+      "code": "E09000028",
+      "count": 4699,
+      "meanEPC": 60.8,
+      "energy": 229.4
+    },
+    {
+      "borough": "Barnet",
+      "borough_name": "Barnet",
+      "code": "E09000003",
+      "count": 4626,
+      "meanEPC": 60.8,
+      "energy": 265.8
+    },
+    {
+      "borough": "Brent",
+      "borough_name": "Brent",
+      "code": "E09000005",
+      "count": 4406,
+      "meanEPC": 61.6,
+      "energy": 237.1
+    },
+    {
+      "borough": "Hackney",
+      "borough_name": "Hackney",
+      "code": "E09000012",
+      "count": 4353,
+      "meanEPC": 60.9,
+      "energy": 229.3
+    },
+    {
+      "borough": "Kensington and Chelsea",
+      "borough_name": "Kensington and Chelsea",
+      "code": "E09000020",
+      "count": 3949,
+      "meanEPC": 59.6,
+      "energy": 229.9
+    },
+    {
+      "borough": "Bromley",
+      "borough_name": "Bromley",
+      "code": "E09000006",
+      "count": 3944,
+      "meanEPC": 60.1,
+      "energy": 262.2
+    },
+    {
+      "borough": "Barking and Dagenham",
+      "borough_name": "Barking and Dagenham",
+      "code": "E09000002",
+      "count": 3720,
+      "meanEPC": 63.0,
+      "energy": 239.7
+    },
+    {
+      "borough": "Islington",
+      "borough_name": "Islington",
+      "code": "E09000019",
+      "count": 3604,
+      "meanEPC": 60.2,
+      "energy": 233.8
+    },
+    {
+      "borough": "Hounslow",
+      "borough_name": "Hounslow",
+      "code": "E09000018",
+      "count": 3590,
+      "meanEPC": 61.7,
+      "energy": 241.3
+    },
+    {
+      "borough": "Westminster",
+      "borough_name": "Westminster",
+      "code": "E09000033",
+      "count": 3431,
+      "meanEPC": 60.8,
+      "energy": 236.4
+    },
+    {
+      "borough": "Bexley",
+      "borough_name": "Bexley",
+      "code": "E09000004",
+      "count": 3142,
+      "meanEPC": 60.9,
+      "energy": 262.7
+    },
+    {
+      "borough": "Camden",
+      "borough_name": "Camden",
+      "code": "E09000007",
+      "count": 2199,
+      "meanEPC": 59.5,
+      "energy": 243.1
+    },
+    {
+      "borough": "Tower Hamlets",
+      "borough_name": "Tower Hamlets",
+      "code": "E09000030",
+      "count": 2092,
+      "meanEPC": 60.7,
+      "energy": 238.9
+    },
+    {
+      "borough": "Sutton",
+      "borough_name": "Sutton",
+      "code": "E09000029",
+      "count": 2090,
+      "meanEPC": 61.7,
+      "energy": 251.9
+    },
+    {
+      "borough": "Harrow",
+      "borough_name": "Harrow",
+      "code": "E09000015",
+      "count": 1996,
+      "meanEPC": 61.2,
+      "energy": 260.4
+    },
+    {
+      "borough": "Hillingdon",
+      "borough_name": "Hillingdon",
+      "code": "E09000017",
+      "count": 1937,
+      "meanEPC": 61.7,
+      "energy": 262.6
+    },
+    {
+      "borough": "Kingston upon Thames",
+      "borough_name": "Kingston upon Thames",
+      "code": "E09000021",
+      "count": 1696,
+      "meanEPC": 61.9,
+      "energy": 244.8
+    },
+    {
+      "borough": "Havering",
+      "borough_name": "Havering",
+      "code": "E09000016",
+      "count": 1502,
+      "meanEPC": 60.8,
+      "energy": 265.5
+    },
+    {
+      "borough": "City of London",
+      "borough_name": "City of London",
+      "code": "E09000001",
+      "count": 11,
+      "meanEPC": 61.1,
+      "energy": 260.0
+    }
+  ],
+  "boroughPriorityData": [
+    {
+      "borough": "Bromley",
+      "rank": 1,
+      "propertyCount": 3944,
+      "meanEPC": 60.1,
+      "energyIntensity": 262.22,
+      "priorityScore": 0.6685
+    },
+    {
+      "borough": "Enfield",
+      "rank": 2,
+      "propertyCount": 8161,
+      "meanEPC": 60.81,
+      "energyIntensity": 255.97,
+      "priorityScore": 0.6473
+    },
+    {
+      "borough": "Barnet",
+      "rank": 3,
+      "propertyCount": 4626,
+      "meanEPC": 60.85,
+      "energyIntensity": 265.83,
+      "priorityScore": 0.6393
+    },
+    {
+      "borough": "Croydon",
+      "rank": 4,
+      "propertyCount": 9932,
+      "meanEPC": 61.24,
+      "energyIntensity": 253.27,
+      "priorityScore": 0.625
+    },
+    {
+      "borough": "Newham",
+      "rank": 5,
+      "propertyCount": 15080,
+      "meanEPC": 61.78,
+      "energyIntensity": 240.32,
+      "priorityScore": 0.5912
+    },
+    {
+      "borough": "Bexley",
+      "rank": 6,
+      "propertyCount": 3142,
+      "meanEPC": 60.9,
+      "energyIntensity": 262.69,
+      "priorityScore": 0.5777
+    },
+    {
+      "borough": "Havering",
+      "rank": 7,
+      "propertyCount": 1502,
+      "meanEPC": 60.76,
+      "energyIntensity": 265.45,
+      "priorityScore": 0.5755
+    },
+    {
+      "borough": "Greenwich",
+      "rank": 8,
+      "propertyCount": 7158,
+      "meanEPC": 61.08,
+      "energyIntensity": 248.89,
+      "priorityScore": 0.5463
+    },
+    {
+      "borough": "Camden",
+      "rank": 9,
+      "propertyCount": 2199,
+      "meanEPC": 59.49,
+      "energyIntensity": 243.12,
+      "priorityScore": 0.5448
+    },
+    {
+      "borough": "Harrow",
+      "rank": 10,
+      "propertyCount": 1996,
+      "meanEPC": 61.17,
+      "energyIntensity": 260.45,
+      "priorityScore": 0.5106
+    },
+    {
+      "borough": "Haringey",
+      "rank": 11,
+      "propertyCount": 9743,
+      "meanEPC": 61.57,
+      "energyIntensity": 240.42,
+      "priorityScore": 0.4933
+    },
+    {
+      "borough": "Lambeth",
+      "rank": 12,
+      "propertyCount": 6537,
+      "meanEPC": 60.29,
+      "energyIntensity": 233.33,
+      "priorityScore": 0.4908
+    },
+    {
+      "borough": "Hillingdon",
+      "rank": 13,
+      "propertyCount": 1937,
+      "meanEPC": 61.66,
+      "energyIntensity": 262.58,
+      "priorityScore": 0.4784
+    },
+    {
+      "borough": "Kensington and Chelsea",
+      "rank": 14,
+      "propertyCount": 3949,
+      "meanEPC": 59.58,
+      "energyIntensity": 229.93,
+      "priorityScore": 0.4762
+    },
+    {
+      "borough": "City of London",
+      "rank": 15,
+      "propertyCount": 11,
+      "meanEPC": 61.09,
+      "energyIntensity": 260.0,
+      "priorityScore": 0.4705
+    },
+    {
+      "borough": "Redbridge",
+      "rank": 16,
+      "propertyCount": 8125,
+      "meanEPC": 61.62,
+      "energyIntensity": 238.89,
+      "priorityScore": 0.4412
+    },
+    {
+      "borough": "Islington",
+      "rank": 17,
+      "propertyCount": 3604,
+      "meanEPC": 60.19,
+      "energyIntensity": 233.81,
+      "priorityScore": 0.4389
+    },
+    {
+      "borough": "Waltham Forest",
+      "rank": 18,
+      "propertyCount": 13251,
+      "meanEPC": 62.48,
+      "energyIntensity": 234.26,
+      "priorityScore": 0.4381
+    },
+    {
+      "borough": "Ealing",
+      "rank": 19,
+      "propertyCount": 7164,
+      "meanEPC": 61.66,
+      "energyIntensity": 240.75,
+      "priorityScore": 0.4299
+    },
+    {
+      "borough": "Lewisham",
+      "rank": 20,
+      "propertyCount": 8144,
+      "meanEPC": 61.38,
+      "energyIntensity": 232.58,
+      "priorityScore": 0.4171
+    },
+    {
+      "borough": "Sutton",
+      "rank": 21,
+      "propertyCount": 2090,
+      "meanEPC": 61.67,
+      "energyIntensity": 251.9,
+      "priorityScore": 0.4003
+    },
+    {
+      "borough": "Westminster",
+      "rank": 22,
+      "propertyCount": 3431,
+      "meanEPC": 60.78,
+      "energyIntensity": 236.36,
+      "priorityScore": 0.3982
+    },
+    {
+      "borough": "Richmond upon Thames",
+      "rank": 23,
+      "propertyCount": 6139,
+      "meanEPC": 61.54,
+      "energyIntensity": 237.21,
+      "priorityScore": 0.3927
+    },
+    {
+      "borough": "Tower Hamlets",
+      "rank": 24,
+      "propertyCount": 2092,
+      "meanEPC": 60.75,
+      "energyIntensity": 238.9,
+      "priorityScore": 0.391
+    },
+    {
+      "borough": "Southwark",
+      "rank": 25,
+      "propertyCount": 4699,
+      "meanEPC": 60.79,
+      "energyIntensity": 229.44,
+      "priorityScore": 0.3741
+    },
+    {
+      "borough": "Wandsworth",
+      "rank": 26,
+      "propertyCount": 11742,
+      "meanEPC": 61.95,
+      "energyIntensity": 221.93,
+      "priorityScore": 0.3626
+    },
+    {
+      "borough": "Hounslow",
+      "rank": 27,
+      "propertyCount": 3590,
+      "meanEPC": 61.65,
+      "energyIntensity": 241.32,
+      "priorityScore": 0.3565
+    },
+    {
+      "borough": "Hackney",
+      "rank": 28,
+      "propertyCount": 4353,
+      "meanEPC": 60.92,
+      "energyIntensity": 229.27,
+      "priorityScore": 0.3524
+    },
+    {
+      "borough": "Brent",
+      "rank": 29,
+      "propertyCount": 4406,
+      "meanEPC": 61.6,
+      "energyIntensity": 237.06,
+      "priorityScore": 0.3478
+    },
+    {
+      "borough": "Kingston upon Thames",
+      "rank": 30,
+      "propertyCount": 1696,
+      "meanEPC": 61.86,
+      "energyIntensity": 244.78,
+      "priorityScore": 0.3203
+    },
+    {
+      "borough": "Hammersmith and Fulham",
+      "rank": 31,
+      "propertyCount": 7157,
+      "meanEPC": 61.85,
+      "energyIntensity": 221.37,
+      "priorityScore": 0.2673
+    },
+    {
+      "borough": "Merton",
+      "rank": 32,
+      "propertyCount": 6864,
+      "meanEPC": 62.65,
+      "energyIntensity": 228.75,
+      "priorityScore": 0.2392
+    },
+    {
+      "borough": "Barking and Dagenham",
+      "rank": 33,
+      "propertyCount": 3720,
+      "meanEPC": 62.99,
+      "energyIntensity": 239.69,
+      "priorityScore": 0.2194
+    }
+  ],
   "tenureSegmentationData": [
     {
       "tenureGroup": "owner_occupied",
       "label": "Owner occupied",
-      "propertyCount": 96864,
-      "sharePct": 58.83,
-      "meanSAP": 61.05,
-      "energyIntensity": 239.15,
-      "wallInsulationRatePct": 3.21,
-      "gasBoilerPct": 96.5,
-      "heatPumpPct": 0.36,
+      "propertyCount": 108963,
+      "sharePct": 59.81,
+      "meanSAP": 60.73,
+      "energyIntensity": 241.39,
+      "wallInsulationRatePct": 3.2,
+      "gasBoilerPct": 96.53,
+      "heatPumpPct": 0.35,
       "districtPct": 0.03
     },
     {
       "tenureGroup": "private_rented_sector",
       "label": "Private rented",
-      "propertyCount": 49680,
-      "sharePct": 30.17,
-      "meanSAP": 62.28,
-      "energyIntensity": 237.63,
-      "wallInsulationRatePct": 3.01,
-      "gasBoilerPct": 97.84,
+      "propertyCount": 53055,
+      "sharePct": 29.12,
+      "meanSAP": 62.14,
+      "energyIntensity": 238.38,
+      "wallInsulationRatePct": 3.0,
+      "gasBoilerPct": 97.88,
       "heatPumpPct": 0.11,
       "districtPct": 0.06
     },
     {
       "tenureGroup": "social_affordable",
       "label": "Social / affordable",
-      "propertyCount": 16408,
-      "sharePct": 9.96,
-      "meanSAP": 63.88,
-      "energyIntensity": 232.21,
-      "wallInsulationRatePct": 12.94,
+      "propertyCount": 18069,
+      "sharePct": 9.92,
+      "meanSAP": 63.69,
+      "energyIntensity": 233.54,
+      "wallInsulationRatePct": 12.53,
       "gasBoilerPct": 97.87,
       "heatPumpPct": 0.05,
-      "districtPct": 0.32
+      "districtPct": 0.31
     },
     {
       "tenureGroup": "unknown",
       "label": "Unknown",
-      "propertyCount": 1707,
-      "sharePct": 1.04,
-      "meanSAP": 60.2,
-      "energyIntensity": 246.79,
-      "wallInsulationRatePct": 3.1,
-      "gasBoilerPct": 92.44,
-      "heatPumpPct": 0.41,
-      "districtPct": 0.06
+      "propertyCount": 2097,
+      "sharePct": 1.15,
+      "meanSAP": 59.49,
+      "energyIntensity": 249.79,
+      "wallInsulationRatePct": 3.0,
+      "gasBoilerPct": 92.61,
+      "heatPumpPct": 0.38,
+      "districtPct": 0.05
     }
   ],
   "caseStreetData": {
     "summary": {
       "streetName": "Shakespeare Crescent",
-      "propertyCount": 76,
+      "propertyCount": 81,
       "meanSAP": null,
       "modalEpcBand": null,
       "epcBandDistribution": {
-        "D": 46,
-        "C": 20,
+        "D": 49,
+        "C": 22,
         "E": 9,
-        "F": 1,
-        "A": 0,
-        "B": 0,
-        "G": 0
+        "F": 1
       }
     },
     "sample": [
       {
+        "LMK_KEY": "2060-7402-5060-2608-0425",
+        "ADDRESS1": "60 Shakespeare Crescent",
+        "POSTCODE": "E12 6LN",
+        "CURRENT_ENERGY_RATING": "C",
+        "CURRENT_ENERGY_EFFICIENCY": 69,
+        "energy_kwh_per_m2_year": 171.0,
+        "heating_system_type": "Gas Boiler"
+      },
+      {
+        "LMK_KEY": "3635-6729-8509-0980-6226",
         "ADDRESS1": "136 Shakespeare Crescent",
         "POSTCODE": "E12 6NB",
         "CURRENT_ENERGY_RATING": "D",
         "CURRENT_ENERGY_EFFICIENCY": 67,
-        "energy_kwh_per_m2_year": 164,
+        "energy_kwh_per_m2_year": 164.0,
         "heating_system_type": "Gas Boiler"
       },
       {
+        "LMK_KEY": "8690-0200-0622-8224-3053",
         "ADDRESS1": "187 Shakespeare Crescent",
         "POSTCODE": "E12 6NA",
         "CURRENT_ENERGY_RATING": "D",
         "CURRENT_ENERGY_EFFICIENCY": 65,
-        "energy_kwh_per_m2_year": 183,
+        "energy_kwh_per_m2_year": 183.0,
         "heating_system_type": "Gas Boiler"
       },
       {
+        "LMK_KEY": "4300-0767-0522-8596-3853",
         "ADDRESS1": "39 Shakespeare Crescent",
         "POSTCODE": "E12 6LL",
         "CURRENT_ENERGY_RATING": "D",
         "CURRENT_ENERGY_EFFICIENCY": 68,
-        "energy_kwh_per_m2_year": 182,
+        "energy_kwh_per_m2_year": 182.0,
         "heating_system_type": "Gas Boiler"
       },
       {
+        "LMK_KEY": "0235-0204-5705-6901-6104",
         "ADDRESS1": "146 Shakespeare Crescent",
         "POSTCODE": "E12 6NB",
         "CURRENT_ENERGY_RATING": "D",
         "CURRENT_ENERGY_EFFICIENCY": 61,
-        "energy_kwh_per_m2_year": 211,
+        "energy_kwh_per_m2_year": 211.0,
         "heating_system_type": "Gas Boiler"
       },
       {
+        "LMK_KEY": "2288-2684-1153-8489-9631",
         "ADDRESS1": "130 Shakespeare Crescent",
         "POSTCODE": "E12 6LP",
         "CURRENT_ENERGY_RATING": "D",
         "CURRENT_ENERGY_EFFICIENCY": 66,
-        "energy_kwh_per_m2_year": 206,
+        "energy_kwh_per_m2_year": 206.0,
         "heating_system_type": "Gas Boiler"
       },
       {
+        "LMK_KEY": "9202-3049-0204-2025-0204",
         "ADDRESS1": "127 Shakespeare Crescent",
         "POSTCODE": "E12 6LW",
         "CURRENT_ENERGY_RATING": "C",
         "CURRENT_ENERGY_EFFICIENCY": 73,
-        "energy_kwh_per_m2_year": 151,
+        "energy_kwh_per_m2_year": 151.0,
         "heating_system_type": "Gas Boiler"
       },
       {
+        "LMK_KEY": "0667-3046-0202-0535-5200",
         "ADDRESS1": "207 Shakespeare Crescent",
         "POSTCODE": "E12 6NA",
         "CURRENT_ENERGY_RATING": "C",
         "CURRENT_ENERGY_EFFICIENCY": 69,
-        "energy_kwh_per_m2_year": 178,
+        "energy_kwh_per_m2_year": 178.0,
         "heating_system_type": "Gas Boiler"
       },
       {
+        "LMK_KEY": "7635-1729-8400-0960-5296",
         "ADDRESS1": "123 Shakespeare Crescent",
         "POSTCODE": "E12 6LW",
         "CURRENT_ENERGY_RATING": "C",
         "CURRENT_ENERGY_EFFICIENCY": 71,
-        "energy_kwh_per_m2_year": 174,
+        "energy_kwh_per_m2_year": 174.0,
         "heating_system_type": "Gas Boiler"
       },
       {
+        "LMK_KEY": "2117-3486-3217-2214-6119",
         "ADDRESS1": "159 Shakespeare Crescent",
         "POSTCODE": "E12 6LW",
         "CURRENT_ENERGY_RATING": "C",
         "CURRENT_ENERGY_EFFICIENCY": 69,
-        "energy_kwh_per_m2_year": 181,
+        "energy_kwh_per_m2_year": 181.0,
         "heating_system_type": "Gas Boiler"
       },
       {
+        "LMK_KEY": "3305-5654-6002-0099-4796",
         "ADDRESS1": "6 Shakespeare Crescent",
         "POSTCODE": "E12 6LN",
         "CURRENT_ENERGY_RATING": "C",
         "CURRENT_ENERGY_EFFICIENCY": 69,
-        "energy_kwh_per_m2_year": 185,
+        "energy_kwh_per_m2_year": 185.0,
         "heating_system_type": "Gas Boiler"
       },
       {
+        "LMK_KEY": "9994-0204-5304-6902-6004",
         "ADDRESS1": "33 Shakespeare Crescent",
         "POSTCODE": "E12 6LL",
         "CURRENT_ENERGY_RATING": "D",
         "CURRENT_ENERGY_EFFICIENCY": 60,
-        "energy_kwh_per_m2_year": 260,
-        "heating_system_type": "Gas Boiler"
-      },
-      {
-        "ADDRESS1": "67 Shakespeare Crescent",
-        "POSTCODE": "E12 6LL",
-        "CURRENT_ENERGY_RATING": "C",
-        "CURRENT_ENERGY_EFFICIENCY": 71,
-        "energy_kwh_per_m2_year": 172,
+        "energy_kwh_per_m2_year": 260.0,
         "heating_system_type": "Gas Boiler"
       }
     ]
@@ -661,63 +1194,63 @@
     {
       "pathwayId": "fabric_plus_hp_only",
       "pathwayName": "Fabric + Heat Pump",
-      "homes": 164659,
-      "capexMean": 27502.13,
-      "billSavingMean": 456.4,
-      "co2SavingMean": 2.7509,
-      "paybackMean": 75.08
+      "homes": 182184,
+      "capexMean": 27492.65,
+      "billSavingMean": 455.49,
+      "co2SavingMean": 2.7557,
+      "paybackMean": 74.83
     },
     {
       "pathwayId": "fabric_plus_hn_only",
       "pathwayName": "Fabric + Heat Network",
-      "homes": 164659,
-      "capexMean": 20502.13,
-      "billSavingMean": 339.04,
-      "co2SavingMean": 2.6479,
-      "paybackMean": 64.89
+      "homes": 182184,
+      "capexMean": 20492.65,
+      "billSavingMean": 339.98,
+      "co2SavingMean": 2.6544,
+      "paybackMean": 64.73
     },
     {
       "pathwayId": "fabric_plus_hp_plus_hn",
       "pathwayName": "Hybrid: Fabric + HP + HN",
-      "homes": 164659,
-      "capexMean": 24882.96,
-      "billSavingMean": 411.11,
-      "co2SavingMean": 2.7111,
-      "paybackMean": 72.57
+      "homes": 182184,
+      "capexMean": 24490.95,
+      "billSavingMean": 404.58,
+      "co2SavingMean": 2.711,
+      "paybackMean": 71.87
     }
   ],
   "confidenceBandsData": [
     {
       "stage": "Baseline",
-      "estimate": 238.08,
-      "lower": 202.37,
-      "upper": 273.79
+      "estimate": 239.83,
+      "lower": 203.86,
+      "upper": 275.81
     },
     {
       "stage": "After Fabric",
-      "estimate": 134.02,
-      "lower": 113.92,
-      "upper": 154.13
+      "estimate": 134.98,
+      "lower": 114.73,
+      "upper": 155.23
     },
     {
       "stage": "Full Retrofit",
-      "estimate": 134.02,
-      "lower": 120.62,
-      "upper": 147.42
+      "estimate": 134.98,
+      "lower": 121.48,
+      "upper": 148.48
     }
   ],
   "sensitivityData": [
     {
       "parameter": "Capital cost per property",
       "lowImpact": 0.0,
-      "highImpact": 25411.19,
-      "range": 25411.19
+      "highImpact": 25322.86,
+      "range": 25322.86
     },
     {
       "parameter": "Payback (years)",
       "lowImpact": 0.0,
-      "highImpact": 43.29,
-      "range": 43.29
+      "highImpact": 43.11,
+      "range": 43.11
     },
     {
       "parameter": "Uptake rate (%)",
@@ -870,18 +1403,18 @@
     }
   ],
   "summaryStats": {
-    "totalProperties": 164659,
-    "meanFabricCost": 11168.084258983718,
-    "meanTotalRetrofitCost": 23628.96571702731,
-    "heatDemandReduction": 43.706451284307214,
-    "readyOrNearReady": 4.072051937640821,
-    "belowBandC": 77.34,
-    "gasBoilerDependency": 97.00289689600933,
-    "meanSAPScore": 61.69383999659903,
-    "dhViableProperties": 61610,
+    "totalProperties": 182184,
+    "meanFabricCost": 11165.860569534098,
+    "meanTotalRetrofitCost": 23616.59828525008,
+    "heatDemandReduction": 43.71855852821836,
+    "readyOrNearReady": 4.0146225793703065,
+    "belowBandC": 77.99,
+    "gasBoilerDependency": 97.01181223378562,
+    "meanSAPScore": 61.41774799104202,
+    "dhViableProperties": 78123,
     "optimalInvestmentPoint": 0.0,
     "costAdvantageDHvsHP": 7000.0,
-    "wallInsulationRate": 3.1,
+    "wallInsulationRate": 3.0,
     "commonEpcBand": "D"
   }
 }

@@ -13,6 +13,7 @@ REPORT_HEADLINE_COLUMNS = [
     "value",
     "unit",
     "source",
+    "definition",
 ]
 
 REQUIRED_BASE_METRIC_KEYS = {

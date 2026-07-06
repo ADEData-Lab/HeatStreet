@@ -60,7 +60,7 @@ BOROUGH_NAME_BY_CODE = {
 import numpy as np
 from loguru import logger
 
-from config.config import DATA_OUTPUTS_DIR, get_scenario_label_map
+from config.config import DATA_OUTPUTS_DIR, get_cost_reduction_levers, get_scenario_label_map
 from src.utils.analysis_logger import convert_to_json_serializable
 from src.utils.run_metadata import get_total_properties_from_metadata
 
@@ -391,6 +391,10 @@ class DashboardDataBuilder:
         total = readiness_summary.get("total_properties", 1)
         pct_map = readiness_summary.get("tier_percentages", {})
         fabric_map = readiness_summary.get("fabric_cost_by_tier", {})
+        system_map = readiness_summary.get("system_cost_by_tier", {})
+        total_map = readiness_summary.get("total_cost_by_tier", {})
+        full_ashp_map = readiness_summary.get("total_cost_full_ashp_by_tier", {})
+        technology_map = readiness_summary.get("system_technology_by_tier", {})
         for tier, count in readiness_summary.get("tier_distribution", {}).items():
             tiers.append(
                 {
@@ -398,6 +402,11 @@ class DashboardDataBuilder:
                     "properties": int(count),
                     "percentage": round(float(pct_map.get(tier, 0)), 2),
                     "avgCost": float(fabric_map.get(tier, 0)),
+                    "fabricCost": float(fabric_map.get(tier, 0)),
+                    "systemCost": float(system_map.get(tier, 0)),
+                    "totalCost": float(total_map.get(tier, 0)),
+                    "totalCostFullAshp": float(full_ashp_map.get(tier, 0)),
+                    "systemTechnology": technology_map.get(tier),
                 }
             )
         return tiers
@@ -577,6 +586,7 @@ class DashboardDataBuilder:
                     "billSavingMean": round(float(row.get("bill_saving_mean", 0)), 2),
                     "co2SavingMean": round(float(row.get("co2_saving_mean", 0)), 4),
                     "paybackMean": round(float(row.get("payback_mean", 0)), 2),
+                    "paybackNote": row.get("payback_note"),
                 }
             )
         return rows
@@ -679,7 +689,9 @@ class DashboardDataBuilder:
                     **({"totalProperties": int(readiness_summary.get("total_properties", 0))}
                        if "totalProperties" not in summary else {}),
                     "meanFabricCost": float(readiness_summary.get("mean_fabric_cost", 0)),
+                    "meanSystemCost": float(readiness_summary.get("mean_system_cost") or 0),
                     "meanTotalRetrofitCost": float(readiness_summary.get("mean_total_retrofit_cost", 0)),
+                    "meanTotalCostFullAshp": float(readiness_summary.get("mean_total_cost_full_ashp") or 0),
                     "heatDemandReduction": float(readiness_summary.get("heat_demand_reduction_percent", 0)),
                     "readyOrNearReady": float(
                         readiness_summary.get("tier_percentages", {}).get(1, 0)
@@ -943,7 +955,10 @@ class DashboardDataBuilder:
         tier_distribution = readiness_summary.get("tier_distribution", {})
         tier_percentages = readiness_summary.get("tier_percentages", {})
         fabric_costs = readiness_summary.get("fabric_cost_by_tier", {})
+        system_costs = readiness_summary.get("system_cost_by_tier", {})
         total_costs = readiness_summary.get("total_cost_by_tier", {})
+        full_ashp_costs = readiness_summary.get("total_cost_full_ashp_by_tier", {})
+        technology_by_tier = readiness_summary.get("system_technology_by_tier", {})
 
         tier_labels = {
             1: "Ready Now",
@@ -959,7 +974,9 @@ class DashboardDataBuilder:
             properties = tier_distribution.get(tier, 0)
             percentage = tier_percentages.get(tier, 0)
             fabric_cost = fabric_costs.get(tier, 0)
+            system_cost = system_costs.get(tier, 0)
             total_cost = total_costs.get(tier, fabric_cost * 3)  # Estimate if not available
+            full_ashp_cost = full_ashp_costs.get(tier, total_cost)
 
             # Estimate heat demand reduction per tier (diminishing returns)
             reduction_pct = max(0, 60 - (tier - 1) * 8)  # Tier 1: 60%, Tier 5: 28%
@@ -974,7 +991,10 @@ class DashboardDataBuilder:
                 "properties": int(properties),
                 "share": round(percentage, 1),
                 "fabricCost": round(fabric_cost, 0),
+                "systemCost": round(system_cost, 0),
                 "totalCost": round(total_cost, 0),
+                "totalCostFullAshp": round(full_ashp_cost, 0),
+                "systemTechnology": technology_by_tier.get(tier),
                 "heatDemand": round(heat_demand, 0),
                 "reduction": round(baseline_demand * reduction_pct / 100, 0),
                 "reductionPct": round(reduction_pct, 1),
@@ -983,16 +1003,33 @@ class DashboardDataBuilder:
 
         return tier_data
 
-    def _format_cost_levers(self) -> List[Dict]:
+    def _format_cost_levers(self) -> Dict:
         """Format cost reduction levers data.
 
         Section 2: Retrofit Measures - cost optimization opportunities.
         """
-        # Based on industry research on heat pump cost reduction opportunities
-        return [
-            {"lever": "Shared ground loops", "impact": 2100, "difficulty": "Medium"},
-            {"lever": "Supply chain optimisation", "impact": 1800, "difficulty": "Low"},
-            {"lever": "Bulk procurement", "impact": 1200, "difficulty": "Low"},
-            {"lever": "Standardised designs", "impact": 800, "difficulty": "Low"},
-            {"lever": "Street-by-street delivery", "impact": 200, "difficulty": "Medium"},
-        ]
+        configured_levers = get_cost_reduction_levers()
+        levers = []
+
+        for lever in configured_levers:
+            impact = float(lever.get("impact_gbp", lever.get("impact", 0)) or 0)
+            levers.append(
+                {
+                    "lever": lever.get("lever"),
+                    "impact_gbp": impact,
+                    "impact": impact,
+                    "difficulty": lever.get("difficulty"),
+                    "source_note": lever.get("source_note"),
+                }
+            )
+
+        total = sum(row["impact_gbp"] for row in levers)
+        return {
+            "levers": levers,
+            "total": total,
+            "conservative_combined_estimate": {
+                "low_gbp": total * 0.5,
+                "high_gbp": total * 0.8,
+            },
+            "note": "Cost reduction levers overlap and should not be treated as fully additive.",
+        }

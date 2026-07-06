@@ -138,13 +138,12 @@ class LondonGISDownloader:
         }
 
     def _fetch_resource_page_html(self, resource_page_url: str) -> str:
-        ssl_context = ssl.create_default_context()
-        request = urllib.request.Request(
-            resource_page_url,
-            headers=self._page_headers(referer=self.GIS_RESOURCE_PAGE_URL),
-        )
-
         try:
+            ssl_context = ssl.create_default_context()
+            request = urllib.request.Request(
+                resource_page_url,
+                headers=self._page_headers(referer=self.GIS_RESOURCE_PAGE_URL),
+            )
             with urllib.request.urlopen(request, context=ssl_context, timeout=60) as response:
                 return response.read().decode("utf-8", errors="replace")
         except urllib.error.HTTPError as e:
@@ -165,13 +164,12 @@ class LondonGISDownloader:
             ) from e
 
     def _download_url_to_path(self, download_url: str, zip_path: Path) -> None:
-        ssl_context = ssl.create_default_context()
-        request = urllib.request.Request(
-            download_url,
-            headers=self._download_headers(referer=self.GIS_RESOURCE_PAGE_URL),
-        )
-
         try:
+            ssl_context = ssl.create_default_context()
+            request = urllib.request.Request(
+                download_url,
+                headers=self._download_headers(referer=self.GIS_RESOURCE_PAGE_URL),
+            )
             with urllib.request.urlopen(request, context=ssl_context, timeout=300) as response, open(zip_path, "wb") as output_file:
                 while True:
                     chunk = response.read(1024 * 1024)

@@ -1,6 +1,7 @@
 import io
 import re
 import shutil
+import ssl
 import urllib.error
 from pathlib import Path
 
@@ -173,3 +174,19 @@ def test_download_gis_data_falls_back_to_direct_url_when_resource_page_fetch_is_
         ).startswith("Mozilla/5.0")
         for entry in requests_seen
     )
+
+
+def test_download_gis_data_handles_ssl_context_creation_failure(monkeypatch, tmp_path):
+    external_dir = _patch_gis_paths(monkeypatch, tmp_path)
+    downloader = LondonGISDownloader()
+
+    monkeypatch.setattr(
+        "ssl.create_default_context",
+        lambda: (_ for _ in ()).throw(ssl.SSLError("[ASN1: NOT_ENOUGH_DATA] not enough data")),
+    )
+
+    assert downloader.download_gis_data(force_redownload=True) is False
+    assert downloader.last_error is not None
+    assert downloader.last_error.failure_kind == "file_download"
+    assert "ASN1" in str(downloader.last_error)
+    assert not (external_dir / "GIS_All_Data.zip").exists()

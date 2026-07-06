@@ -131,6 +131,31 @@ def test_ask_gis_download_warns_optional_london_datastore_layer(monkeypatch):
     assert "resource page" in output
 
 
+def test_ask_gis_download_catches_unexpected_optional_failure(monkeypatch):
+    fake_console = FakeConsole()
+
+    class FakeGISDownloader:
+        def __init__(self):
+            self.last_error = None
+
+        def get_data_summary(self):
+            return {"available": False}
+
+        def download_and_prepare(self):
+            raise RuntimeError("[ASN1: NOT_ENOUGH_DATA] not enough data")
+
+    monkeypatch.setattr(run_analysis, "console", fake_console)
+    monkeypatch.setattr(run_analysis, "LondonGISDownloader", FakeGISDownloader)
+
+    result = run_analysis.ask_gis_download()
+
+    assert result is False
+    output = "\n".join(fake_console.messages)
+    assert "Optional London Datastore GIS download failed" in output
+    assert "this does not affect the EPC API download path" in output
+    assert "ASN1" in output
+
+
 def test_download_data_surfaces_borough_scoped_api_error(monkeypatch):
     sample_start = date_cls(2024, 1, 1)
     sample_end = date_cls(2024, 12, 31)

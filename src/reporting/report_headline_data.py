@@ -31,6 +31,7 @@ def build_report_headline_dataframe(
         scenario: str = "overall",
         unit: Optional[str] = None,
         source: Optional[str] = None,
+        definition: Optional[str] = None,
     ) -> None:
         rows.append(
             {
@@ -40,6 +41,7 @@ def build_report_headline_dataframe(
                 "value": value,
                 "unit": unit,
                 "source": source,
+                "definition": definition,
             }
         )
 
@@ -273,12 +275,20 @@ def build_report_headline_dataframe(
             cost_effective_count = results.get("cost_effective_count")
         annual_co2_reduction_kg = results.get("annual_co2_reduction_kg")
         capital_cost_total = results.get("capital_cost_total")
-        cost_per_tco2_20yr_gbp = None
+        cost_per_tco2_20yr_gbp = results.get("cost_per_tco2_20yr_gbp")
         # Uses total CO2 abatement over the analysis horizon (annual savings × years).
-        if capital_cost_total is not None and annual_co2_reduction_kg:
+        if cost_per_tco2_20yr_gbp is None and capital_cost_total is not None and annual_co2_reduction_kg:
             tco2_over_horizon = (annual_co2_reduction_kg / 1000) * analysis_horizon_years
             if tco2_over_horizon:
                 cost_per_tco2_20yr_gbp = capital_cost_total / tco2_over_horizon
+        cost_per_tco2_definition = results.get("cost_per_tco2_20yr_definition") or (
+            "capital_cost_total / ((annual_co2_reduction_kg / 1000) * "
+            f"{analysis_horizon_years:g} years), using configured analysis_horizon_years"
+        )
+        diagnostic_abatement_definition = (
+            "Diagnostic property-level median carbon abatement cost; headline cost-effectiveness "
+            "uses scenario_cost_per_tco2_20yr_gbp."
+        )
 
         scenario_metrics = [
             (
@@ -331,8 +341,8 @@ def build_report_headline_dataframe(
             ),
             (
                 "scenario_carbon_abatement_cost_median",
-                results.get("carbon_abatement_cost_median"),
-                "Scenario median carbon abatement cost",
+                results.get("carbon_abatement_cost_property_median", results.get("carbon_abatement_cost_median")),
+                "Scenario diagnostic median property carbon abatement cost",
                 "gbp_per_tco2",
             ),
             (
@@ -344,6 +354,11 @@ def build_report_headline_dataframe(
         ]
 
         for metric_key, value, label, unit in scenario_metrics:
+            definition = None
+            if metric_key == "scenario_cost_per_tco2_20yr_gbp":
+                definition = cost_per_tco2_definition
+            elif metric_key == "scenario_carbon_abatement_cost_median":
+                definition = diagnostic_abatement_definition
             add_row(
                 metric_key,
                 value,
@@ -351,6 +366,7 @@ def build_report_headline_dataframe(
                 scenario=scenario_name,
                 unit=unit,
                 source="scenario_results",
+                definition=definition,
             )
 
     dataframe = pd.DataFrame(rows, columns=REPORT_HEADLINE_COLUMNS)

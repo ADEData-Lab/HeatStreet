@@ -876,7 +876,12 @@ class ScenarioModeler:
             'current_annual_energy_kwh': float(total_energy),
             'current_annual_co2_kg': float(total_co2_kg),
             'epc_band_shifts': {},
-            'average_payback_years': 0
+            'average_payback_years': 0,
+            'cost_per_tco2_20yr_gbp': None,
+            'cost_per_tco2_20yr_definition': (
+                "capital_cost_total / ((annual_co2_reduction_kg / 1000) * "
+                f"{self.analysis_horizon_years:g} years), using configured analysis_horizon_years"
+            ),
         }
 
     def _inject_fabric_bundles(self, scenarios: Dict[str, Dict]) -> Dict[str, Dict]:
@@ -1338,6 +1343,17 @@ class ScenarioModeler:
             'pct_not_cost_effective': pct_not_cost_effective,
         }
 
+        tco2_over_horizon = (results['annual_co2_reduction_kg'] / 1000) * self.analysis_horizon_years
+        results['cost_per_tco2_20yr_gbp'] = (
+            results['capital_cost_total'] / tco2_over_horizon
+            if tco2_over_horizon > 0
+            else None
+        )
+        results['cost_per_tco2_20yr_definition'] = (
+            "capital_cost_total / ((annual_co2_reduction_kg / 1000) * "
+            f"{self.analysis_horizon_years:g} years), using configured analysis_horizon_years"
+        )
+
         if {'baseline_energy_kwh', 'post_measure_energy_kwh'}.issubset(numeric_df.columns):
             results['baseline_annual_energy_kwh'] = float(numeric_df['baseline_energy_kwh'].sum())
             results['post_measure_energy_kwh'] = float(numeric_df['post_measure_energy_kwh'].sum())
@@ -1553,10 +1569,16 @@ class ScenarioModeler:
         if 'carbon_abatement_cost' in numeric_df.columns:
             finite_abatement = numeric_df['carbon_abatement_cost'].replace([np.inf, -np.inf], np.nan).dropna()
             if len(finite_abatement) > 0:
-                results['carbon_abatement_cost_mean'] = float(finite_abatement.mean())
-                results['carbon_abatement_cost_median'] = float(finite_abatement.median())
-                results['carbon_abatement_cost_p10'] = float(finite_abatement.quantile(0.10))
-                results['carbon_abatement_cost_p90'] = float(finite_abatement.quantile(0.90))
+                results['carbon_abatement_cost_property_mean'] = float(finite_abatement.mean())
+                results['carbon_abatement_cost_property_median'] = float(finite_abatement.median())
+                results['carbon_abatement_cost_property_p10'] = float(finite_abatement.quantile(0.10))
+                results['carbon_abatement_cost_property_p90'] = float(finite_abatement.quantile(0.90))
+
+                # Deprecated aliases retained for one release.
+                results['carbon_abatement_cost_mean'] = results['carbon_abatement_cost_property_mean']
+                results['carbon_abatement_cost_median'] = results['carbon_abatement_cost_property_median']
+                results['carbon_abatement_cost_p10'] = results['carbon_abatement_cost_property_p10']
+                results['carbon_abatement_cost_p90'] = results['carbon_abatement_cost_property_p90']
 
         # Log tiered cost-effectiveness summary
         if ce_summary:
@@ -1704,6 +1726,12 @@ class ScenarioModeler:
             )
             carbon_abatement_cost = public_expenditure / (total_co2_saved / 1000) if total_co2_saved > 0 else 0  # £/tCO2
 
+            narrative_line = (
+                f"{subsidy_pct}% subsidy: payback {payback_years:.1f} years, "
+                f"uptake {uptake_rate * 100:.1f}%, public spend GBP {public_expenditure:,.0f}, "
+                f"abatement cost GBP {carbon_abatement_cost:,.0f}/tCO2."
+            )
+
             sensitivity_results[f'{subsidy_pct}%'] = {
                 'subsidy_percentage': subsidy_pct,
                 'capital_cost_per_property': capital_cost_per_property,
@@ -1719,7 +1747,8 @@ class ScenarioModeler:
                 'public_expenditure_per_property': public_expenditure / properties_upgraded if properties_upgraded > 0 else 0,
                 'carbon_abatement_cost_per_tonne': carbon_abatement_cost,
                 'cost_uplift_pct': uplift_pct,
-                'cost_uplift_note': uplift_note
+                'cost_uplift_note': uplift_note,
+                'narrative_line': narrative_line,
             }
 
             logger.info(
@@ -1865,9 +1894,9 @@ class ScenarioModeler:
             scenario_label = results.get('scenario_label') or self._get_scenario_label(scenario)
             capital_cost_total = results.get('capital_cost_total')
             annual_co2_reduction_kg = results.get('annual_co2_reduction_kg')
-            cost_per_tco2_20yr_gbp = None
+            cost_per_tco2_20yr_gbp = results.get('cost_per_tco2_20yr_gbp')
             # Uses total CO2 abatement over the analysis horizon (annual savings × years).
-            if capital_cost_total is not None and annual_co2_reduction_kg:
+            if cost_per_tco2_20yr_gbp is None and capital_cost_total is not None and annual_co2_reduction_kg:
                 tco2_over_horizon = (
                     annual_co2_reduction_kg / 1000
                 ) * self.analysis_horizon_years
@@ -1883,6 +1912,7 @@ class ScenarioModeler:
                 'annual_energy_reduction_kwh': results.get('annual_energy_reduction_kwh'),
                 'annual_co2_reduction_kg': results.get('annual_co2_reduction_kg'),
                 'cost_per_tco2_20yr_gbp': cost_per_tco2_20yr_gbp,
+                'cost_per_tco2_20yr_definition': results.get('cost_per_tco2_20yr_definition'),
                 'annual_bill_savings': results.get('annual_bill_savings'),
                 'annual_bill_savings_low': results.get('annual_bill_savings_low'),
                 'annual_bill_savings_high': results.get('annual_bill_savings_high'),
@@ -1908,6 +1938,10 @@ class ScenarioModeler:
                 'marginal_pct': ce_summary.get('marginal_pct'),
                 'not_cost_effective_count': ce_summary.get('not_cost_effective_count'),
                 'not_cost_effective_pct': ce_summary.get('not_cost_effective_pct'),
+                'carbon_abatement_cost_property_mean': results.get('carbon_abatement_cost_property_mean'),
+                'carbon_abatement_cost_property_median': results.get('carbon_abatement_cost_property_median'),
+                'carbon_abatement_cost_property_p10': results.get('carbon_abatement_cost_property_p10'),
+                'carbon_abatement_cost_property_p90': results.get('carbon_abatement_cost_property_p90'),
                 'carbon_abatement_cost_mean': results.get('carbon_abatement_cost_mean'),
                 'carbon_abatement_cost_median': results.get('carbon_abatement_cost_median'),
                 # EPC band metrics

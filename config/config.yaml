@@ -323,6 +323,28 @@ costs:
   # Electrical
   electrical_upgrade: 1500  # 60A -> 100A supply for HP
 
+cost_reduction_levers:
+  - lever: "Shared ground loops"
+    impact_gbp: 2100
+    difficulty: "Medium"
+    source_note: "Existing dashboard lever; impact overlaps with other delivery and procurement effects."
+  - lever: "Supply chain optimisation"
+    impact_gbp: 1800
+    difficulty: "Low"
+    source_note: "Existing dashboard lever; impact overlaps with bulk procurement and standardisation."
+  - lever: "Bulk procurement"
+    impact_gbp: 1200
+    difficulty: "Low"
+    source_note: "Existing dashboard lever; impact overlaps with supply chain optimisation."
+  - lever: "Standardised designs"
+    impact_gbp: 800
+    difficulty: "Low"
+    source_note: "Existing dashboard lever; impact overlaps with street-by-street delivery."
+  - lever: "Street-by-street delivery"
+    impact_gbp: 200
+    difficulty: "Medium"
+    source_note: "Existing dashboard lever; impact overlaps with procurement and installer mobilisation savings."
+
 # Costing rules (uniform basis per m² vs fixed, with caps and rationale)
 cost_rules:
   loft_insulation_topup:

@@ -788,7 +788,17 @@ def ask_gis_download():
         console.print()
         console.print("[cyan]Downloading London GIS data...[/cyan]")
 
-        if gis_downloader.download_and_prepare():
+        try:
+            gis_ready = gis_downloader.download_and_prepare()
+        except Exception as exc:
+            logger.warning(
+                "Optional London GIS download failed unexpectedly; continuing without London Datastore GIS layers: {}",
+                exc,
+            )
+            gis_downloader.last_error = exc
+            gis_ready = False
+
+        if gis_ready:
             console.print("[green]✓[/green] GIS data downloaded and ready")
             return True
 

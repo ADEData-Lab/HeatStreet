@@ -10,6 +10,7 @@ from dataclasses import dataclass
 import io
 import json
 import os
+import ssl
 import tempfile
 import time
 import urllib.error
@@ -268,6 +269,16 @@ class EPCAPIDownloader:
             "Authorization": f"Bearer {self.token}",
         }
 
+    @staticmethod
+    def _create_ssl_context() -> ssl.SSLContext:
+        """Create a TLS context without relying on the Windows certificate store."""
+        try:
+            import certifi
+        except ImportError:
+            return ssl.create_default_context()
+
+        return ssl.create_default_context(cafile=certifi.where())
+
     @classmethod
     def _is_first_party_api_url(cls, url: str) -> bool:
         return urllib.parse.urlparse(url).netloc.casefold() == cls.API_HOST
@@ -303,7 +314,10 @@ class EPCAPIDownloader:
         url: str,
         request_context: Optional[EPCRequestContext] = None,
     ):
-        opener = urllib.request.build_opener(_ManualRedirectHandler())
+        opener = urllib.request.build_opener(
+            _ManualRedirectHandler(),
+            urllib.request.HTTPSHandler(context=self._create_ssl_context()),
+        )
         current_url = url
 
         for _ in range(self.MAX_DOWNLOAD_REDIRECTS + 1):
@@ -381,7 +395,17 @@ class EPCAPIDownloader:
         backoff = 1.0
         for attempt in range(retries):
             try:
-                with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                try:
+                    response_context = self._create_ssl_context()
+                    response = urllib.request.urlopen(
+                        request,
+                        timeout=self.timeout,
+                        context=response_context,
+                    )
+                except TypeError:
+                    response = urllib.request.urlopen(request, timeout=self.timeout)
+
+                with response:
                     payload = response.read().decode("utf-8")
                     if not payload.strip():
                         if request_context is None:
@@ -405,6 +429,10 @@ class EPCAPIDownloader:
             except urllib.error.URLError as e:
                 if request_context is not None:
                     raise EPCDownloadError.from_url_error(request_context, e) from e
+                raise
+            except ssl.SSLError as e:
+                if request_context is not None:
+                    raise EPCDownloadError.unexpected(request_context, e) from e
                 raise
             except json.JSONDecodeError as e:
                 if request_context is not None:
@@ -472,6 +500,11 @@ class EPCAPIDownloader:
                     detail="EPC API returned an empty file download.",
                 )
             return destination
+        except ssl.SSLError as e:
+            self._raise_unexpected_download_error(
+                f"TLS error while streaming EPC full-load download to {destination.resolve()}: {e}",
+                request_context=request_context,
+            )
         except OSError as e:
             self._raise_unexpected_download_error(
                 f"Filesystem error while streaming EPC full-load download to {destination.resolve()}: {e}",
