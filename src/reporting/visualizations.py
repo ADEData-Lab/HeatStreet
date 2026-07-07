@@ -597,8 +597,8 @@ class ReportGenerator:
         Recreate the "Fabric Investment Tipping Point Analysis" chart from the pipeline curve CSV.
 
         Args:
-            curve_csv: Path to fabric_tipping_point_curve.csv. If omitted, uses the latest run in
-                data/outputs/bin/run_*/ or falls back to data/outputs/.
+            curve_csv: Path to fabric_tipping_point_curve.csv. If omitted, uses data/outputs/
+                first, then falls back to the latest run in data/outputs/bin/run_*/.
             save_png: Output PNG path (defaults to data/outputs/figures/tipping_point.png).
             save_svg: Output SVG path (defaults to data/outputs/figures/tipping_point.svg).
         """
@@ -611,13 +611,13 @@ class ReportGenerator:
 
         if curve_csv is None:
             candidates: List[Path] = []
+            candidates.append(DATA_OUTPUTS_DIR / "fabric_tipping_point_curve.csv")
             bin_dir = DATA_OUTPUTS_DIR / "bin"
             if bin_dir.exists():
                 run_dirs = [p for p in bin_dir.iterdir() if p.is_dir() and p.name.startswith("run_")]
                 run_dirs.sort(key=lambda p: p.stat().st_mtime, reverse=True)
                 if run_dirs:
                     candidates.append(run_dirs[0] / "fabric_tipping_point_curve.csv")
-            candidates.append(DATA_OUTPUTS_DIR / "fabric_tipping_point_curve.csv")
             for c in candidates:
                 if c.exists():
                     curve_csv = c

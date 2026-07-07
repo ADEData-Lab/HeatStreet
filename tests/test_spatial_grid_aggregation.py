@@ -184,8 +184,8 @@ def test_circular_mask():
     assert set(offsets_circular).issubset(set(offsets_chebyshev))
 
     # Check that we have a reasonable number of offsets
-    # For 250m radius and 125m cells, we expect around 21-29 offsets with circular mask
-    assert 15 < len(offsets_circular) < 35
+    # For a 250m radius and 125m cell-center spacing, the circular mask includes 13 offsets.
+    assert len(offsets_circular) == 13
 
 
 def test_grid_method_vs_buffer_method(sample_properties):
@@ -233,6 +233,45 @@ def test_grid_with_missing_energy_data():
 
     # Should return properties unchanged or with tertile classification
     assert len(result) == len(properties)
+
+
+def test_unsupported_heat_network_source_returns_no_layers(monkeypatch):
+    """Legacy configured sources should not trigger any network data loading."""
+    analyzer = HeatNetworkAnalyzer()
+
+    def fail_if_called(*args, **kwargs):
+        raise AssertionError("HNPD loader should not run for unsupported sources")
+
+    monkeypatch.setattr(analyzer, "load_hnpd_data", fail_if_called)
+
+    assert analyzer.load_heat_network_data(data_source="london" + "_heat_map") == (None, None)
+    assert analyzer.load_heat_network_data(data_source="both") == (None, None)
+
+
+def test_readiness_uses_density_tiers_when_hnpd_layers_missing(monkeypatch, sample_properties):
+    """Readiness annotation should still classify density tiers without HNPD layers."""
+    analyzer = HeatNetworkAnalyzer()
+    df = pd.DataFrame(index=sample_properties.index)
+    calls = {}
+
+    def fake_classify(properties, heat_networks, heat_zones):
+        calls["network_args"] = (heat_networks, heat_zones)
+        classified = properties.copy()
+        classified["tier_number"] = 3
+        classified["heat_density_gwh_km2"] = 25
+        return classified
+
+    monkeypatch.setattr(analyzer, "geocode_properties", lambda input_df: sample_properties.copy())
+    monkeypatch.setattr(analyzer, "load_heat_network_data", lambda **kwargs: (None, None))
+    monkeypatch.setattr(analyzer, "classify_heat_network_tiers", fake_classify)
+
+    result = analyzer.annotate_heat_network_readiness(df, auto_download_gis=False)
+
+    assert calls["network_args"] == (None, None)
+    assert result["tier_number"].eq(3).all()
+    assert result["hn_ready"].all()
+    assert result["distance_to_network_m"].isna().all()
+    assert not result["in_heat_zone"].any()
 
 
 def test_config_disable_spatial():

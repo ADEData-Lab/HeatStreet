@@ -538,6 +538,135 @@ def test_download_national_domestic_dataset_counts_skipped_malformed_rows(monkey
     assert processed["malformed_rows_skipped"] == 1
 
 
+def test_download_national_domestic_dataset_emits_progress_callback_events(monkeypatch, tmp_path):
+    output_dir = tmp_path / "staged_national_callbacks"
+    output_dir.mkdir(exist_ok=True)
+    monkeypatch.setattr("src.acquisition.epc_api_downloader.DATA_RAW_DIR", output_dir)
+
+    downloader = EPCAPIDownloader(token="abc123", download_mode="full_load")
+
+    csv_bytes = io.BytesIO()
+    with zipfile.ZipFile(csv_bytes, "w") as zf:
+        zf.writestr(
+            "certificates-2024.csv",
+            "uprn,lodgement-date,council,propertyTypeDescription,builtForm,constructionAgeBand\n"
+            "keep1,2024-01-01,Camden,House,Mid-Terrace,England and Wales: 1900-1929\n"
+            "keep2,2024-01-03,Camden,House,End-Terrace,England and Wales: before 1900\n",
+        )
+        zf.writestr("recommendations-2024.csv", "uprn,recommendation\nkeep1,Loft insulation\n")
+
+    class FakeResponse:
+        def __init__(self, payload):
+            self.payload = payload
+            self._offset = 0
+
+        def read(self, size=-1):
+            if size is None or size < 0:
+                size = len(self.payload) - self._offset
+            if self._offset >= len(self.payload):
+                return b""
+            chunk = self.payload[self._offset:self._offset + size]
+            self._offset += size
+            return chunk
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    monkeypatch.setattr(
+        downloader,
+        "_open_download_response",
+        lambda url, request_context=None: FakeResponse(csv_bytes.getvalue()),
+    )
+
+    events = []
+    dataset = downloader.download_national_domestic_dataset(
+        sample_start_date=date_cls(2024, 1, 1),
+        sample_end_date=date_cls(2024, 12, 31),
+        chunk_size=1,
+        progress_callback=events.append,
+    )
+
+    event_names = [event["event"] for event in events]
+    assert dataset.row_count == 2
+    assert "attempt_directory_created" in event_names
+    assert "zip_download_started" in event_names
+    assert "zip_validation_complete" in event_names
+    assert "member_selection_complete" in event_names
+    assert "member_started" in event_names
+    assert "chunk_parsed" in event_names
+    assert "parquet_part_written" in event_names
+    assert "member_complete" in event_names
+    assert event_names[-1] == "dataset_reference_created"
+
+    selection = next(event for event in events if event["event"] == "member_selection_complete")
+    assert selection["selected_certificate_members"] == ["certificates-2024.csv"]
+    assert selection["ignored_recommendation_members"] == ["recommendations-2024.csv"]
+
+    member_complete = next(event for event in events if event["event"] == "member_complete")
+    assert member_complete["rows_read"] == 2
+    assert member_complete["rows_retained_after_sample_window"] == 2
+    assert member_complete["malformed_rows_skipped"] == 0
+    assert len([event for event in events if event["event"] == "parquet_part_written"]) == 2
+
+
+def test_download_national_domestic_dataset_callback_reports_reusable_stage(monkeypatch, tmp_path):
+    output_dir = tmp_path / "staged_national_callback_reuse"
+    output_dir.mkdir(exist_ok=True)
+    monkeypatch.setattr("src.acquisition.epc_api_downloader.DATA_RAW_DIR", output_dir)
+
+    downloader = EPCAPIDownloader(token="abc123", download_mode="full_load")
+    stage_dir = output_dir / "staged" / "domestic_full_load_2024-01-01_2024-12-31"
+    dataset_dir = _write_parquet_dataset_dir(
+        stage_dir / "raw_certificates_dataset",
+        pd.DataFrame(
+            [
+                {
+                    "UPRN": "1",
+                    "COUNCIL": "Camden",
+                    "PROPERTY_TYPE": "House",
+                    "BUILT_FORM": "Mid-Terrace",
+                    "CONSTRUCTION_AGE_BAND": "England and Wales: 1900-1929",
+                }
+            ]
+        ),
+    )
+    manifest_path = stage_dir / "ingest_manifest.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "status": "complete",
+                "dataset_path": str(dataset_dir),
+                "rows_retained_after_sample_window": 1,
+                "sample_start_date": "2024-01-01",
+                "sample_end_date": "2024-12-31",
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    events = []
+    cached = downloader.download_national_domestic_dataset(
+        sample_start_date=date_cls(2024, 1, 1),
+        sample_end_date=date_cls(2024, 12, 31),
+        progress_callback=events.append,
+    )
+
+    assert cached.parquet_path == dataset_dir
+    assert events == [
+        {
+            "event": "reusable_staged_dataset_accepted",
+            "stage_dir": str(stage_dir.resolve()),
+            "manifest_path": str(manifest_path.resolve()),
+            "dataset_path": str(dataset_dir.resolve()),
+            "row_count": 1,
+        }
+    ]
+
+
 def test_materialize_full_load_subset_reuses_cached_stage_with_sidecar_files(monkeypatch, tmp_path):
     output_dir = tmp_path / "staged_national_reuse"
     output_dir.mkdir(exist_ok=True)

@@ -126,8 +126,7 @@ Heat Street treats parameters as policy‑facing inputs that should be reviewabl
 ### 2.3 Spatial datasets (heat networks and zones)
 Spatial analysis combines EPC‑derived property locations (postcode centroid) with:
 - **BEIS/DESNZ Heat Network Planning Database (HNPD)** (January 2024 release): points for operational/under‑construction and planned networks with permission
-- **London Datastore Heat Map GIS layers (legacy, ~2012)** used as a fallback and for some supporting layers
-- **Heat network zone polygons** (where available): borough heat priority areas / potential network zones
+- **EPC/property heat-density analysis** for Tier 3-5 screening where network infrastructure evidence is absent
 
 ## 3) Pipeline structure: modules and what each does
 
@@ -554,7 +553,6 @@ The analysis is implemented across these high‑level modules. This appendix is 
 **Acquisition**
 - EPC download: `src/acquisition/epc_api_downloader.py` (Energy Certificate Data API queries by borough; pagination; stock filters; raw outputs)
 - Heat network planning data: `src/acquisition/hnpd_downloader.py` (downloads and filters HNPD)
-- London GIS layers: `src/acquisition/london_gis_downloader.py` (downloads and prepares London Datastore layers when used)
 
 **Cleaning and validation**
 - QA and standardisation: `src/cleaning/data_validator.py`

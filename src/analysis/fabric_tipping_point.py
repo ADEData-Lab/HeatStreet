@@ -77,10 +77,23 @@ class FabricTippingPointAnalyzer:
             DataFrame with one row per measure
         """
         rows = []
+        selected_sequence = self.generate_fabric_measure_sequence(
+            typical_annual_heat_demand_kwh=typical_annual_heat_demand_kwh
+        )
+        selected_measure_by_group = {
+            self.catalogue[measure_id].mutually_exclusive_group: measure_id
+            for measure_id in selected_sequence
+            if self.catalogue[measure_id].mutually_exclusive_group
+        }
 
         for measure_id, measure in self.catalogue.items():
             # Skip measures that do not affect fabric heat demand
             if measure.annual_kwh_saving_pct <= 0:
+                continue
+            if (
+                measure.mutually_exclusive_group
+                and selected_measure_by_group.get(measure.mutually_exclusive_group) != measure_id
+            ):
                 continue
 
             gross_saving_kwh = typical_annual_heat_demand_kwh * measure.annual_kwh_saving_pct
@@ -131,39 +144,51 @@ class FabricTippingPointAnalyzer:
             List of measure IDs ordered by marginal benefit-per-cost
         """
         remaining_demand_fraction = 1.0
-        remaining_measures = set(self.catalogue.keys())
+        remaining_measures = [
+            measure_id
+            for measure_id, measure in self.catalogue.items()
+            if measure.annual_kwh_saving_pct > 0 and measure.capex_per_home > 0
+        ]
         ordered_measures: List[str] = []
 
         while remaining_measures:
-            best_measure = None
-            best_benefit_per_pound = -np.inf
-
-            for measure_id in list(remaining_measures):
+            candidates = []
+            for measure_id in remaining_measures:
                 measure = self.catalogue[measure_id]
-                if measure.annual_kwh_saving_pct <= 0 or measure.capex_per_home <= 0:
-                    remaining_measures.remove(measure_id)
-                    continue
-
                 marginal_kwh_saved = (
                     typical_annual_heat_demand_kwh
                     * remaining_demand_fraction
                     * measure.annual_kwh_saving_pct
                 )
                 benefit_per_pound = marginal_kwh_saved / measure.capex_per_home
+                candidates.append((measure_id, benefit_per_pound, measure.capex_per_home))
 
-                if benefit_per_pound > best_benefit_per_pound:
-                    best_benefit_per_pound = benefit_per_pound
-                    best_measure = measure_id
-
-            if best_measure is None:
+            if not candidates:
                 break
 
+            candidates.sort(
+                key=lambda item: (-round(item[1], 12), item[2], item[0])
+            )
+            best_measure = candidates[0][0]
             ordered_measures.append(best_measure)
-            remaining_measures.remove(best_measure)
 
             # Update remaining demand fraction to capture diminishing returns
             measure_saving_pct = self.catalogue[best_measure].annual_kwh_saving_pct
             remaining_demand_fraction *= (1 - measure_saving_pct)
+
+            exclusive_group = self.catalogue[best_measure].mutually_exclusive_group
+            if exclusive_group:
+                remaining_measures = [
+                    measure_id
+                    for measure_id in remaining_measures
+                    if self.catalogue[measure_id].mutually_exclusive_group != exclusive_group
+                ]
+            else:
+                remaining_measures = [
+                    measure_id
+                    for measure_id in remaining_measures
+                    if measure_id != best_measure
+                ]
 
         return ordered_measures
 

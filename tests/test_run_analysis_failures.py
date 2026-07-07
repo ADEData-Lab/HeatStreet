@@ -12,7 +12,6 @@ import pandas as pd
 
 import run_analysis
 from src.acquisition.epc_api_downloader import EPCDownloadError, EPCRequestContext
-from src.acquisition.london_gis_downloader import LondonGISDownloadError
 from src.utils.staged_dataset import DatasetReference
 
 
@@ -100,60 +99,6 @@ def make_dataset_reference(base_dir: Path, name: str, df: pd.DataFrame, *, stage
         sample_start_date="2024-01-01",
         sample_end_date="2024-12-31",
     )
-
-
-def test_ask_gis_download_warns_optional_london_datastore_layer(monkeypatch):
-    fake_console = FakeConsole()
-
-    class FakeGISDownloader:
-        def __init__(self):
-            self.last_error = LondonGISDownloadError(
-                "Failed to fetch London Datastore resource page https://data.london.gov.uk/dataset/london-heat-map: HTTP 404 Not Found",
-                failure_kind="resource_page_fetch",
-            )
-
-        def get_data_summary(self):
-            return {"available": False}
-
-        def download_and_prepare(self):
-            return False
-
-    monkeypatch.setattr(run_analysis, "console", fake_console)
-    monkeypatch.setattr(run_analysis, "LondonGISDownloader", FakeGISDownloader)
-
-    result = run_analysis.ask_gis_download()
-
-    assert result is False
-    output = "\n".join(fake_console.messages)
-    assert "Optional London Datastore GIS download failed" in output
-    assert "this does not affect the EPC API download path" in output
-    assert "Reason:" in output
-    assert "resource page" in output
-
-
-def test_ask_gis_download_catches_unexpected_optional_failure(monkeypatch):
-    fake_console = FakeConsole()
-
-    class FakeGISDownloader:
-        def __init__(self):
-            self.last_error = None
-
-        def get_data_summary(self):
-            return {"available": False}
-
-        def download_and_prepare(self):
-            raise RuntimeError("[ASN1: NOT_ENOUGH_DATA] not enough data")
-
-    monkeypatch.setattr(run_analysis, "console", fake_console)
-    monkeypatch.setattr(run_analysis, "LondonGISDownloader", FakeGISDownloader)
-
-    result = run_analysis.ask_gis_download()
-
-    assert result is False
-    output = "\n".join(fake_console.messages)
-    assert "Optional London Datastore GIS download failed" in output
-    assert "this does not affect the EPC API download path" in output
-    assert "ASN1" in output
 
 
 def test_download_data_surfaces_borough_scoped_api_error(monkeypatch):
@@ -391,7 +336,6 @@ def test_main_returns_non_zero_when_phase_one_has_no_data(monkeypatch):
     monkeypatch.setattr(run_analysis, "is_one_stop_only", lambda config=None: False)
     monkeypatch.setattr(run_analysis, "AnalysisLogger", FakeAnalysisLogger)
     monkeypatch.setattr(run_analysis, "ask_hnpd_download", lambda: False)
-    monkeypatch.setattr(run_analysis, "ask_gis_download", lambda: False)
     monkeypatch.setattr(
         run_analysis,
         "prompt_sample_window",
@@ -599,7 +543,6 @@ def test_main_completes_staged_pipeline_without_dataframe_assumptions(monkeypatc
     monkeypatch.setattr(run_analysis, "is_one_stop_only", lambda config=None: False)
     monkeypatch.setattr(run_analysis, "AnalysisLogger", lambda: RecordingAnalysisLogger(tmp_path))
     monkeypatch.setattr(run_analysis, "ask_hnpd_download", lambda: False)
-    monkeypatch.setattr(run_analysis, "ask_gis_download", lambda: False)
     monkeypatch.setattr(
         run_analysis,
         "prompt_sample_window",
@@ -681,7 +624,6 @@ def test_main_returns_non_zero_when_staged_phase_one_dataset_is_empty(monkeypatc
     monkeypatch.setattr(run_analysis, "is_one_stop_only", lambda config=None: False)
     monkeypatch.setattr(run_analysis, "AnalysisLogger", lambda: RecordingAnalysisLogger(tmp_path))
     monkeypatch.setattr(run_analysis, "ask_hnpd_download", lambda: False)
-    monkeypatch.setattr(run_analysis, "ask_gis_download", lambda: False)
     monkeypatch.setattr(
         run_analysis,
         "prompt_sample_window",
@@ -707,6 +649,7 @@ def test_main_returns_non_zero_when_staged_phase_one_dataset_is_empty(monkeypatc
 
 def test_run_analysis_has_single_staged_safe_mainline():
     assert not hasattr(run_analysis, "_legacy_main")
+    assert not hasattr(run_analysis, "ask_" + "gis_download")
 
     main_source = inspect.getsource(run_analysis.main)
 

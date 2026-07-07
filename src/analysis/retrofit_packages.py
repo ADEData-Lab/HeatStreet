@@ -50,6 +50,7 @@ class Measure:
         annual_kwh_saving_fixed: Fixed kWh saving (if not percentage-based)
         flow_temp_reduction_k: Reduction in required flow temperature (K)
         co2_saving_factor: Additional CO2 factor beyond energy savings
+        mutually_exclusive_group: Group name for measures that cannot be combined
         applicability_check: Function to check if measure applies to property
     """
     measure_id: str
@@ -60,6 +61,7 @@ class Measure:
     flow_temp_reduction_k: float = 0.0
     co2_saving_factor: float = 1.0  # Multiplier for CO2 savings
     requires_check: bool = False  # If True, applicability depends on property
+    mutually_exclusive_group: Optional[str] = None
 
 
 # ============================================================================
@@ -136,7 +138,8 @@ def get_measure_catalogue() -> Dict[str, Measure]:
             capex_per_home=costs.get('double_glazing_upgrade', 6000),
             annual_kwh_saving_pct=savings.get('double_glazing', {}).get('kwh_saving_pct', 0.10),
             flow_temp_reduction_k=savings.get('double_glazing', {}).get('flow_temp_reduction_k', 2),
-            requires_check=True  # Only if single glazed
+            requires_check=True,  # Only if single glazed
+            mutually_exclusive_group='glazing'
         ),
 
         'triple_glazing_upgrade': Measure(
@@ -145,7 +148,8 @@ def get_measure_catalogue() -> Dict[str, Measure]:
             capex_per_home=costs.get('triple_glazing_upgrade', 9000),
             annual_kwh_saving_pct=savings.get('triple_glazing', {}).get('kwh_saving_pct', 0.15),
             flow_temp_reduction_k=savings.get('triple_glazing', {}).get('flow_temp_reduction_k', 3),
-            requires_check=True  # Applies to single or double glazed
+            requires_check=True,  # Applies to single or double glazed
+            mutually_exclusive_group='glazing'
         ),
 
         # ---- Airtightness ----

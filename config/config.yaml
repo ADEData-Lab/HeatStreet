@@ -513,7 +513,7 @@ heat_pump:
 # Configure which data sources to use for heat network spatial analysis
 data_sources:
   heat_networks:
-    # Primary data source: 'hnpd' (2024, UK-wide), 'london_heat_map' (2012, London only), or 'both'
+    # Primary data source: 'hnpd' (2024, UK-wide)
     primary: "hnpd"
 
     # BEIS Heat Network Planning Database (HNPD) configuration
@@ -531,11 +531,6 @@ data_sources:
         - "Planning Permission Granted"
         - "Appeal Granted"
         - "Secretary of State - Granted"
-
-    # London Heat Map (2012 legacy data) configuration
-    london_heat_map:
-      fallback_enabled: true  # Use as fallback if HNPD unavailable
-      use_for_heat_density: true  # Still use borough shapefiles for Tier 3-5 density
 
 # Spatial Analysis Configuration
 # Configure how heat density neighborhoods are calculated

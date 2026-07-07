@@ -43,7 +43,7 @@ HeatStreet/
 │   └── utils/                # Utility functions
 ├── tests/                    # Unit tests
 ├── docs/                     # Additional documentation
-├── run_analysis.py           # Interactive pipeline orchestrator
+├── run_analysis.py           # Interactive Mission Control runner
 ├── run-conda.bat             # Windows conda launcher (recommended for spatial analysis)
 ├── run-conda.ps1             # PowerShell conda launcher (recommended for spatial analysis)
 ├── requirements.txt          # Core Python dependencies
@@ -261,6 +261,12 @@ print(
 PY
 ```
 
+**Mission Control dashboard renders oddly**
+- Use `python run_analysis.py --no-tui` for plain fallback output.
+- Use `python run_analysis.py --quiet` for minimal output in logs or scripted runs.
+- CI, redirected output, `TERM=dumb`, and `HEATSTREET_TUI=0` disable the live dashboard automatically.
+- `analysis_log.json` is unchanged and remains the source of truth even when the live dashboard is disabled.
+
 #### How Should I Run It?
 
 | Option | Best For | Spatial Analysis? |
@@ -287,19 +293,15 @@ Register for API access at [https://get-energy-performance-data.communities.gov.
 - DESNZ/BEIS Heat Network Planning Database (January 2024) is used as the primary source of up-to-date heat network scheme locations.
 - The pipeline auto-downloads it to `data/external/hnpd-january-2024.csv` (see `data_sources.heat_networks` in `config/config.yaml`).
 
-**London Heat Map GIS package (legacy; optional/fallback)**:
-- Used as a fallback evidence layer if HNPD is unavailable, and to provide zone/“potential network” geometries used by the Tier 2 overlay.
-- The pipeline resolves the current `GIS_All_Data.zip` link from the London Datastore London Heat Map page and extracts it under `data/external/`.
-
 **Boundary Files**:
 - London borough boundaries
 - LSOA boundaries for aggregation
 
 ## Usage
 
-### 🎯 Interactive Analysis (Recommended)
+### Interactive Mission Control Runner
 
-The easiest way to run the complete analysis is using the interactive CLI:
+The easiest way to run the complete analysis is using the Mission Control runner:
 
 ```bash
 # Windows Command Prompt (Conda launcher)
@@ -312,7 +314,57 @@ run-conda.bat
 python run_analysis.py
 ```
 
-The interactive CLI will guide you through:
+For the best full Mission Control TUI rendering on Windows, use Windows Terminal or PowerShell. Anaconda Prompt and Windows cmd are supported with conservative rendering, but if Rich Live still flickers there, use `--simple-tui`, or switch to Windows Terminal/PowerShell for the full TUI.
+
+In a capable interactive terminal, `python run_analysis.py` opens the compact live Mission Control panel with phase status, the current action, headline counters, warnings, and key output paths. `--simple-tui` prints one stable line per phase plus the final summary. `--no-tui` uses plain, log-friendly console output. In CI, redirected output, `TERM=dumb`, `HEATSTREET_TUI=0`, `--no-tui`, or `--quiet`, the full Rich Live dashboard is disabled.
+
+Common runner options:
+
+```bash
+# Full compact Mission Control TUI when the terminal supports it
+python run_analysis.py
+
+# Stable line-oriented TUI for cmd/Anaconda or narrow terminals
+python run_analysis.py --simple-tui
+
+# Plain fallback output
+python run_analysis.py --no-tui
+
+# Conservative full TUI refresh rate
+python run_analysis.py --tui-refresh-rate 2
+
+# Minimal operator output
+python run_analysis.py --quiet
+
+# Expanded fallback diagnostics
+python run_analysis.py --verbose
+
+# Noninteractive sample window
+python run_analysis.py --sample-start 2016-01-01 --sample-end 2025-12-31
+
+# Reuse matching raw data, or force a fresh EPC full-load download
+python run_analysis.py --use-existing
+python run_analysis.py --fresh
+
+# Scope download without prompting
+python run_analysis.py --download-scope full-london
+python run_analysis.py --download-scope single-borough --borough Camden
+```
+
+Terminal environment overrides:
+
+```bash
+# Disable or request the full Rich TUI where the terminal supports it
+HEATSTREET_TUI=0
+HEATSTREET_TUI=1
+
+# Clamp the full TUI refresh rate to the supported 2-4 FPS range
+HEATSTREET_TUI_REFRESH_RATE=2
+```
+
+The dashboard is for operators. `data/outputs/analysis_log.json` remains the audit source for phases, metrics, outputs, and run metadata. This runner change does not alter scientific assumptions, formulas, filters, schemas, or output locations.
+
+The Mission Control runner will guide you through:
 
 1. **EPC Data Download**
    - Choose borough(s) to analyze
@@ -332,7 +384,7 @@ The interactive CLI will guide you through:
    - Performs subsidy sensitivity analysis
 
 4. **Spatial Analysis** (if GDAL available)
-   - Uses HNPD (2024) and optional London Heat Map GIS (legacy) as evidence layers
+   - Uses HNPD (2024) as the external heat network infrastructure evidence layer
    - Classifies properties into heat network tiers (Tier 1–5)
    - Calculates local heat density (GWh/km²) from EPC-derived demand
    - Generates interactive HTML maps
@@ -495,7 +547,7 @@ Properties are classified into five tiers:
 
 | Tier | Definition (screening) | Main evidence input | Recommended Pathway |
 |------|------------|---------------------|
-| **Tier 1** | Within 250m of existing heat network | HNPD (Operational / Under Construction) or London Heat Map fallback | District heating connection |
+| **Tier 1** | Within 250m of existing heat network | HNPD (Operational / Under Construction) | District heating connection |
 | **Tier 2** | Near planned heat network (proxy) | HNPD planned schemes (planning granted) buffered by the configured distance; polygon zone layer used if available | District heating (planned) |
 | **Tier 3** | High local heat density (default ≥20 GWh/km²) | EPC-derived heat density (postcode centroids) | District heating (extension potentially viable) |
 | **Tier 4** | Moderate density (default 5–20 GWh/km²) | EPC-derived heat density | Heat pump (network marginal) |
@@ -711,7 +763,6 @@ pytest --cov=src tests/
 
 - Hardy, A., & Glew, D. (2019). An analysis of errors in the Energy Performance certificate database. *Energy Policy*, 129, 1168-1178.
 - Energy Certificate Data API: https://get-energy-performance-data.communities.gov.uk/
-- London Heat Map: https://www.london.gov.uk/programmes-strategies/environment-and-climate-change/energy/london-heat-map
 - RdSAP Methodology: https://www.bre.co.uk/sap/
 
 ## License
@@ -727,7 +778,6 @@ For questions or issues:
 ## Acknowledgments
 
 - UK Government EPC Register for open data access
-- Greater London Authority for London Heat Map data
 - Hardy & Glew for EPC quality assurance methodology
 - Case street residents (Shakespeare Crescent) for local calibration data
 

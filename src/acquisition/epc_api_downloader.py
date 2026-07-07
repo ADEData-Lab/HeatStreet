@@ -19,7 +19,7 @@ import urllib.request
 import zipfile
 from datetime import date as date_cls, datetime, timedelta
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -213,6 +213,16 @@ class EPCAPIDownloader:
         "LOCAL_AUTHORITY_LABEL",
         "LOCAL_AUTHORITY",
     )
+
+    @staticmethod
+    def _emit_progress(progress_callback: Optional[Callable[[Dict[str, Any]], None]], event: Dict[str, Any]) -> None:
+        """Emit a structured progress event without coupling acquisition to a UI."""
+        if progress_callback is None:
+            return
+        try:
+            progress_callback(dict(event))
+        except Exception as exc:
+            logger.debug(f"Ignoring EPC progress callback failure: {exc}")
 
     LONDON_LA_CODES = {
         'Barking and Dagenham': 'E09000002',
@@ -863,6 +873,7 @@ class EPCAPIDownloader:
         sample_end_date: Optional[date_cls] = None,
         chunk_size: int = FULL_LOAD_CHUNK_SIZE,
         force_refresh: bool = False,
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> DatasetReference:
         """Stage the domestic full-load ZIP into a certificate-only Parquet dataset."""
         request_context = request_context or self._build_request_context(
@@ -878,6 +889,16 @@ class EPCAPIDownloader:
                 and cached.sample_end_date == (sample_end_date.isoformat() if sample_end_date else None)
                 and cached.exists()
             ):
+                self._emit_progress(
+                    progress_callback,
+                    {
+                        "event": "reusable_staged_dataset_accepted",
+                        "stage_dir": self._path_text(cached.parquet_path.parent),
+                        "manifest_path": self._path_text(cached.manifest_path) if cached.manifest_path else None,
+                        "dataset_path": self._path_text(cached.parquet_path),
+                        "row_count": cached.row_count,
+                    },
+                )
                 return cached
 
         stage_dir = self._full_load_stage_dir(sample_start_date, sample_end_date)
@@ -894,6 +915,16 @@ class EPCAPIDownloader:
         )
         if reusable_dataset is not None:
             self._full_load_stage_cache = reusable_dataset
+            self._emit_progress(
+                progress_callback,
+                {
+                    "event": "reusable_staged_dataset_accepted",
+                    "stage_dir": self._path_text(stage_dir),
+                    "manifest_path": self._path_text(manifest_path),
+                    "dataset_path": self._path_text(reusable_dataset.parquet_path),
+                    "row_count": reusable_dataset.row_count,
+                },
+            )
             logger.info(
                 "Returning staged national domestic dataset parquet={} manifest={}",
                 self._path_text(reusable_dataset.parquet_path),
@@ -905,10 +936,34 @@ class EPCAPIDownloader:
         dataset_dir = attempt_dir / "raw_certificates_dataset"
         download_zip_path = attempt_dir / "domestic_full_load.zip"
         logger.info("Chosen national full-load attempt directory: {}", self._path_text(attempt_dir))
+        self._emit_progress(
+            progress_callback,
+            {
+                "event": "attempt_directory_created",
+                "stage_dir": self._path_text(stage_dir),
+                "attempt_dir": self._path_text(attempt_dir),
+            },
+        )
 
         logger.info("Streaming EPC domestic full-load ZIP to {}", download_zip_path)
+        self._emit_progress(
+            progress_callback,
+            {
+                "event": "zip_download_started",
+                "url": self.FULL_LOAD_URL,
+                "download_zip_path": self._path_text(download_zip_path),
+            },
+        )
         self._download_file_to_path(self.FULL_LOAD_URL, download_zip_path, request_context=request_context)
-        self._validate_downloaded_zip_artifact(download_zip_path, request_context=request_context)
+        zip_size = self._validate_downloaded_zip_artifact(download_zip_path, request_context=request_context)
+        self._emit_progress(
+            progress_callback,
+            {
+                "event": "zip_validation_complete",
+                "download_zip_path": self._path_text(download_zip_path),
+                "size_bytes": zip_size,
+            },
+        )
 
         manifest: Dict[str, object] = {
             "source_url": self.FULL_LOAD_URL,
@@ -951,11 +1006,29 @@ class EPCAPIDownloader:
             manifest["selected_certificate_members"] = certificate_members
             manifest["ignored_recommendation_members"] = recommendation_members
             manifest["ignored_non_certificate_members"] = other_members
+            self._emit_progress(
+                progress_callback,
+                {
+                    "event": "member_selection_complete",
+                    "selected_certificate_members": list(certificate_members),
+                    "ignored_recommendation_members": list(recommendation_members),
+                    "ignored_non_certificate_members": list(other_members),
+                },
+            )
 
             for member in certificate_members:
                 approx_member_rows = self._count_member_data_lines(zf, member)
                 rows_retained = 0
                 parsed_rows = 0
+                self._emit_progress(
+                    progress_callback,
+                    {
+                        "event": "member_started",
+                        "member": member,
+                        "approx_rows_in_file": int(approx_member_rows),
+                        "member_year": self._extract_member_year(member),
+                    },
+                )
 
                 with zf.open(member) as raw_file:
                     chunk_iter = pd.read_csv(
@@ -964,7 +1037,8 @@ class EPCAPIDownloader:
                         on_bad_lines="skip",
                     )
                     for chunk in chunk_iter:
-                        parsed_rows += len(chunk)
+                        chunk_rows_read = len(chunk)
+                        parsed_rows += chunk_rows_read
                         chunk = self._normalize_api_records(chunk)
                         if not manifest["normalized_columns"]:
                             manifest["normalized_columns"] = list(chunk.columns)
@@ -975,8 +1049,29 @@ class EPCAPIDownloader:
                             log_prefix=f"full-load member {Path(member).name}",
                         )
                         rows_retained += len(chunk)
+                        self._emit_progress(
+                            progress_callback,
+                            {
+                                "event": "chunk_parsed",
+                                "member": member,
+                                "rows_read": int(chunk_rows_read),
+                                "parsed_rows_total": int(parsed_rows),
+                                "rows_retained": int(len(chunk)),
+                                "rows_retained_total": int(rows_retained),
+                            },
+                        )
                         if not chunk.empty:
-                            write_parquet_part(chunk, dataset_dir, part_index, prefix="certificates")
+                            part_path = write_parquet_part(chunk, dataset_dir, part_index, prefix="certificates")
+                            self._emit_progress(
+                                progress_callback,
+                                {
+                                    "event": "parquet_part_written",
+                                    "member": member,
+                                    "part_index": int(part_index),
+                                    "rows": int(len(chunk)),
+                                    "path": self._path_text(part_path),
+                                },
+                            )
                             part_index += 1
 
                 skipped_rows = max(approx_member_rows - parsed_rows, 0)
@@ -992,6 +1087,18 @@ class EPCAPIDownloader:
                         "malformed_rows_skipped": int(skipped_rows),
                         "member_year": self._extract_member_year(member),
                     }
+                )
+                self._emit_progress(
+                    progress_callback,
+                    {
+                        "event": "member_complete",
+                        "member": member,
+                        "approx_rows_in_file": int(approx_member_rows),
+                        "rows_read": int(parsed_rows),
+                        "rows_retained_after_sample_window": int(rows_retained),
+                        "malformed_rows_skipped": int(skipped_rows),
+                        "member_year": self._extract_member_year(member),
+                    },
                 )
 
         if part_index == 0:
@@ -1019,6 +1126,16 @@ class EPCAPIDownloader:
         )
         write_dataset_manifest(dataset_ref)
         self._full_load_stage_cache = dataset_ref
+        self._emit_progress(
+            progress_callback,
+            {
+                "event": "dataset_reference_created",
+                "name": dataset_ref.name,
+                "parquet_path": self._path_text(dataset_ref.parquet_path),
+                "manifest_path": self._path_text(manifest_path),
+                "row_count": dataset_ref.row_count,
+            },
+        )
         logger.info(
             "Staged {} certificate rows from {} members; ignored {} recommendation members; skipped ~{} malformed rows",
             dataset_ref.row_count,
@@ -1254,6 +1371,7 @@ class EPCAPIDownloader:
         max_results: Optional[int] = None,
         log_borough: bool = True,
         show_progress: bool = True,
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> pd.DataFrame:
         if borough_name not in self.LONDON_LA_CODES:
             logger.error(f"Unknown borough: {borough_name}")
@@ -1281,6 +1399,7 @@ class EPCAPIDownloader:
                 sample_start_date=effective_start_date,
                 sample_end_date=effective_end_date,
                 request_context=request_context,
+                progress_callback=progress_callback,
             )
         all_records: List[pd.DataFrame] = []
         current_page = 1
@@ -1372,11 +1491,13 @@ class EPCAPIDownloader:
         sample_start_date: Optional[date_cls],
         sample_end_date: Optional[date_cls],
         request_context: Optional[EPCRequestContext] = None,
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> pd.DataFrame:
         staged = self.download_national_domestic_dataset(
             request_context=request_context,
             sample_start_date=sample_start_date,
             sample_end_date=sample_end_date,
+            progress_callback=progress_callback,
         )
         output_parquet_path = DATA_RAW_DIR / f"epc_{borough_name.lower().replace(' ', '_')}_full_load.parquet"
         subset = self._materialize_staged_subset(
@@ -1428,6 +1549,7 @@ class EPCAPIDownloader:
         max_results_per_borough: Optional[int] = None,
         max_workers: int = 4,
         log_boroughs: bool = True,
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> pd.DataFrame:
         property_types = property_types or ['house']
         if self.download_mode == "full_load":
@@ -1446,6 +1568,7 @@ class EPCAPIDownloader:
                 request_context=request_context,
                 sample_start_date=effective_start_date,
                 sample_end_date=effective_end_date,
+                progress_callback=progress_callback,
             )
             raw_output = DATA_RAW_DIR / "epc_london_raw.parquet"
             subset = self._materialize_staged_subset(

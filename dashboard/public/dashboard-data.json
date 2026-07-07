@@ -362,31 +362,56 @@
       "tier": "Tier 1",
       "properties": 5397,
       "percentage": 2.96,
-      "avgCost": 1551.6173800259403
+      "avgCost": 1551.6173800259403,
+      "fabricCost": 1551.6173800259403,
+      "systemCost": 13818.851213637206,
+      "totalCost": 15370.468593663147,
+      "totalCostFullAshp": 15370.468593663147,
+      "systemTechnology": "ashp"
     },
     {
       "tier": "Tier 2",
       "properties": 1917,
       "percentage": 1.05,
-      "avgCost": 2890.5774647887324
+      "avgCost": 2890.5774647887324,
+      "fabricCost": 2890.5774647887324,
+      "systemCost": 13959.05059989567,
+      "totalCost": 16849.628064684402,
+      "totalCostFullAshp": 16849.628064684402,
+      "systemTechnology": "ashp"
     },
     {
       "tier": "Tier 3",
       "properties": 83433,
       "percentage": 45.8,
-      "avgCost": 10566.224012081551
+      "avgCost": 10566.224012081551,
+      "fabricCost": 10566.224012081551,
+      "systemCost": 13660.477029472751,
+      "totalCost": 24226.7010415543,
+      "totalCostFullAshp": 24226.7010415543,
+      "systemTechnology": "ashp"
     },
     {
       "tier": "Tier 4",
       "properties": 82058,
       "percentage": 45.04,
-      "avgCost": 11938.385312827511
+      "avgCost": 11938.385312827511,
+      "fabricCost": 11938.385312827511,
+      "systemCost": 10787.809110629067,
+      "totalCost": 22726.194423456578,
+      "totalCostFullAshp": 26582.915279436496,
+      "systemTechnology": "hybrid_ashp"
     },
     {
       "tier": "Tier 5",
       "properties": 9379,
       "percentage": 5.15,
-      "avgCost": 16964.9254717987
+      "avgCost": 16964.9254717987,
+      "fabricCost": 16964.9254717987,
+      "systemCost": 15142.844652948075,
+      "totalCost": 32107.770124746774,
+      "totalCostFullAshp": 32107.770124746774,
+      "systemTechnology": "ashp"
     }
   ],
   "interventionData": [
@@ -428,7 +453,10 @@
       "properties": 5397,
       "share": 3.0,
       "fabricCost": 1552.0,
+      "systemCost": 13819.0,
       "totalCost": 15370.0,
+      "totalCostFullAshp": 15370.0,
+      "systemTechnology": "ashp",
       "heatDemand": 96.0,
       "reduction": 144.0,
       "reductionPct": 60,
@@ -440,7 +468,10 @@
       "properties": 1917,
       "share": 1.1,
       "fabricCost": 2891.0,
+      "systemCost": 13959.0,
       "totalCost": 16850.0,
+      "totalCostFullAshp": 16850.0,
+      "systemTechnology": "ashp",
       "heatDemand": 115.0,
       "reduction": 125.0,
       "reductionPct": 52,
@@ -452,7 +483,10 @@
       "properties": 83433,
       "share": 45.8,
       "fabricCost": 10566.0,
+      "systemCost": 13660.0,
       "totalCost": 24227.0,
+      "totalCostFullAshp": 24227.0,
+      "systemTechnology": "ashp",
       "heatDemand": 134.0,
       "reduction": 106.0,
       "reductionPct": 44,
@@ -464,7 +498,10 @@
       "properties": 82058,
       "share": 45.0,
       "fabricCost": 11938.0,
+      "systemCost": 10788.0,
       "totalCost": 22726.0,
+      "totalCostFullAshp": 26583.0,
+      "systemTechnology": "hybrid_ashp",
       "heatDemand": 153.0,
       "reduction": 86.0,
       "reductionPct": 36,
@@ -476,7 +513,10 @@
       "properties": 9379,
       "share": 5.1,
       "fabricCost": 16965.0,
+      "systemCost": 15143.0,
       "totalCost": 32108.0,
+      "totalCostFullAshp": 32108.0,
+      "systemTechnology": "ashp",
       "heatDemand": 173.0,
       "reduction": 67.0,
       "reductionPct": 28,
@@ -1192,13 +1232,24 @@
   "heatNetworkThresholdData": [],
   "hnVsHpComparisonData": [
     {
+      "pathwayId": "fabric_only",
+      "pathwayName": "Fabric Only",
+      "homes": 182184,
+      "capexMean": 15492.65,
+      "billSavingMean": 584.45,
+      "co2SavingMean": 1.714,
+      "paybackMean": 28.61,
+      "paybackNote": "Tariff context: heat network GBP 0.0800/kWh vs gas GBP 0.0624/kWh; carbon factors HN 0.073 vs gas 0.183 kgCO2/kWh."
+    },
+    {
       "pathwayId": "fabric_plus_hp_only",
       "pathwayName": "Fabric + Heat Pump",
       "homes": 182184,
       "capexMean": 27492.65,
       "billSavingMean": 455.49,
       "co2SavingMean": 2.7557,
-      "paybackMean": 74.83
+      "paybackMean": 74.83,
+      "paybackNote": "Tariff context: heat network GBP 0.0800/kWh vs gas GBP 0.0624/kWh; carbon factors HN 0.073 vs gas 0.183 kgCO2/kWh."
     },
     {
       "pathwayId": "fabric_plus_hn_only",
@@ -1207,7 +1258,8 @@
       "capexMean": 20492.65,
       "billSavingMean": 339.98,
       "co2SavingMean": 2.6544,
-      "paybackMean": 64.73
+      "paybackMean": 64.73,
+      "paybackNote": "HN has lower capex, but modeled payback can be longer because the HN tariff exceeds the gas price (HN GBP 0.0800/kWh vs gas GBP 0.0624/kWh); its main advantage is carbon reduction (HN 0.073 vs gas 0.183 kgCO2/kWh)."
     },
     {
       "pathwayId": "fabric_plus_hp_plus_hn",
@@ -1216,7 +1268,8 @@
       "capexMean": 24490.95,
       "billSavingMean": 404.58,
       "co2SavingMean": 2.711,
-      "paybackMean": 71.87
+      "paybackMean": 71.87,
+      "paybackNote": "HN has lower capex, but modeled payback can be longer because the HN tariff exceeds the gas price (HN GBP 0.0800/kWh vs gas GBP 0.0624/kWh); its main advantage is carbon reduction (HN 0.073 vs gas 0.183 kgCO2/kWh)."
     }
   ],
   "confidenceBandsData": [
@@ -1365,47 +1418,67 @@
       "savings": 655.0
     },
     {
-      "measure": "Double Glazing Upgrade (from single)",
-      "cost": 35700.0,
-      "savings": 683.0
+      "measure": "Triple Glazing Upgrade (Danish standard)",
+      "cost": 38700.0,
+      "savings": 697.0
     },
     {
-      "measure": "Triple Glazing Upgrade (Danish standard)",
+      "measure": "Double Glazing Upgrade (from single)",
       "cost": 44700.0,
       "savings": 721.0
     }
   ],
-  "costLeversData": [
-    {
-      "lever": "Shared ground loops",
-      "impact": 2100,
-      "difficulty": "Medium"
+  "costLeversData": {
+    "levers": [
+      {
+        "lever": "Shared ground loops",
+        "impact_gbp": 2100.0,
+        "impact": 2100.0,
+        "difficulty": "Medium",
+        "source_note": "Existing dashboard lever; impact overlaps with other delivery and procurement effects."
+      },
+      {
+        "lever": "Supply chain optimisation",
+        "impact_gbp": 1800.0,
+        "impact": 1800.0,
+        "difficulty": "Low",
+        "source_note": "Existing dashboard lever; impact overlaps with bulk procurement and standardisation."
+      },
+      {
+        "lever": "Bulk procurement",
+        "impact_gbp": 1200.0,
+        "impact": 1200.0,
+        "difficulty": "Low",
+        "source_note": "Existing dashboard lever; impact overlaps with supply chain optimisation."
+      },
+      {
+        "lever": "Standardised designs",
+        "impact_gbp": 800.0,
+        "impact": 800.0,
+        "difficulty": "Low",
+        "source_note": "Existing dashboard lever; impact overlaps with street-by-street delivery."
+      },
+      {
+        "lever": "Street-by-street delivery",
+        "impact_gbp": 200.0,
+        "impact": 200.0,
+        "difficulty": "Medium",
+        "source_note": "Existing dashboard lever; impact overlaps with procurement and installer mobilisation savings."
+      }
+    ],
+    "total": 6100.0,
+    "conservative_combined_estimate": {
+      "low_gbp": 3050.0,
+      "high_gbp": 4880.0
     },
-    {
-      "lever": "Supply chain optimisation",
-      "impact": 1800,
-      "difficulty": "Low"
-    },
-    {
-      "lever": "Bulk procurement",
-      "impact": 1200,
-      "difficulty": "Low"
-    },
-    {
-      "lever": "Standardised designs",
-      "impact": 800,
-      "difficulty": "Low"
-    },
-    {
-      "lever": "Street-by-street delivery",
-      "impact": 200,
-      "difficulty": "Medium"
-    }
-  ],
+    "note": "Cost reduction levers overlap and should not be treated as fully additive."
+  },
   "summaryStats": {
     "totalProperties": 182184,
     "meanFabricCost": 11165.860569534098,
+    "meanSystemCost": 12450.737715715979,
     "meanTotalRetrofitCost": 23616.59828525008,
+    "meanTotalCostFullAshp": 25353.71460721029,
     "heatDemandReduction": 43.71855852821836,
     "readyOrNearReady": 4.0146225793703065,
     "belowBandC": 77.99,

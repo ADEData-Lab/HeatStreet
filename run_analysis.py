@@ -6,15 +6,19 @@ with interactive prompts and progress indicators.
 """
 
 import os
+import io
 import json
 import shutil
 import sys
 import subprocess
+import argparse
 import importlib
 import inspect
 import gc
 import re
 import platform
+import contextlib
+import warnings
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, Union
 from datetime import date as date_cls, datetime, timedelta
@@ -35,7 +39,6 @@ from src.acquisition.epc_api_downloader import (
     EPCDownloadError,
     EPCStockDefinitionError,
 )
-from src.acquisition.london_gis_downloader import LondonGISDownloader
 from src.acquisition.hnpd_downloader import HNPDDownloader
 from src.cleaning.data_validator import EPCDataValidator
 from src.analysis.archetype_analysis import ArchetypeAnalyzer
@@ -48,6 +51,7 @@ from src.utils.staged_processing import (
     apply_adjustments_staged_dataset,
     validate_staged_dataset,
 )
+from src.ui import create_dashboard
 
 
 console = Console()
@@ -57,6 +61,11 @@ EXIT_ANALYSIS_FAILED = 1
 EXIT_CANCELLED = 130
 REPO_ROOT = Path(__file__).resolve().parent
 _hp_hn_comparison_outputs_cache: Optional[Dict[str, Any]] = None
+
+PHASE_ACQUISITION = "Acquisition"
+PHASE_VALIDATION = "Validation"
+PHASE_MODELLING = "Modelling"
+PHASE_OUTPUTS = "Outputs"
 
 EXPECTED_STAGED_DOWNLOAD_DATA_MARKERS = (
     "download_national_domestic_dataset(",
@@ -74,6 +83,308 @@ EXPECTED_STAGED_NATIONAL_DOWNLOADER_MARKERS = (
 
 class AnalysisCancelled(Exception):
     """User cancelled the interactive analysis flow."""
+
+
+def _ui_call(ui, method_name: str, *args, **kwargs):
+    """Call a dashboard method without allowing UI errors into the pipeline."""
+    if ui is None:
+        return None
+    try:
+        method = getattr(ui, method_name, None)
+        if method is None:
+            return None
+        return method(*args, **kwargs)
+    except Exception:
+        return None
+
+
+@contextlib.contextmanager
+def _ui_suspend(ui, message: str = ""):
+    """Temporarily suspend Live rendering around an interactive prompt."""
+    if ui is None or not hasattr(ui, "suspend_for_prompt"):
+        yield
+        return
+    manager = ui.suspend_for_prompt(message)
+    if manager is None:
+        yield
+        return
+    with manager:
+        yield
+
+
+def _ui_phase_started(ui, name: str, message: str = "") -> None:
+    _ui_call(ui, "phase_started", name, message)
+
+
+def _ui_phase_progress(ui, name: str, message: str) -> None:
+    _ui_call(ui, "phase_progress", name, message)
+
+
+def _ui_phase_completed(ui, name: str, message: str = "") -> None:
+    _ui_call(ui, "phase_completed", name, message)
+
+
+def _ui_phase_failed(ui, name: str, message: str = "") -> None:
+    _ui_call(ui, "phase_failed", name, message)
+
+
+def _ui_phase_skipped(ui, name: str, message: str = "") -> None:
+    _ui_call(ui, "phase_skipped", name, message)
+
+
+def _ui_metric(ui, key: str, value: Any, group: Optional[str] = None) -> None:
+    _ui_call(ui, "metric", key, value, group=group)
+
+
+def _ui_output(ui, label: str, path: Any) -> None:
+    _ui_call(ui, "output", label, path)
+
+
+def _ui_warning(ui, message: str) -> None:
+    _ui_call(ui, "warning", message)
+
+
+def _ui_info(ui, message: str) -> None:
+    _ui_call(ui, "info", message)
+
+
+def _ui_suppresses_progress(ui) -> bool:
+    """Return True when external progress bars should stay silent."""
+    return bool(getattr(ui, "suppress_external_progress", False))
+
+
+def _render_console_message(objects: tuple[Any, ...], kwargs: Dict[str, Any]) -> str:
+    """Render Rich console print arguments to plain text for dashboard events."""
+    buffer = io.StringIO()
+    capture = Console(file=buffer, force_terminal=False, color_system=None, width=100)
+    allowed_kwargs = {
+        key: value
+        for key, value in kwargs.items()
+        if key
+        in {
+            "style",
+            "justify",
+            "overflow",
+            "no_wrap",
+            "emoji",
+            "markup",
+            "highlight",
+            "soft_wrap",
+            "new_line_start",
+            "crop",
+        }
+    }
+    try:
+        capture.print(*objects, **allowed_kwargs)
+    except Exception:
+        return " ".join(str(obj) for obj in objects)
+    return buffer.getvalue().strip()
+
+
+@contextlib.contextmanager
+def _route_console_output_for_tui(ui):
+    """Route routine console prints into the full TUI while Rich Live is active."""
+    if not (
+        getattr(ui, "route_console_output", False)
+        and not getattr(ui, "verbose", False)
+    ):
+        yield
+        return
+
+    original_print = console.print
+    original_clear = console.clear
+    original_rprint = globals().get("rprint")
+
+    def passthrough_allowed() -> bool:
+        return bool(getattr(ui, "allow_console_output", False)) or not bool(
+            getattr(ui, "is_live_active", False)
+        )
+
+    def routed_print(*objects, **kwargs):
+        if passthrough_allowed():
+            return original_print(*objects, **kwargs)
+        text = _render_console_message(objects, kwargs)
+        if not text:
+            return None
+        lowered = text.lower()
+        if any(token in lowered for token in ("warning", "failed", "error", "could not", "cannot")):
+            _ui_warning(ui, text)
+        else:
+            _ui_info(ui, text)
+        return None
+
+    def routed_clear(*args, **kwargs):
+        if passthrough_allowed():
+            return original_clear(*args, **kwargs)
+        return None
+
+    console.print = routed_print
+    console.clear = routed_clear
+    globals()["rprint"] = routed_print
+    try:
+        yield
+    finally:
+        console.print = original_print
+        console.clear = original_clear
+        if original_rprint is not None:
+            globals()["rprint"] = original_rprint
+
+
+@contextlib.contextmanager
+def _configure_tui_logging(ui):
+    """Keep loguru/Python warning output away from the live screen."""
+    if not getattr(ui, "is_full_tui", False):
+        yield
+        return
+
+    DATA_OUTPUTS_DIR.mkdir(parents=True, exist_ok=True)
+    log_path = DATA_OUTPUTS_DIR / "mission_control.log"
+    original_showwarning = warnings.showwarning
+
+    try:
+        logger.remove()
+    except ValueError:
+        pass
+    logger.add(log_path, level="INFO", encoding="utf-8", backtrace=False, diagnose=False)
+
+    def showwarning(message, category, filename, lineno, file=None, line=None):
+        summary = f"{category.__name__}: {message}"
+        _ui_warning(ui, summary)
+        logger.warning(f"{summary} ({filename}:{lineno})")
+
+    warnings.showwarning = showwarning
+    try:
+        yield
+    finally:
+        warnings.showwarning = original_showwarning
+        try:
+            logger.remove()
+        except ValueError:
+            pass
+        logger.add(sys.stderr, level="DEBUG")
+
+
+@contextlib.contextmanager
+def _external_progress_context(ui):
+    """Disable external tqdm-style progress output under the full TUI."""
+    if not _ui_suppresses_progress(ui):
+        yield
+        return
+
+    previous = os.environ.get("TQDM_DISABLE")
+    os.environ["TQDM_DISABLE"] = "1"
+    try:
+        yield
+    finally:
+        if previous is None:
+            os.environ.pop("TQDM_DISABLE", None)
+        else:
+            os.environ["TQDM_DISABLE"] = previous
+
+
+def _call_with_optional_ui(func, *args, ui=None, **kwargs):
+    """Call a function with ui=... only when its signature supports it."""
+    if ui is None:
+        return func(*args, **kwargs)
+    try:
+        signature = inspect.signature(func)
+        parameters = signature.parameters
+        if "ui" in parameters or any(
+            parameter.kind == inspect.Parameter.VAR_KEYWORD
+            for parameter in parameters.values()
+        ):
+            kwargs["ui"] = ui
+    except (TypeError, ValueError):
+        kwargs["ui"] = ui
+    return func(*args, **kwargs)
+
+
+def _make_epc_progress_callback(ui):
+    """Translate acquisition callback dictionaries into dashboard metrics."""
+    if ui is None:
+        return None
+
+    counters: Dict[str, int] = {
+        "certificate members selected": 0,
+        "recommendation members ignored": 0,
+        "members processed": 0,
+        "rows read": 0,
+        "rows retained": 0,
+        "malformed rows skipped": 0,
+        "Parquet parts written": 0,
+    }
+
+    def callback(event: Dict[str, Any]) -> None:
+        try:
+            event_type = event.get("event")
+            if event_type == "reusable_staged_dataset_accepted":
+                _ui_info(ui, "Reusable staged EPC full-load dataset accepted")
+                if event.get("row_count") is not None:
+                    _ui_metric(ui, "rows retained", event.get("row_count"), group=PHASE_ACQUISITION)
+                if event.get("dataset_path"):
+                    _ui_output(ui, "Reusable EPC staged dataset", event.get("dataset_path"))
+            elif event_type == "attempt_directory_created":
+                _ui_info(ui, "Created EPC full-load attempt directory")
+            elif event_type == "zip_download_started":
+                _ui_phase_progress(ui, "Data Download", "Downloading EPC full-load ZIP")
+            elif event_type == "zip_validation_complete":
+                _ui_metric(ui, "EPC ZIP bytes", event.get("size_bytes", 0), group=PHASE_ACQUISITION)
+            elif event_type == "member_selection_complete":
+                counters["certificate members selected"] = len(event.get("selected_certificate_members") or [])
+                counters["recommendation members ignored"] = len(event.get("ignored_recommendation_members") or [])
+                _ui_metric(ui, "certificate members selected", counters["certificate members selected"], group=PHASE_ACQUISITION)
+                _ui_metric(ui, "recommendation members ignored", counters["recommendation members ignored"], group=PHASE_ACQUISITION)
+            elif event_type == "member_started":
+                _ui_phase_progress(ui, "Data Download", f"Reading {event.get('member')}")
+            elif event_type == "chunk_parsed":
+                counters["rows read"] += int(event.get("rows_read", 0) or 0)
+                counters["rows retained"] += int(event.get("rows_retained", 0) or 0)
+                _ui_metric(ui, "rows read", counters["rows read"], group=PHASE_ACQUISITION)
+                _ui_metric(ui, "rows retained", counters["rows retained"], group=PHASE_ACQUISITION)
+            elif event_type == "parquet_part_written":
+                counters["Parquet parts written"] += 1
+                _ui_metric(ui, "Parquet parts written", counters["Parquet parts written"], group=PHASE_ACQUISITION)
+            elif event_type == "member_complete":
+                counters["members processed"] += 1
+                counters["malformed rows skipped"] += int(event.get("malformed_rows_skipped", 0) or 0)
+                _ui_metric(ui, "members processed", counters["members processed"], group=PHASE_ACQUISITION)
+                _ui_metric(ui, "malformed rows skipped", counters["malformed rows skipped"], group=PHASE_ACQUISITION)
+            elif event_type == "dataset_reference_created":
+                _ui_metric(ui, "rows retained", event.get("row_count", 0), group=PHASE_ACQUISITION)
+                _ui_output(ui, "National EPC staged dataset", event.get("parquet_path"))
+        except Exception:
+            return None
+
+    return callback
+
+
+def _add_metric(
+    analysis_logger: Optional[AnalysisLogger],
+    ui,
+    key: str,
+    value: Any,
+    description: str = "",
+    *,
+    group: Optional[str] = None,
+) -> None:
+    """Mirror an audit metric into the dashboard where available."""
+    if analysis_logger:
+        analysis_logger.add_metric(key, value, description)
+    _ui_metric(ui, key, value, group=group)
+
+
+def _register_output(
+    analysis_logger: Optional[AnalysisLogger],
+    ui,
+    output_path: Union[str, Path],
+    output_type: str,
+    description: str,
+) -> bool:
+    """Register an output with the audit logger and the optional dashboard."""
+    registered = add_analysis_output_if_exists(analysis_logger, output_path, output_type, description)
+    if registered:
+        _ui_output(ui, description or output_type, output_path)
+    return registered
 
 
 def _safe_resolve_path(value: Optional[Union[str, Path]]) -> Optional[str]:
@@ -472,6 +783,65 @@ def parse_iso_date(value: str) -> date_cls:
     return datetime.strptime(value.strip(), "%Y-%m-%d").date()
 
 
+def _argparse_iso_date(value: str) -> date_cls:
+    """Parse a CLI ISO date with an argparse-friendly error."""
+    try:
+        return parse_iso_date(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("expected YYYY-MM-DD") from exc
+
+
+def parse_args(argv=None) -> argparse.Namespace:
+    """Parse HeatStreet Mission Control runner arguments."""
+    parser = argparse.ArgumentParser(
+        description="Run the HeatStreet Mission Control analysis pipeline.",
+    )
+    tui_group = parser.add_mutually_exclusive_group()
+    tui_group.add_argument("--tui", dest="tui", action="store_true", help="Enable the Rich live dashboard when the terminal supports it.")
+    tui_group.add_argument("--no-tui", dest="tui", action="store_false", help="Disable the Rich live dashboard.")
+    parser.set_defaults(tui=None)
+    parser.add_argument("--simple-tui", action="store_true", help="Use a stable line-oriented terminal dashboard.")
+    parser.add_argument(
+        "--tui-refresh-rate",
+        type=int,
+        metavar="N",
+        help="Rich dashboard refresh rate in frames per second; supported values are clamped to 2-4.",
+    )
+
+    parser.add_argument("--quiet", action="store_true", help="Suppress live dashboard and routine fallback chatter.")
+    parser.add_argument("--verbose", action="store_true", help="Show expanded diagnostic detail in fallback output.")
+
+    open_group = parser.add_mutually_exclusive_group()
+    open_group.add_argument("--open-results", dest="open_results", action="store_true", help="Open the outputs folder after a successful run.")
+    open_group.add_argument("--no-open", dest="open_results", action="store_false", help="Do not open the outputs folder after the run.")
+    parser.set_defaults(open_results=False)
+
+    parser.add_argument("--sample-start", type=_argparse_iso_date, help="Inclusive EPC sample start date (YYYY-MM-DD).")
+    parser.add_argument("--sample-end", type=_argparse_iso_date, help="Inclusive EPC sample end date (YYYY-MM-DD).")
+
+    data_group = parser.add_mutually_exclusive_group()
+    data_group.add_argument("--use-existing", action="store_true", help="Use matching existing raw data without prompting.")
+    data_group.add_argument("--fresh", action="store_true", help="Force a fresh EPC download even when matching raw data exists.")
+
+    report_group = parser.add_mutually_exclusive_group()
+    report_group.add_argument("--one-stop-only", action="store_true", help="Generate only one-stop reporting outputs for this run.")
+    report_group.add_argument("--full-reports", action="store_true", help="Generate the full report set for this run.")
+
+    parser.add_argument(
+        "--download-scope",
+        choices=["full-london", "single-borough"],
+        help="EPC acquisition scope. single-borough prompts for --borough when omitted.",
+    )
+    parser.add_argument("--borough", help="London borough name for --download-scope single-borough.")
+
+    args = parser.parse_args(argv)
+    if args.sample_start and args.sample_end and args.sample_start > args.sample_end:
+        parser.error("--sample-start cannot be after --sample-end")
+    if args.borough and args.download_scope is None:
+        args.download_scope = "single-borough"
+    return args
+
+
 def validate_end_date(value: str) -> Union[bool, str]:
     """Validate sample end date input."""
     if not value or not value.strip():
@@ -514,14 +884,15 @@ def compute_sample_start_date(sample_end_date: date_cls) -> date_cls:
         return sample_end_date.replace(year=sample_end_date.year - 10, day=28)
 
 
-def prompt_sample_end_date() -> date_cls:
+def prompt_sample_end_date(ui=None) -> date_cls:
     """Prompt for the sample end date, defaulting to yesterday for API safety."""
     default_value = (date_cls.today() - timedelta(days=1)).isoformat()
-    sample_end_text = questionary.text(
-        "Sample end date (YYYY-MM-DD):",
-        default=default_value,
-        validate=validate_end_date,
-    ).ask()
+    with _ui_suspend(ui, "Waiting for sample end date"):
+        sample_end_text = questionary.text(
+            "Sample end date (YYYY-MM-DD):",
+            default=default_value,
+            validate=validate_end_date,
+        ).ask()
 
     if sample_end_text is None:
         raise KeyboardInterrupt("Sample end date input cancelled")
@@ -529,15 +900,16 @@ def prompt_sample_end_date() -> date_cls:
     return parse_iso_date(sample_end_text)
 
 
-def prompt_sample_window() -> Tuple[date_cls, date_cls]:
+def prompt_sample_window(ui=None) -> Tuple[date_cls, date_cls]:
     """Prompt for a fully configurable sample window."""
-    sample_end_date = prompt_sample_end_date()
+    sample_end_date = prompt_sample_end_date(ui=ui)
     default_start_date = compute_sample_start_date(sample_end_date).isoformat()
-    sample_start_text = questionary.text(
-        "Sample start date (YYYY-MM-DD):",
-        default=default_start_date,
-        validate=lambda value: validate_start_date(value, sample_end_date),
-    ).ask()
+    with _ui_suspend(ui, "Waiting for sample start date"):
+        sample_start_text = questionary.text(
+            "Sample start date (YYYY-MM-DD):",
+            default=default_start_date,
+            validate=lambda value: validate_start_date(value, sample_end_date),
+        ).ask()
 
     if sample_start_text is None:
         raise KeyboardInterrupt("Sample start date input cancelled")
@@ -618,11 +990,12 @@ def dataset_is_empty(value) -> bool:
     return dataset_record_count(value) == 0
 
 
-def ensure_dataframe(value, *, stage_name: str):
+def ensure_dataframe(value, *, stage_name: str, ui=None):
     """Materialize a staged dataset into memory when a downstream phase needs a dataframe."""
     if not is_dataset_reference(value):
         return value
 
+    _ui_phase_progress(ui, "Materialization", f"Materializing {stage_name}")
     console.print(f"[cyan]Materializing {stage_name} from staged Parquet at {value.parquet_path}...[/cyan]")
     try:
         df = value.load_dataframe()
@@ -637,6 +1010,7 @@ def ensure_dataframe(value, *, stage_name: str):
         ) from exc
 
     console.print(f"[green]OK[/green] Loaded {len(df):,} records from staged dataset")
+    _ui_metric(ui, f"{stage_name} records", len(df), group=PHASE_ACQUISITION)
     return df
 
 
@@ -706,11 +1080,12 @@ def print_header():
     print()
 
 
-def check_credentials():
+def check_credentials(ui=None):
     """Check if the API token is configured."""
     token = os.getenv('EPC_API_TOKEN')
 
     if not token:
+        _ui_warning(ui, "EPC API token missing")
         console.print("[yellow]⚠[/yellow]  API token not found in .env file", style="yellow")
         console.print()
 
@@ -732,10 +1107,11 @@ def check_credentials():
         console.print("[dim]Get the token from your my account page on the Energy Certificate Data API service.[/dim]")
         console.print()
 
-        token = questionary.password(
-            "Bearer token:",
-            validate=validate_epc_token
-        ).ask()
+        with _ui_suspend(ui, "Waiting for EPC API token"):
+            token = questionary.password(
+                "Bearer token:",
+                validate=validate_epc_token
+            ).ask()
 
         if token is None:
             console.print("[yellow]Credential input cancelled[/yellow]")
@@ -757,65 +1133,11 @@ def check_credentials():
         console.print("[green]✓[/green] API token saved to .env file")
         console.print()
 
+    _ui_metric(ui, "EPC API token", "configured", group=PHASE_ACQUISITION)
     return True
 
 
-def ask_gis_download():
-    """Ask if user wants to download London GIS data for spatial analysis."""
-    console.print()
-    console.print("[cyan]London GIS Data (Optional)[/cyan]")
-    console.print()
-    console.print("This analysis can optionally use GIS data from London Datastore for:")
-    console.print("  • Existing district heating networks")
-    console.print("  • Potential heat network zones")
-    console.print("  • Heat load and supply data by borough")
-    console.print()
-
-    # Check if already downloaded
-    gis_downloader = LondonGISDownloader()
-    summary = gis_downloader.get_data_summary()
-
-    if summary['available']:
-        console.print("[green]✓[/green] GIS data already downloaded")
-        console.print(f"    Heat load files: {summary['heat_load_files']}")
-        console.print(f"    Network files: {summary['network_files']}")
-        console.print(f"    Heat supply files: {summary['heat_supply_files']}")
-        return True
-
-    download = True  # Automatically download GIS data for spatial analysis
-
-    if download:
-        console.print()
-        console.print("[cyan]Downloading London GIS data...[/cyan]")
-
-        try:
-            gis_ready = gis_downloader.download_and_prepare()
-        except Exception as exc:
-            logger.warning(
-                "Optional London GIS download failed unexpectedly; continuing without London Datastore GIS layers: {}",
-                exc,
-            )
-            gis_downloader.last_error = exc
-            gis_ready = False
-
-        if gis_ready:
-            console.print("[green]✓[/green] GIS data downloaded and ready")
-            return True
-
-        error_detail = getattr(gis_downloader, "last_error", None)
-        console.print(
-            "[yellow]⚠[/yellow] Optional London Datastore GIS download failed "
-            "(spatial analysis will continue without London Datastore GIS layers; "
-            "this does not affect the EPC API download path)"
-        )
-        if error_detail:
-            console.print(f"[dim]Reason: {error_detail}[/dim]")
-        return False
-
-    return False
-
-
-def ask_hnpd_download():
+def ask_hnpd_download(ui=None):
     """Ask if user wants to download BEIS Heat Network Planning Database."""
     console.print()
     console.print("[cyan]BEIS Heat Network Planning Database (Recommended)[/cyan]")
@@ -824,7 +1146,7 @@ def ask_hnpd_download():
     console.print("  • Operational heat networks across the UK")
     console.print("  • Networks under construction")
     console.print("  • Planned networks with planning permission")
-    console.print("  • More accurate than 2012 London Heat Map data")
+    console.print("  • Current external evidence for Tier 1-2 heat network proximity")
     console.print()
 
     # Check if already downloaded
@@ -833,6 +1155,7 @@ def ask_hnpd_download():
 
     if summary['available']:
         console.print("[green]✓[/green] HNPD data already downloaded")
+        _ui_metric(ui, "HNPD", "available", group=PHASE_ACQUISITION)
         console.print(f"    Total records: {summary['total_records']}")
         console.print(f"    Tier 1 networks: {summary['tier_1_networks']} (operational/under construction)")
         console.print(f"    Tier 2 networks: {summary['tier_2_networks']} (planning granted)")
@@ -846,16 +1169,29 @@ def ask_hnpd_download():
         console.print("[cyan]Downloading BEIS Heat Network Planning Database...[/cyan]")
 
         if hnpd_downloader.download_and_prepare():
+            _ui_metric(ui, "HNPD", "downloaded", group=PHASE_ACQUISITION)
             console.print("[green]✓[/green] HNPD data downloaded and ready")
             summary = hnpd_downloader.get_data_summary()
             console.print(f"    {summary['total_records']} heat network records loaded")
             console.print(f"    {summary['tier_1_networks']} Tier 1 + {summary['tier_2_networks']} Tier 2 networks")
             return True
         else:
-            console.print("[yellow]⚠[/yellow] HNPD download failed (will use London Heat Map 2012 as fallback)")
+            _ui_warning(
+                ui,
+                "HNPD download failed; network-proximity tiers may be unavailable, but density-based tiers can still run",
+            )
+            console.print(
+                "[yellow]⚠[/yellow] HNPD download failed "
+                "(Tier 1-2 network proximity evidence may be unavailable; "
+                "Tier 3-5 density-based classification can still run)"
+            )
             return False
 
-    console.print("[yellow]⚠[/yellow] Skipping HNPD download (will use London Heat Map 2012 as fallback)")
+    console.print(
+        "[yellow]⚠[/yellow] Skipping HNPD download "
+        "(Tier 1-2 network proximity evidence may be unavailable; "
+        "Tier 3-5 density-based classification can still run)"
+    )
     return False
 
 
@@ -863,34 +1199,50 @@ def download_data(
     analysis_logger: AnalysisLogger = None,
     sample_start_date: date_cls = None,
     sample_end_date: date_cls = None,
+    ui=None,
+    download_scope: Optional[str] = None,
+    borough: Optional[str] = None,
 ):
     """Download EPC data via API."""
     console.print()
     console.print(Panel("[bold]Phase 1: Data Download[/bold]", border_style="blue"))
     console.print()
+    _ui_phase_started(ui, "Data Download", "Preparing EPC acquisition")
 
     from_year = sample_start_date.year if sample_start_date else 2015
 
-    download_scope = questionary.select(
-        "Select download scope:",
-        choices=[
-            "All London boroughs (full dataset)",
-            "Single borough (testing)",
-        ],
-    ).ask()
+    scope_map = {
+        "full-london": "All London boroughs (full dataset)",
+        "single-borough": "Single borough (testing)",
+    }
+    download_scope = scope_map.get(download_scope, download_scope)
+    if download_scope is None:
+        with _ui_suspend(ui, "Waiting for EPC download scope"):
+            download_scope = questionary.select(
+                "Select download scope:",
+                choices=[
+                    "All London boroughs (full dataset)",
+                    "Single borough (testing)",
+                ],
+            ).ask()
 
     if not download_scope:
         raise AnalysisCancelled("Download cancelled by user")
 
-    selected_borough = None
+    selected_borough = borough
     if download_scope == "Single borough (testing)":
-        selected_borough = questionary.autocomplete(
-            "Select borough:",
-            choices=list(EPCAPIDownloader.LONDON_LA_CODES.keys()),
-        ).ask()
+        if not selected_borough:
+            with _ui_suspend(ui, "Waiting for borough selection"):
+                selected_borough = questionary.autocomplete(
+                    "Select borough:",
+                    choices=list(EPCAPIDownloader.LONDON_LA_CODES.keys()),
+                ).ask()
 
         if not selected_borough:
             raise AnalysisCancelled("Download cancelled by user")
+        _ui_metric(ui, "Download scope", selected_borough, group=PHASE_ACQUISITION)
+    else:
+        _ui_metric(ui, "Download scope", "full London", group=PHASE_ACQUISITION)
 
     download_mode = "full_load"
     downloader = EPCAPIDownloader(download_mode=download_mode)
@@ -918,7 +1270,8 @@ def download_data(
                 sample_end_date=sample_end_date,
                 max_results=None,
                 log_borough=True,
-                show_progress=True,
+                show_progress=not _ui_suppresses_progress(ui),
+                progress_callback=_make_epc_progress_callback(ui),
             )
         elif hasattr(downloader, "download_national_domestic_dataset"):
             console.print("[cyan]Using staged Parquet processing for the national EPC full-load extract...[/cyan]")
@@ -927,6 +1280,7 @@ def download_data(
             national_stage = downloader.download_national_domestic_dataset(
                 sample_start_date=sample_start_date,
                 sample_end_date=sample_end_date,
+                progress_callback=_make_epc_progress_callback(ui),
             )
             ingest_manifest = national_stage.metadata
             selected_members = ingest_manifest.get("selected_certificate_members", [])
@@ -977,6 +1331,9 @@ def download_data(
             console.print(f"[green]OK[/green] Raw London house records: {raw_record_count:,}")
             console.print(f"[green]OK[/green] Filtered London pre-1930 terraced house records: {filtered_record_count:,}")
             console.print(f"[cyan]Filtered staged dataset:[/cyan] {filtered_ref.parquet_path}")
+            _ui_metric(ui, "raw London records", raw_record_count, group=PHASE_ACQUISITION)
+            _ui_metric(ui, "filtered stock records", filtered_record_count, group=PHASE_ACQUISITION)
+            _ui_output(ui, "Filtered EPC staged dataset", filtered_ref.parquet_path)
 
             if sample_start_date and sample_end_date:
                 for output_path, dataset_type in (
@@ -1020,6 +1377,11 @@ def download_data(
                     ),
                 )
 
+            _ui_phase_completed(
+                ui,
+                "Data Download",
+                f"Prepared {filtered_record_count:,} London pre-1930 terraced house records",
+            )
             return filtered_ref
         else:
             console.print(
@@ -1114,26 +1476,37 @@ def download_data(
                 ),
             )
 
+        _ui_metric(ui, "raw London records", len(df), group=PHASE_ACQUISITION)
+        _ui_metric(ui, "filtered stock records", len(df_filtered), group=PHASE_ACQUISITION)
+        _ui_phase_completed(
+            ui,
+            "Data Download",
+            f"Prepared {len(df_filtered):,} pre-1930 terraced house records",
+        )
         return df_filtered
 
     except AnalysisCancelled:
         raise
     except EPCStockDefinitionError as e:
+        _ui_phase_failed(ui, "Data Download", f"Stock definition failed: {e}")
         console.print(f"[red]✗[/red] Stock definition failed: {e}", style="red")
         if analysis_logger:
             analysis_logger.complete_phase(success=False, message=f"StockDefinitionError: {e}")
         return None
     except EPCDownloadError as e:
+        _ui_phase_failed(ui, "Data Download", f"EPC download failed: {e}")
         console.print(f"[red]✗[/red] EPC download failed: {e}", style="red")
         if analysis_logger:
             analysis_logger.complete_phase(success=False, message=str(e))
         return None
     except ValueError as e:
+        _ui_phase_failed(ui, "Data Download", f"Value error: {e}")
         console.print(f"[red]✗[/red] Error: {e}", style="red")
         if analysis_logger:
             analysis_logger.complete_phase(success=False, message=f"ValueError: {e}")
         return None
     except Exception as e:
+        _ui_phase_failed(ui, "Data Download", f"Unexpected error: {e}")
         console.print(f"[red]✗[/red] Unexpected error: {e}", style="red")
         if analysis_logger:
             analysis_logger.complete_phase(success=False, message=f"Error: {e}")
@@ -1145,11 +1518,13 @@ def validate_data(
     analysis_logger: AnalysisLogger = None,
     sample_start_date: date_cls = None,
     sample_end_date: date_cls = None,
+    ui=None,
 ):
     """Validate and clean data."""
     console.print()
     console.print(Panel("[bold]Phase 2: Data Validation[/bold]", border_style="blue"))
     console.print()
+    _ui_phase_started(ui, "Data Validation", "Running quality assurance checks")
 
     if analysis_logger:
         analysis_logger.start_phase(
@@ -1202,6 +1577,14 @@ def validate_data(
         console.print(f"    Duplicates removed: {report.get('duplicates_removed', 0):,}")
         console.print(f"    Invalid records: {invalid_records:,}")
         console.print("[green]OK[/green] Validated data saved")
+        _ui_metric(ui, "input records", report.get('total_records', 0), group=PHASE_VALIDATION)
+        _ui_metric(ui, "passed records", records_passed, group=PHASE_VALIDATION)
+        _ui_metric(ui, "duplicates removed", report.get('duplicates_removed', 0), group=PHASE_VALIDATION)
+        _ui_metric(ui, "invalid records", invalid_records, group=PHASE_VALIDATION)
+        if report.get('total_records', 0):
+            _ui_metric(ui, "validation rate", records_passed/report['total_records']*100, group=PHASE_VALIDATION)
+        _ui_metric(ui, "negative energy values", report.get('negative_energy_values', 0), group=PHASE_VALIDATION)
+        _ui_metric(ui, "negative CO2 values", report.get('negative_co2_values', 0), group=PHASE_VALIDATION)
 
         if analysis_logger:
             analysis_logger.add_metric("input_records", report.get('total_records', 0), "Records before validation")
@@ -1222,6 +1605,9 @@ def validate_data(
             add_analysis_output_if_exists(analysis_logger, validation_report_json, "report", "Data validation report (JSON)")
             analysis_logger.complete_phase(success=True, message=f"{records_passed:,} records validated")
 
+        _ui_output(ui, "Validated EPC dataset", validated_dataset.parquet_path)
+        _ui_output(ui, "Validation report", validation_report_json)
+        _ui_phase_completed(ui, "Data Validation", f"{records_passed:,} records validated")
         return validated_dataset, report
 
     validator = EPCDataValidator()
@@ -1294,12 +1680,23 @@ def validate_data(
 
     console.print(f"[green]✓[/green] Validated data saved")
 
+    _ui_metric(ui, "input records", report['total_records'], group=PHASE_VALIDATION)
+    _ui_metric(ui, "passed records", records_passed, group=PHASE_VALIDATION)
+    _ui_metric(ui, "duplicates removed", report['duplicates_removed'], group=PHASE_VALIDATION)
+    _ui_metric(ui, "invalid records", invalid_records, group=PHASE_VALIDATION)
+    _ui_metric(ui, "validation rate", records_passed/report['total_records']*100, group=PHASE_VALIDATION)
+    _ui_metric(ui, "negative energy values", report.get('negative_energy_values', 0), group=PHASE_VALIDATION)
+    _ui_metric(ui, "negative CO2 values", report.get('negative_co2_values', 0), group=PHASE_VALIDATION)
+    _ui_output(ui, "Validated EPC dataset", output_file)
+    _ui_output(ui, "Validation report", DATA_PROCESSED_DIR / "validation_report.json")
+
     if analysis_logger:
         analysis_logger.add_output(str(output_file), "csv", "Validated EPC dataset")
         analysis_logger.add_output("data/processed/validation_report.txt", "report", "Data validation report")
         analysis_logger.add_output("data/processed/validation_report.json", "report", "Data validation report (JSON)")
         analysis_logger.complete_phase(success=True, message=f"{records_passed:,} records validated")
 
+    _ui_phase_completed(ui, "Data Validation", f"{records_passed:,} records validated")
     return df_validated, report
 
 
@@ -1308,11 +1705,13 @@ def apply_methodological_adjustments(
     analysis_logger: AnalysisLogger = None,
     sample_start_date: date_cls = None,
     sample_end_date: date_cls = None,
+    ui=None,
 ):
     """Apply evidence-based methodological adjustments."""
     console.print()
     console.print(Panel("[bold]Phase 2.5: Methodological Adjustments[/bold]", border_style="blue"))
     console.print()
+    _ui_phase_started(ui, "Methodological Adjustments", "Applying evidence-based adjustments")
 
     if analysis_logger:
         analysis_logger.start_phase(
@@ -1361,6 +1760,13 @@ def apply_methodological_adjustments(
             console.print("    - Measurement uncertainty (Crawley et al., 2019)")
             adjustments_applied.append("Measurement uncertainty")
 
+        _ui_metric(ui, "adjustments applied", len(adjustments_applied), group=PHASE_VALIDATION)
+        _ui_metric(ui, "records adjusted", adjusted_record_count, group=PHASE_VALIDATION)
+        if adjustments_applied:
+            _ui_metric(ui, "adjustment names", ", ".join(adjustments_applied), group=PHASE_VALIDATION)
+        _ui_output(ui, "Adjusted EPC dataset", adjusted_dataset.parquet_path)
+        _ui_output(ui, "Adjustment summary", DATA_PROCESSED_DIR / "methodological_adjustments_summary.json")
+
         if analysis_logger:
             analysis_logger.add_metric("adjustments_applied", len(adjustments_applied), f"Applied: {', '.join(adjustments_applied)}")
             analysis_logger.add_metric("records_adjusted", adjusted_record_count, "Records with adjustments")
@@ -1369,6 +1775,7 @@ def apply_methodological_adjustments(
             analysis_logger.add_output(str(output_file.with_suffix(".parquet")), "parquet", "Adjusted EPC dataset (Parquet)")
             analysis_logger.complete_phase(success=True, message=f"{len(adjustments_applied)} methodological adjustments applied")
 
+        _ui_phase_completed(ui, "Methodological Adjustments", f"{len(adjustments_applied)} adjustments applied")
         return adjusted_dataset, summary
 
     adjuster = MethodologicalAdjustments()
@@ -1431,6 +1838,13 @@ def apply_methodological_adjustments(
         console.print(f"    • Measurement uncertainty (Crawley et al., 2019)")
         adjustments_applied.append("Measurement uncertainty")
 
+    _ui_metric(ui, "adjustments applied", len(adjustments_applied), group=PHASE_VALIDATION)
+    _ui_metric(ui, "records adjusted", adjusted_record_count, group=PHASE_VALIDATION)
+    if adjustments_applied:
+        _ui_metric(ui, "adjustment names", ", ".join(adjustments_applied), group=PHASE_VALIDATION)
+    _ui_output(ui, "Adjusted EPC dataset", parquet_file if parquet_file and parquet_file.exists() else output_file)
+    _ui_output(ui, "Adjustment summary", DATA_PROCESSED_DIR / "methodological_adjustments_summary.json")
+
     if analysis_logger:
         analysis_logger.add_metric("adjustments_applied", len(adjustments_applied), f"Applied: {', '.join(adjustments_applied)}")
         analysis_logger.add_metric("records_adjusted", adjusted_record_count, "Records with adjustments")
@@ -1440,6 +1854,7 @@ def apply_methodological_adjustments(
             analysis_logger.add_output(str(parquet_file), "parquet", "Adjusted EPC dataset (Parquet)")
         analysis_logger.complete_phase(success=True, message=f"{len(adjustments_applied)} methodological adjustments applied")
 
+    _ui_phase_completed(ui, "Methodological Adjustments", f"{len(adjustments_applied)} adjustments applied")
     return df_adjusted, summary
 
 
@@ -1533,11 +1948,12 @@ def ensure_hp_hn_comparison_outputs(df=None, analysis_logger: AnalysisLogger = N
         return None
 
 
-def analyze_archetype(df, analysis_logger: AnalysisLogger = None):
+def analyze_archetype(df, analysis_logger: AnalysisLogger = None, ui=None):
     """Run archetype characterization."""
     console.print()
     console.print(Panel("[bold]Phase 3: Archetype Analysis[/bold]", border_style="blue"))
     console.print()
+    _ui_phase_started(ui, "Archetype Analysis", "Analyzing property characteristics")
 
     if analysis_logger:
         analysis_logger.start_phase(
@@ -1550,6 +1966,7 @@ def analyze_archetype(df, analysis_logger: AnalysisLogger = None):
     analyzer = ArchetypeAnalyzer()
     results = analyzer.analyze_archetype(df)
     analyzer.save_results()
+    _ui_metric(ui, "properties", len(df), group=PHASE_MODELLING)
 
     console.print(f"[green]✓[/green] Archetype analysis complete")
 
@@ -1562,6 +1979,7 @@ def analyze_archetype(df, analysis_logger: AnalysisLogger = None):
                 count = results['epc_bands']['frequency'][band]
                 pct = results['epc_bands']['percentage'][band]
                 console.print(f"    Band {band}: {count:,} ({pct:.1f}%)")
+                _ui_metric(ui, f"EPC band {band}", count, group=PHASE_MODELLING)
 
         if analysis_logger:
             for band in ['D', 'E', 'F', 'G']:
@@ -1577,14 +1995,19 @@ def analyze_archetype(df, analysis_logger: AnalysisLogger = None):
         analysis_logger.add_output("data/outputs/archetype_analysis_results.txt", "report", "Archetype characterization results")
         analysis_logger.complete_phase(success=True, message="Archetype characterization complete")
 
+    if results:
+        _ui_metric(ui, "archetype result sections", len(results), group=PHASE_MODELLING)
+    _ui_output(ui, "Archetype results", "data/outputs/archetype_analysis_results.txt")
+    _ui_phase_completed(ui, "Archetype Analysis", "Archetype characterization complete")
     return results
 
 
-def model_scenarios(df, analysis_logger: AnalysisLogger = None):
+def model_scenarios(df, analysis_logger: AnalysisLogger = None, ui=None):
     """Run scenario modeling."""
     console.print()
     console.print(Panel("[bold]Phase 4: Scenario Modeling[/bold]", border_style="blue"))
     console.print()
+    _ui_phase_started(ui, "Scenario Modeling", "Modeling decarbonization scenarios")
 
     if analysis_logger:
         analysis_logger.start_phase(
@@ -1605,13 +2028,18 @@ def model_scenarios(df, analysis_logger: AnalysisLogger = None):
     if scenario_results:
         for scenario, results in scenario_results.items():
             if 'capital_cost_per_property' in results:
+                cost_per_property = results['capital_cost_per_property']
+                _ui_metric(ui, f"{scenario} status", "complete", group=PHASE_MODELLING)
+                _ui_metric(ui, f"{scenario} cost/property", cost_per_property, group=PHASE_MODELLING)
                 console.print(f"    {scenario}: £{results['capital_cost_per_property']:,.0f} per property")
                 if analysis_logger:
-                    analysis_logger.add_metric(f"scenario_{scenario}_cost", results['capital_cost_per_property'], f"Capital cost per property")
+                    analysis_logger.add_metric(f"scenario_{scenario}_cost", cost_per_property, f"Capital cost per property")
             else:
                 console.print(f"    {scenario}: Analysis incomplete (missing required data)")
+                _ui_metric(ui, f"{scenario} status", "skipped", group=PHASE_MODELLING)
     else:
         console.print("[yellow]Note: Scenario modeling could not be completed (missing required columns)[/yellow]")
+        _ui_warning(ui, "Scenario modeling could not be completed")
 
     # Subsidy analysis
     console.print()
@@ -1671,14 +2099,21 @@ def model_scenarios(df, analysis_logger: AnalysisLogger = None):
             analysis_logger.add_output(str(save_paths['summary_path']), "csv", "Scenario results summary")
         analysis_logger.complete_phase(success=True, message=f"{len(scenario_results)} scenarios modeled successfully")
 
+    _ui_metric(ui, "scenarios modeled", len(scenario_results), group=PHASE_MODELLING)
+    if save_paths.get('property_path'):
+        _ui_output(ui, "Scenario property results", save_paths['property_path'])
+    if save_paths.get('summary_path'):
+        _ui_output(ui, "Scenario summary", save_paths['summary_path'])
+    _ui_phase_completed(ui, "Scenario Modeling", f"{len(scenario_results)} scenarios modeled")
     return scenario_results, subsidy_results
 
 
-def analyze_retrofit_readiness(df, analysis_logger: AnalysisLogger = None, one_stop_only: bool = False):
+def analyze_retrofit_readiness(df, analysis_logger: AnalysisLogger = None, one_stop_only: bool = False, ui=None):
     """Analyze heat pump retrofit readiness."""
     console.print()
     console.print(Panel("[bold]Phase 4.3: Retrofit Readiness Analysis[/bold]", border_style="blue"))
     console.print()
+    _ui_phase_started(ui, "Retrofit Readiness Analysis", "Assessing heat pump readiness")
 
     if analysis_logger:
         analysis_logger.start_phase(
@@ -1721,6 +2156,17 @@ def analyze_retrofit_readiness(df, analysis_logger: AnalysisLogger = None, one_s
         console.print(f"  Mean fabric cost: £{summary['mean_fabric_cost']:,.0f}")
         console.print(f"  Total retrofit investment: £{summary['total_retrofit_cost']/1e6:.1f}M")
         console.print()
+
+        for tier in range(1, 6):
+            _ui_metric(
+                ui,
+                f"retrofit tier {tier}",
+                summary['tier_distribution'].get(tier, 0),
+                group=PHASE_MODELLING,
+            )
+        _ui_metric(ui, "solid wall barrier count", summary['needs_solid_wall_insulation'], group=PHASE_MODELLING)
+        _ui_metric(ui, "mean fabric cost", summary['mean_fabric_cost'], group=PHASE_MODELLING)
+        _ui_metric(ui, "total retrofit investment", summary['total_retrofit_cost'], group=PHASE_MODELLING)
 
         if analysis_logger:
             for tier in range(1, 6):
@@ -1784,9 +2230,12 @@ def analyze_retrofit_readiness(df, analysis_logger: AnalysisLogger = None, one_s
                 analysis_logger.add_output("data/outputs/figures/retrofit_readiness_dashboard.png", "png", "Retrofit readiness visualization")
             analysis_logger.complete_phase(success=True, message="Retrofit readiness assessment complete")
 
+        _ui_output(ui, "Retrofit readiness results", "data/outputs/retrofit_readiness_analysis.csv")
+        _ui_phase_completed(ui, "Retrofit Readiness Analysis", "Retrofit readiness assessment complete")
         return df_readiness, summary
 
     except Exception as e:
+        _ui_phase_failed(ui, "Retrofit Readiness Analysis", f"Retrofit readiness failed: {e}")
         console.print(f"[yellow]⚠ Retrofit readiness analysis failed: {e}[/yellow]")
         logger.error(f"Retrofit readiness error: {e}")
         if analysis_logger:
@@ -1794,11 +2243,12 @@ def analyze_retrofit_readiness(df, analysis_logger: AnalysisLogger = None, one_s
         return None, None
 
 
-def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None, one_stop_only: bool = False):
+def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None, one_stop_only: bool = False, ui=None):
     """Run spatial heat network tier analysis (optional - requires GDAL)."""
     console.print()
     console.print(Panel("[bold]Phase 4.5: Spatial Analysis (Optional)[/bold]", border_style="blue"))
     console.print()
+    _ui_phase_started(ui, "Spatial Analysis", "Checking spatial dependencies")
 
     console.print("[cyan]Heat Network Tier Classification[/cyan]")
     console.print()
@@ -1891,8 +2341,10 @@ def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None, one_stop_on
         """Check for required spatial libraries before running analysis."""
         missing_modules, available_backends = get_spatial_dependency_status()
         if not missing_modules:
+            _ui_metric(ui, "spatial dependencies", "available", group=PHASE_MODELLING)
             return True
 
+        _ui_warning(ui, f"Spatial dependencies missing: {', '.join(missing_modules)}")
         console.print()
         console.print("[yellow]⚠ Spatial libraries missing[/yellow]")
         console.print(f"Missing modules/backend: {', '.join(missing_modules)}")
@@ -1913,13 +2365,14 @@ def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None, one_stop_on
                 console.print()
                 print_windows_spatial_guidance()
 
-                choice = questionary.select(
-                    "How would you like to proceed?",
-                    choices=[
-                        questionary.Choice("Pause/abort so I can fix the Conda environment", value="abort"),
-                        questionary.Choice("Continue without spatial results", value="skip"),
-                    ],
-                ).ask()
+                with _ui_suspend(ui, "Waiting for spatial dependency decision"):
+                    choice = questionary.select(
+                        "How would you like to proceed?",
+                        choices=[
+                            questionary.Choice("Pause/abort so I can fix the Conda environment", value="abort"),
+                            questionary.Choice("Continue without spatial results", value="skip"),
+                        ],
+                    ).ask()
             else:
                 install_command = (
                     f"conda install -n {conda_env} -c conda-forge "
@@ -1927,14 +2380,15 @@ def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None, one_stop_on
                 )
                 console.print(f"Recommended Windows fix: [bold]{install_command}[/bold]")
                 console.print()
-                choice = questionary.select(
-                    "How would you like to proceed?",
-                    choices=[
-                        questionary.Choice("Attempt to install spatial dependencies now (conda)", value="install"),
-                        questionary.Choice("Pause/abort to install manually", value="abort"),
-                        questionary.Choice("Continue without spatial results", value="skip"),
-                    ],
-                ).ask()
+                with _ui_suspend(ui, "Waiting for spatial dependency decision"):
+                    choice = questionary.select(
+                        "How would you like to proceed?",
+                        choices=[
+                            questionary.Choice("Attempt to install spatial dependencies now (conda)", value="install"),
+                            questionary.Choice("Pause/abort to install manually", value="abort"),
+                            questionary.Choice("Continue without spatial results", value="skip"),
+                        ],
+                    ).ask()
 
                 if choice == "install":
                     console.print()
@@ -1971,14 +2425,15 @@ def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None, one_stop_on
             install_command = "pip install -r requirements-spatial.txt"
             console.print(f"Recommended fix for this environment: [bold]{install_command}[/bold]")
             console.print()
-            choice = questionary.select(
-                "How would you like to proceed?",
-                choices=[
-                    questionary.Choice("Attempt to install requirements-spatial.txt now (pip)", value="install"),
-                    questionary.Choice("Pause/abort to install manually", value="abort"),
-                    questionary.Choice("Continue without spatial results", value="skip"),
-                ],
-            ).ask()
+            with _ui_suspend(ui, "Waiting for spatial dependency decision"):
+                choice = questionary.select(
+                    "How would you like to proceed?",
+                    choices=[
+                        questionary.Choice("Attempt to install requirements-spatial.txt now (pip)", value="install"),
+                        questionary.Choice("Pause/abort to install manually", value="abort"),
+                        questionary.Choice("Continue without spatial results", value="skip"),
+                    ],
+                ).ask()
 
             if choice == "install":
                 console.print()
@@ -2009,9 +2464,11 @@ def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None, one_stop_on
             analysis_logger.skip_phase(
                 "Spatial Analysis", "Spatial dependencies missing; map outputs will not be generated",
             )
+        _ui_phase_skipped(ui, "Spatial Analysis", "Spatial dependencies missing")
         return False
 
     if not check_spatial_dependencies():
+        _ui_phase_skipped(ui, "Spatial Analysis", "Spatial analysis skipped")
         return None, None
 
     try:
@@ -2027,14 +2484,15 @@ def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None, one_stop_on
 
         console.print("[cyan]Running spatial analysis...[/cyan]")
         console.print("  • Geocoding properties from lat/lon coordinates")
-        console.print("  • Loading London heat network GIS data")
+        console.print("  • Loading HNPD heat network data")
         console.print("  • Calculating heat density (GWh/km²)")
         console.print("  • Classifying into 5 heat network tiers")
         console.print()
 
-        properties_classified, pathway_summary = analyzer.run_complete_analysis(
-            df, auto_download_gis=True, create_maps=not one_stop_only
-        )
+        with _external_progress_context(ui):
+            properties_classified, pathway_summary = analyzer.run_complete_analysis(
+                df, auto_download_gis=True, create_maps=not one_stop_only
+            )
 
         if properties_classified is not None and pathway_summary is not None:
             console.print(f"[green]✓[/green] Spatial analysis complete!")
@@ -2073,14 +2531,22 @@ def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None, one_stop_on
                         analysis_logger.add_output(str(map_pdf), "pdf", "Heat network tier map (PDF)")
                 analysis_logger.complete_phase(success=True, message="Spatial analysis with heat network classification complete")
 
+            _ui_metric(ui, "properties geocoded", len(properties_classified), group=PHASE_MODELLING)
+            _ui_output(ui, "Spatial GeoJSON", "data/processed/epc_with_heat_network_tiers.geojson")
+            _ui_output(ui, "Pathway suitability by tier", "data/outputs/pathway_suitability_by_tier.csv")
+            if not one_stop_only:
+                _ui_output(ui, "Heat network map", "data/outputs/maps/heat_network_tiers.html")
+            _ui_phase_completed(ui, "Spatial Analysis", "Spatial heat-network classification complete")
             return properties_classified, pathway_summary
         else:
             console.print("[yellow]⚠ Spatial analysis could not complete[/yellow]")
             if analysis_logger:
                 analysis_logger.complete_phase(success=False, message="Spatial analysis could not complete")
+            _ui_phase_failed(ui, "Spatial Analysis", "Spatial analysis could not complete")
             return None, None
 
     except ImportError as e:
+        _ui_phase_skipped(ui, "Spatial Analysis", "GDAL/geopandas not installed")
         console.print()
         console.print("[yellow]━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━[/yellow]")
         console.print("[yellow]⚠ GDAL/geopandas not installed - Skipping spatial analysis[/yellow]")
@@ -2112,6 +2578,7 @@ def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None, one_stop_on
         return None, None
 
     except Exception as e:
+        _ui_phase_failed(ui, "Spatial Analysis", f"Spatial analysis error: {e}")
         console.print(f"[yellow]⚠ Spatial analysis error: {e}[/yellow]")
         console.print("[cyan]Continuing without spatial analysis...[/cyan]")
         if analysis_logger:
@@ -2119,16 +2586,28 @@ def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None, one_stop_on
         return None, None
 
 
-def generate_reports(archetype_results, scenario_results, subsidy_results=None, df_validated=None, pathway_summary=None, analysis_logger: AnalysisLogger = None):
+def generate_reports(
+    archetype_results,
+    scenario_results,
+    subsidy_results=None,
+    df_validated=None,
+    pathway_summary=None,
+    analysis_logger: AnalysisLogger = None,
+    ui=None,
+    one_stop_only: Optional[bool] = None,
+):
     """Generate final reports and visualizations."""
     console.print()
     console.print(Panel("[bold]Phase 5: Report Generation[/bold]", border_style="blue"))
     console.print()
+    _ui_phase_started(ui, "Report Generation", "Generating reports and visualizations")
 
-    if is_one_stop_only():
+    effective_one_stop_only = is_one_stop_only() if one_stop_only is None else one_stop_only
+    if effective_one_stop_only:
         console.print("[cyan]One-stop reporting enabled; skipping additional report outputs.[/cyan]")
         if analysis_logger:
             analysis_logger.skip_phase("Report Generation", "One-stop report output enabled")
+        _ui_phase_skipped(ui, "Report Generation", "One-stop report output enabled")
         return []
 
     if analysis_logger:
@@ -2246,15 +2725,21 @@ def generate_reports(archetype_results, scenario_results, subsidy_results=None, 
         analysis_logger.add_output("data/outputs/reports/executive_summary.md", "report", "Executive summary (Markdown)")
         analysis_logger.complete_phase(success=True, message=f"{len(reports_created)} reports and visualizations generated")
 
+    _ui_metric(ui, "reports generated", len(reports_created), group=PHASE_OUTPUTS)
+    _ui_output(ui, "Figures", "data/outputs/figures/")
+    _ui_output(ui, "Reports", "data/outputs/reports/")
+    _ui_output(ui, "Workbook", "data/outputs/heat_street_analysis_results.xlsx")
+    _ui_phase_completed(ui, "Report Generation", f"{len(reports_created)} reports generated")
     return True
 
 
-def generate_one_stop_report(df=None, analysis_logger: AnalysisLogger = None):
+def generate_one_stop_report(df=None, analysis_logger: AnalysisLogger = None, ui=None):
     """Generate the one-stop JSON report."""
     console.print()
     console.print(Panel("[bold]Phase 5: One-Stop Report[/bold]", border_style="blue"))
     console.print()
     console.print("[cyan]Generating one-stop JSON report...[/cyan]")
+    _ui_phase_started(ui, "One-Stop Report", "Generating one-stop JSON report")
 
     ensure_hp_hn_comparison_outputs(df, analysis_logger)
 
@@ -2268,6 +2753,8 @@ def generate_one_stop_report(df=None, analysis_logger: AnalysisLogger = None):
     if analysis_logger:
         analysis_logger.add_output("data/outputs/one_stop_output.json", "json", "One-stop report")
 
+    _ui_output(ui, "One-stop JSON", output_path)
+    _ui_phase_completed(ui, "One-Stop Report", "One-stop JSON report generated")
     return output_path
 
 
@@ -2365,11 +2852,12 @@ def cleanup_reporting_outputs():
     return archive_dir
 
 
-def generate_additional_reports(df_raw, df_validated, validation_report, archetype_results, scenario_results, analysis_logger: AnalysisLogger = None):
+def generate_additional_reports(df_raw, df_validated, validation_report, archetype_results, scenario_results, analysis_logger: AnalysisLogger = None, ui=None):
     """Generate additional specialized reports for client presentation."""
     console.print()
     console.print(Panel("[bold]Phase 5.5: Additional Reports[/bold]", border_style="blue"))
     console.print()
+    _ui_phase_started(ui, "Additional Reports", "Generating supporting report tables")
 
     if analysis_logger:
         analysis_logger.start_phase(
@@ -2519,6 +3007,10 @@ def generate_additional_reports(df_raw, df_validated, validation_report, archety
         analysis_logger.add_output("data/outputs/data_quality_report.txt", "report", "Data quality assessment")
         analysis_logger.complete_phase(success=True, message=f"{len(reports_created)} additional specialized reports generated")
 
+    _ui_metric(ui, "additional reports", len(reports_created), group=PHASE_OUTPUTS)
+    _ui_output(ui, "Borough breakdown", "data/outputs/borough_breakdown.csv")
+    _ui_output(ui, "Tenure segmentation", "data/outputs/reports/tenure_segmentation.csv")
+    _ui_phase_completed(ui, "Additional Reports", f"{len(reports_created)} additional reports generated")
     return {
         "case_street_df": case_street_df,
         "case_street_summary": case_street_summary,
@@ -2538,6 +3030,7 @@ def package_dashboard_assets(
     subsidy_results=None,
     df_validated=None,
     analysis_logger: AnalysisLogger = None,
+    ui=None,
 ):
     """Export dashboard JSON data into outputs and the React app.
 
@@ -2559,6 +3052,7 @@ def package_dashboard_assets(
     console.print()
     console.print(Panel("[bold]Phase 6: Dashboard Packaging[/bold]", border_style="blue"))
     console.print()
+    _ui_phase_started(ui, "Dashboard Packaging", "Exporting dashboard dataset")
 
     if analysis_logger:
         analysis_logger.start_phase(
@@ -2676,7 +3170,12 @@ def package_dashboard_assets(
             )
             analysis_logger.add_metric("dashboard_data_arrays", len(data_arrays), "Data arrays in dashboard JSON")
             analysis_logger.complete_phase(success=True, message="Dashboard data exported")
+        _ui_metric(ui, "dashboard data arrays", len(data_arrays), group=PHASE_OUTPUTS)
+        _ui_output(ui, "Dashboard data", dataset_path)
+        _ui_output(ui, "React dashboard data", public_dataset)
+        _ui_phase_completed(ui, "Dashboard Packaging", "Dashboard data exported")
     except Exception as e:
+        _ui_phase_failed(ui, "Dashboard Packaging", f"Dashboard packaging failed: {e}")
         console.print(f"[yellow]⚠ Could not package dashboard: {e}[/yellow]")
         logger.exception("Dashboard packaging error")
         if analysis_logger:
@@ -2729,6 +3228,7 @@ def prompt_use_existing_dataframe(
     include_records: bool = True,
     sample_start_date: date_cls = None,
     sample_end_date: date_cls = None,
+    ui=None,
 ):
     """
     Ask the user whether to reuse an existing processed dataset.
@@ -2778,6 +3278,7 @@ def prompt_use_existing_dataframe(
             phase_name,
             f"Load existing {description} from disk"
         )
+    _ui_phase_started(ui, phase_name, f"Loading existing {description}")
 
     try:
         import pandas as pd
@@ -2798,9 +3299,13 @@ def prompt_use_existing_dataframe(
             add_analysis_output_if_exists(analysis_logger, selected_path, output_type, f"Existing {description}")
             analysis_logger.complete_phase(success=True, message=f"Loaded existing {description}")
 
+        _ui_metric(ui, "records loaded", len(df_existing), group=PHASE_ACQUISITION)
+        _ui_output(ui, f"Existing {description}", selected_path)
+        _ui_phase_completed(ui, phase_name, f"Loaded existing {description}")
         return df_existing
     except Exception as e:
         console.print(f"[yellow]⚠ Could not load existing {description}: {e}[/yellow]")
+        _ui_phase_failed(ui, phase_name, f"Failed to load existing {description}: {e}")
         logger.exception(f"Failed to load existing {description}")
         if analysis_logger and analysis_logger.current_phase:
             analysis_logger.complete_phase(success=False, message=f"Failed to load existing {description}: {e}")
@@ -2907,11 +3412,47 @@ def check_existing_data(sample_start_date: date_cls = None, sample_end_date: dat
     return False, None, 0
 
 
-def load_existing_data(file_path, analysis_logger: AnalysisLogger = None):
+def resolve_sample_window_from_args(args: argparse.Namespace, ui=None) -> Tuple[date_cls, date_cls]:
+    """Resolve CLI sample dates or fall back to the interactive prompt."""
+    if args.sample_start or args.sample_end:
+        sample_end_date = args.sample_end or (date_cls.today() - timedelta(days=1))
+        sample_start_date = args.sample_start or compute_sample_start_date(sample_end_date)
+        if sample_start_date > sample_end_date:
+            raise ValueError(
+                f"Sample start date {sample_start_date.isoformat()} cannot be after "
+                f"sample end date {sample_end_date.isoformat()}"
+            )
+        _ui_metric(ui, "sample start date", sample_start_date.isoformat(), group=PHASE_ACQUISITION)
+        _ui_metric(ui, "sample end date", sample_end_date.isoformat(), group=PHASE_ACQUISITION)
+        return sample_start_date, sample_end_date
+    return _call_with_optional_ui(prompt_sample_window, ui=ui)
+
+
+def resolve_one_stop_only(config: Optional[Dict[str, Any]], args: argparse.Namespace) -> bool:
+    """Apply report-mode CLI overrides without editing config files."""
+    if args.one_stop_only:
+        return True
+    if args.full_reports:
+        return False
+    return is_one_stop_only(config)
+
+
+def open_results_folder() -> None:
+    """Open the outputs folder with the platform file manager."""
+    if platform.system() == 'Windows':
+        subprocess.run(['explorer', 'data\\outputs'], check=False)
+    elif platform.system() == 'Darwin':
+        subprocess.run(['open', 'data/outputs'], check=False)
+    else:
+        subprocess.run(['xdg-open', 'data/outputs'], check=False)
+
+
+def load_existing_data(file_path, analysis_logger: AnalysisLogger = None, ui=None):
     """Load previously downloaded data from file."""
     console.print()
     console.print(Panel("[bold]Phase 1: Loading Existing Data[/bold]", border_style="blue"))
     console.print()
+    _ui_phase_started(ui, "Loading Existing Data", "Loading previously downloaded EPC data")
 
     if analysis_logger:
         analysis_logger.start_phase(
@@ -2936,14 +3477,36 @@ def load_existing_data(file_path, analysis_logger: AnalysisLogger = None):
         analysis_logger.add_output(str(file_path), "csv", "Existing EPC data loaded")
         analysis_logger.complete_phase(success=True, message=f"Loaded {len(df):,} existing records")
 
+    _ui_metric(ui, "records loaded", len(df), group=PHASE_ACQUISITION)
+    _ui_output(ui, "Existing EPC data", file_path)
+    _ui_phase_completed(ui, "Loading Existing Data", f"Loaded {len(df):,} existing records")
     return df
 
 
-def main():
+def main(argv=None):
     """Main execution function."""
-    print_header()
-
+    # Staged-safe mainline checks live in _main_impl:
+    # dataset_is_empty(df), ensure_dataframe(df_adjusted)
+    args = parse_args([] if argv is None else argv)
+    ui = create_dashboard(args, console=console, env=os.environ)
+    ui.start()
     analysis_logger = AnalysisLogger()
+    start_time = time.time()
+
+    try:
+        with _configure_tui_logging(ui), _route_console_output_for_tui(ui):
+            _ui_call(ui, "run_started", "HeatStreet analysis started")
+            print_header()
+            return _main_impl(args, ui, analysis_logger, start_time)
+    except Exception as exc:
+        _ui_call(ui, "run_failed", str(exc))
+        raise
+    finally:
+        _ui_call(ui, "stop")
+
+
+def _main_impl(args: argparse.Namespace, ui, analysis_logger: AnalysisLogger, start_time: float):
+    """Run the pipeline after argparse/UI setup."""
     runtime_identity, preflight = emit_startup_diagnostics(analysis_logger)
     if not preflight.get("ok"):
         analysis_logger.set_metadata(
@@ -2954,11 +3517,14 @@ def main():
         if log_path:
             console.print(f"[yellow]Startup diagnostics log saved to:[/yellow] {log_path}")
             console.print()
+        _ui_call(ui, "run_failed", "Startup preflight failed")
         return EXIT_ANALYSIS_FAILED
+    _ui_info(ui, "Preflight passed")
 
     # Check credentials
-    if not check_credentials():
+    if not _call_with_optional_ui(check_credentials, ui=ui):
         console.print("[red]Cannot proceed without API credentials[/red]")
+        _ui_call(ui, "run_failed", "API credentials missing")
         return EXIT_ANALYSIS_FAILED
 
     console.print("[green]✓[/green] API credentials configured")
@@ -2968,23 +3534,25 @@ def main():
     ensure_directories()
 
     config = load_config()
-    one_stop_only = is_one_stop_only(config)
+    one_stop_only = resolve_one_stop_only(config, args)
 
     console.print("[green]✓[/green] Analysis logger initialized")
     console.print()
 
     # Ask about heat network data downloads
     # HNPD first (recommended, 2024 data)
-    ask_hnpd_download()
-
-    # London GIS data second (for heat density in Tiers 3-5)
-    ask_gis_download()
+    _call_with_optional_ui(ask_hnpd_download, ui=ui)
 
     try:
-        sample_start_date, sample_end_date = prompt_sample_window()
+        sample_start_date, sample_end_date = resolve_sample_window_from_args(args, ui=ui)
     except KeyboardInterrupt:
         console.print("[yellow]Analysis cancelled by user[/yellow]")
+        _ui_call(ui, "run_failed", "Analysis cancelled by user")
         return EXIT_CANCELLED
+    except ValueError as e:
+        console.print(f"[red]{e}[/red]")
+        _ui_call(ui, "run_failed", str(e))
+        return EXIT_ANALYSIS_FAILED
 
     analysis_logger.set_metadata("sample_start_date", sample_start_date.isoformat())
     analysis_logger.set_metadata("sample_end_date", sample_end_date.isoformat())
@@ -2998,22 +3566,34 @@ def main():
     df = None
     fresh_data_downloaded = False  # Track if we just downloaded new data
 
+    if args.use_existing and not has_existing:
+        console.print("[red]No matching existing data found for --use-existing[/red]")
+        _ui_call(ui, "run_failed", "No matching existing data found for --use-existing")
+        return EXIT_ANALYSIS_FAILED
+
     if has_existing:
-        # Ask user whether to use existing data or download new
-        use_existing = questionary.select(
-            "Existing data found. What would you like to do?",
-            choices=[
-                questionary.Choice("Use existing data", value=True),
-                questionary.Choice("Download new data (will overwrite existing)", value=False),
-            ],
-        ).ask()
+        if args.fresh:
+            use_existing = False
+        elif args.use_existing:
+            use_existing = True
+        else:
+            # Ask user whether to use existing data or download new
+            with _ui_suspend(ui, "Waiting for existing-data decision"):
+                use_existing = questionary.select(
+                    "Existing data found. What would you like to do?",
+                    choices=[
+                        questionary.Choice("Use existing data", value=True),
+                        questionary.Choice("Download new data (will overwrite existing)", value=False),
+                    ],
+                ).ask()
 
         if use_existing is None:
             console.print("[yellow]Analysis cancelled by user[/yellow]")
+            _ui_call(ui, "run_failed", "Analysis cancelled by user")
             return EXIT_CANCELLED
 
         if use_existing:
-            df = load_existing_data(existing_file, analysis_logger)
+            df = _call_with_optional_ui(load_existing_data, existing_file, analysis_logger, ui=ui)
         else:
             console.print()
             console.print("[yellow]Downloading new data (existing data will be overwritten)...[/yellow]")
@@ -3046,15 +3626,21 @@ def main():
 
         # Phase 1: Download
         try:
-            df = download_data(
+            df = _call_with_optional_ui(
+                download_data,
                 analysis_logger,
                 sample_start_date=sample_start_date,
                 sample_end_date=sample_end_date,
+                download_scope=args.download_scope,
+                borough=args.borough,
+                ui=ui,
             )
         except AnalysisCancelled as e:
+            _ui_call(ui, "run_failed", str(e))
             console.print(f"[yellow]{e}[/yellow]")
             return EXIT_CANCELLED
         if df is None or dataset_is_empty(df):
+            _ui_call(ui, "run_failed", "Analysis stopped - no data available")
             console.print("[red]✗ Analysis stopped - no data available[/red]")
             return EXIT_ANALYSIS_FAILED
         gc.collect()  # Cleanup API response objects
@@ -3071,13 +3657,15 @@ def main():
     validated_path = DATA_PROCESSED_DIR / "epc_london_validated.csv"
     df_validated = None
     if not fresh_data_downloaded:
-        df_validated = prompt_use_existing_dataframe(
+        df_validated = _call_with_optional_ui(
+            prompt_use_existing_dataframe,
             "Data Validation",
             "validated EPC dataset",
             validated_path,
             analysis_logger,
             sample_start_date=sample_start_date,
             sample_end_date=sample_end_date,
+            ui=ui,
         )
     validation_report = None
 
@@ -3109,11 +3697,13 @@ def main():
                 logger.warning(f"Could not save validation report: {e}")
     else:
         # Phase 2: Validate
-        df_validated, validation_report = validate_data(
+        df_validated, validation_report = _call_with_optional_ui(
+            validate_data,
             df,
             analysis_logger,
             sample_start_date=sample_start_date,
             sample_end_date=sample_end_date,
+            ui=ui,
         )
         # Cleanup raw dataframe since we now use df_validated
         if not is_dataset_reference(df):
@@ -3124,6 +3714,7 @@ def main():
     analysis_logger.set_metadata("total_properties", dataset_record_count(df_validated))
 
     if dataset_is_empty(df_validated):
+        _ui_call(ui, "run_failed", "Analysis stopped - no valid data")
         console.print("[red]✗ Analysis stopped - no valid data[/red]")
         return EXIT_ANALYSIS_FAILED
 
@@ -3132,13 +3723,15 @@ def main():
     adjusted_path = DATA_PROCESSED_DIR / "epc_london_adjusted.csv"
     df_adjusted = None
     if not fresh_data_downloaded:
-        df_adjusted = prompt_use_existing_dataframe(
+        df_adjusted = _call_with_optional_ui(
+            prompt_use_existing_dataframe,
             "Methodological Adjustments",
             "methodologically adjusted dataset",
             adjusted_path,
             analysis_logger,
             sample_start_date=sample_start_date,
             sample_end_date=sample_end_date,
+            ui=ui,
         )
     adjustment_summary = None
     if df_adjusted is not None:
@@ -3148,11 +3741,13 @@ def main():
         else:
             console.print("[yellow]⚠ Adjustment summary JSON not found; proceeding without it[/yellow]")
     else:
-        df_adjusted, adjustment_summary = apply_methodological_adjustments(
+        df_adjusted, adjustment_summary = _call_with_optional_ui(
+            apply_methodological_adjustments,
             df_validated,
             analysis_logger,
             sample_start_date=sample_start_date,
             sample_end_date=sample_end_date,
+            ui=ui,
         )
         # Cleanup pre-adjustment dataframe since we now use df_adjusted
         if 'df_validated' in locals() and df_validated is not df_adjusted:
@@ -3160,61 +3755,79 @@ def main():
         gc.collect()
 
     try:
-        df_adjusted_frame = ensure_dataframe(df_adjusted, stage_name="adjusted EPC dataset")
+        df_adjusted_frame = ensure_dataframe(df_adjusted, stage_name="adjusted EPC dataset", ui=ui)
     except RuntimeError as e:
+        _ui_call(ui, "run_failed", str(e))
         console.print(f"[red]x[/red] {e}")
         return EXIT_ANALYSIS_FAILED
 
     # Phase 3: Analyze (use adjusted data)
-    archetype_results = analyze_archetype(df_adjusted_frame, analysis_logger)
+    archetype_results = _call_with_optional_ui(analyze_archetype, df_adjusted_frame, analysis_logger, ui=ui)
     gc.collect()  # Cleanup analysis intermediate results
 
     # Phase 4: Model (use adjusted data for realistic baselines)
-    scenario_results, subsidy_results = model_scenarios(df_adjusted_frame, analysis_logger)
+    scenario_results, subsidy_results = _call_with_optional_ui(model_scenarios, df_adjusted_frame, analysis_logger, ui=ui)
     gc.collect()  # Major cleanup after expensive modeling phase
 
     # Phase 4.3: Retrofit Readiness
-    df_readiness, readiness_summary = analyze_retrofit_readiness(
+    df_readiness, readiness_summary = _call_with_optional_ui(
+        analyze_retrofit_readiness,
         df_adjusted_frame,
         analysis_logger,
         one_stop_only=one_stop_only,
+        ui=ui,
     )
     gc.collect()  # Cleanup readiness calculation intermediates
 
     # Phase 4.5: Spatial Analysis (optional)
-    properties_with_tiers, pathway_summary = run_spatial_analysis(
+    properties_with_tiers, pathway_summary = _call_with_optional_ui(
+        run_spatial_analysis,
         df_adjusted_frame,
         analysis_logger,
         one_stop_only=one_stop_only,
+        ui=ui,
     )
     gc.collect()  # Cleanup GIS objects and geocoding cache
 
     # Phase 5.5: Additional reports and supporting tables
     try:
-        df_raw_for_reports = ensure_dataframe(df_raw, stage_name="raw EPC dataset for reporting")
+        df_raw_for_reports = ensure_dataframe(df_raw, stage_name="raw EPC dataset for reporting", ui=ui)
     except RuntimeError as e:
         console.print(f"[yellow]âš  Could not materialize raw dataset for additional reports: {e}[/yellow]")
         df_raw_for_reports = df_adjusted_frame
 
-    additional_outputs = generate_additional_reports(
+    additional_outputs = _call_with_optional_ui(
+        generate_additional_reports,
         df_raw_for_reports,
         df_adjusted_frame,
         validation_report,
         archetype_results,
         scenario_results,
         analysis_logger,
+        ui=ui,
     )
 
     # Phase 5: Report
     if one_stop_only:
-        generate_one_stop_report(df_adjusted_frame, analysis_logger)
+        _call_with_optional_ui(generate_one_stop_report, df_adjusted_frame, analysis_logger, ui=ui)
         gc.collect()  # Cleanup report generation objects
     else:
-        generate_reports(archetype_results, scenario_results, subsidy_results, df_adjusted_frame, pathway_summary, analysis_logger)
+        _call_with_optional_ui(
+            generate_reports,
+            archetype_results,
+            scenario_results,
+            subsidy_results,
+            df_adjusted_frame,
+            pathway_summary,
+            analysis_logger,
+            ui=ui,
+            one_stop_only=one_stop_only,
+        )
         gc.collect()  # Cleanup matplotlib figures and Excel writer objects
 
     # Phase 6: Package dashboard
-    package_dashboard_assets(
+    _call_with_optional_ui(
+        package_dashboard_assets,
         archetype_results,
         scenario_results,
         readiness_summary,
@@ -3223,6 +3836,7 @@ def main():
         subsidy_results,
         df_adjusted_frame,
         analysis_logger,
+        ui=ui,
     )
     gc.collect()  # Final cleanup after dashboard packaging
 
@@ -3298,26 +3912,29 @@ def main():
     ))
     console.print()
 
-    # Ask if user wants to open results
-    open_results = False  # Skip opening results folder automatically
+    _ui_call(
+        ui,
+        "run_completed",
+        elapsed=elapsed,
+        properties=len(df_adjusted_frame),
+        one_stop_json=DATA_OUTPUTS_DIR / "one_stop_output.json",
+        html_dashboard=DATA_OUTPUTS_DIR / "one_stop_dashboard.html",
+        workbook=combined_workbook or DATA_OUTPUTS_DIR / "analysis_outputs_compendium.xlsx",
+        audit_log=log_path,
+        figures=DATA_OUTPUTS_DIR / "figures",
+        maps=DATA_OUTPUTS_DIR / "maps",
+        dashboard_data=DATA_OUTPUTS_DIR / "dashboard" / "dashboard-data.json",
+    )
 
-    if open_results:
-        import subprocess
-        import platform
-
-        if platform.system() == 'Windows':
-            subprocess.run(['explorer', 'data\\outputs'])
-        elif platform.system() == 'Darwin':  # macOS
-            subprocess.run(['open', 'data/outputs'])
-        else:  # Linux
-            subprocess.run(['xdg-open', 'data/outputs'])
+    if args.open_results:
+        open_results_folder()
 
     return EXIT_SUCCESS
 
 
 if __name__ == "__main__":
     try:
-        sys.exit(main())
+        sys.exit(main(sys.argv[1:]))
     except KeyboardInterrupt:
         console.print("\n[yellow]Analysis interrupted by user[/yellow]")
         sys.exit(EXIT_CANCELLED)
