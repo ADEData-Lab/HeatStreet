@@ -391,29 +391,39 @@ class ArchetypeAnalyzer:
         """Analyze window glazing types."""
         logger.info("Analyzing window glazing...")
 
-        glazing_col = None
-        for col in ['WINDOWS_DESCRIPTION', 'GLAZING_TYPE']:
-            if col in df.columns:
-                glazing_col = col
-                break
+        # Use the standardized glazing_type column produced by data_validator (read-only).
+        # Never overwrite df['glazing_type'] here — it is shared with downstream phases
+        # (retrofit readiness, pathway model) that run after archetype analysis completes.
+        if 'glazing_type' in df.columns:
+            glazing_series = df['glazing_type']
+        else:
+            # Fallback: derive from raw EPC columns without writing back to df.
+            # 'GLAZED_TYPE' is the correct EPC full-load column name (not 'GLAZING_TYPE').
+            glazing_col = None
+            for col in ['WINDOWS_DESCRIPTION', 'GLAZED_TYPE']:
+                if col in df.columns:
+                    glazing_col = col
+                    break
 
-        if glazing_col is None:
-            logger.warning("No glazing column found")
-            return {}
+            if glazing_col is None:
+                logger.warning("No glazing column found (glazing_type absent, WINDOWS_DESCRIPTION/GLAZED_TYPE missing)")
+                return {}
 
-        # Categorize glazing types
-        df['glazing_type'] = 'Unknown'
+            glazing_series = pd.Series('unknown', index=df.index, dtype=object)
+            desc = df[glazing_col].fillna('').astype(str).str.lower()
+            glazing_series[desc.str.contains('triple', na=False)] = 'triple'
+            glazing_series[desc.str.contains('double', na=False)] = 'double'
+            glazing_series[desc.str.contains('single', na=False)] = 'single'
 
-        single_mask = df[glazing_col].str.contains('single', case=False, na=False)
-        double_mask = df[glazing_col].str.contains('double', case=False, na=False)
-        triple_mask = df[glazing_col].str.contains('triple', case=False, na=False)
+        glazing_types = glazing_series.value_counts().to_dict()
+        glazing_pct = glazing_series.value_counts(normalize=True).to_dict()
 
-        df.loc[single_mask, 'glazing_type'] = 'Single'
-        df.loc[double_mask, 'glazing_type'] = 'Double'
-        df.loc[triple_mask, 'glazing_type'] = 'Triple'
-
-        glazing_types = df['glazing_type'].value_counts().to_dict()
-        glazing_pct = df['glazing_type'].value_counts(normalize=True).to_dict()
+        known = sum(v for k, v in glazing_types.items() if k not in ('unknown', 'Unknown'))
+        if known == 0:
+            logger.error(
+                "Glazing distribution has zero known values — glazing_type is all 'unknown'. "
+                "Check that EPC data includes WINDOWS_DESCRIPTION or GLAZED_TYPE columns."
+            )
 
         results = {
             'types': glazing_types,

@@ -882,6 +882,21 @@ class EPCDataValidator:
         glazing_counts = df['glazing_type'].value_counts()
         logger.info(f"Glazing types: {glazing_counts.to_dict()}")
 
+        # Data-quality guard: fail loudly if no glazing signal reached the data.
+        total = len(df)
+        known = int((df['glazing_type'] != 'unknown').sum())
+        coverage_pct = known / total * 100 if total > 0 else 0.0
+        if coverage_pct == 0:
+            raise ValueError(
+                f"Glazing coverage is 0%: none of {glazing_cols + ['WINDOWS_ENERGY_EFF']} "
+                "produced usable glazing values. Verify the EPC extract contains glazing columns."
+            )
+        if coverage_pct < 50:
+            logger.warning(
+                f"Low glazing coverage: {coverage_pct:.1f}% of properties have a known "
+                f"glazing type (expected 90%+). Check glazing column availability."
+            )
+
         return df
 
     def _standardize_ventilation(self, df: pd.DataFrame) -> pd.DataFrame:

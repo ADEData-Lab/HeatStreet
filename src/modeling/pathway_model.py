@@ -21,8 +21,9 @@ Outputs:
 
 import pandas as pd
 import numpy as np
+import time
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Callable, Dict, List, Optional, Tuple
 from dataclasses import dataclass
 from loguru import logger
 
@@ -72,6 +73,42 @@ def _select_baseline_annual_kwh(property_like: pd.Series, energy_intensity: floa
 def _assert_non_negative_intensities(df: pd.DataFrame) -> pd.DataFrame:
     """Ensure no negative energy intensity values are present before pathway modeling."""
     return assert_non_negative_intensities(df)
+
+
+def _select_baseline_energy_intensity_array(df: pd.DataFrame) -> np.ndarray:
+    """Vectorized baseline energy intensity selection for all properties at once."""
+    priority_cols = [
+        'energy_consumption_adjusted',
+        'energy_consumption_adjusted_central',
+        'ENERGY_CONSUMPTION_CURRENT',
+    ]
+    result = pd.Series(np.nan, index=df.index)
+    for col in priority_cols:
+        if col in df.columns:
+            result = result.fillna(pd.to_numeric(df[col], errors='coerce'))
+    return result.fillna(150.0).values.astype(float)
+
+
+def _select_baseline_annual_kwh_array(df: pd.DataFrame, energy_intensity: np.ndarray) -> np.ndarray:
+    """Vectorized baseline annual kWh selection for all properties at once."""
+    priority_cols = [
+        'baseline_consumption_kwh_year',
+        'baseline_consumption_kwh_year_central',
+        'baseline_consumption_kwh_year_low',
+        'baseline_consumption_kwh_year_high',
+    ]
+    result = pd.Series(np.nan, index=df.index)
+    for col in priority_cols:
+        if col in df.columns:
+            result = result.fillna(pd.to_numeric(df[col], errors='coerce'))
+
+    floor_area = pd.to_numeric(
+        df['TOTAL_FLOOR_AREA'] if 'TOTAL_FLOOR_AREA' in df.columns else pd.Series(100, index=df.index),
+        errors='coerce',
+    ).fillna(100).values.astype(float)
+
+    calc = energy_intensity * floor_area
+    return result.fillna(pd.Series(calc, index=df.index)).values.astype(float)
 
 
 # ============================================================================
@@ -539,52 +576,307 @@ class PathwayModeler:
         """Return common summary statistics for a series."""
         return summarize_series(series)
 
+    def _calculate_discounted_payback_array(
+        self, capex: np.ndarray, annual_saving: np.ndarray
+    ) -> np.ndarray:
+        """Analytical discounted payback using the geometric-series closed form.
+
+        Solves: saving * (1 - (1+r)^-N) / r = capex
+        => N = -log(1 - capex*r/saving) / log(1+r)
+
+        Returns np.inf where payback is never achieved or inputs are non-positive.
+        """
+        r = self.discount_rate
+        if r <= 0:
+            with np.errstate(divide='ignore', invalid='ignore'):
+                return np.where((capex > 0) & (annual_saving > 0), capex / annual_saving, np.inf)
+
+        with np.errstate(divide='ignore', invalid='ignore'):
+            ratio = np.where(annual_saving > 0, capex * r / annual_saving, np.inf)
+            valid = (capex > 0) & (annual_saving > 0) & (ratio < 1.0)
+            n_years = np.where(valid, -np.log1p(-ratio) / np.log1p(r), np.inf)
+        return n_years
+
+    def _precompute_property_arrays(self, df: pd.DataFrame) -> Dict:
+        """Pre-compute expensive per-property quantities once for all vectorized pathway calls."""
+        logger.info("Pre-computing property arrays for vectorized pathway modeling...")
+
+        df_with_flow = self.adjuster.estimate_flow_temperature(df)
+
+        energy_intensity = _select_baseline_energy_intensity_array(df)
+        baseline_demand = _select_baseline_annual_kwh_array(df, energy_intensity)
+        baseline_bill = baseline_demand * self.gas_price
+        baseline_co2 = (baseline_demand * self.gas_carbon) / 1000.0
+
+        unique_packages = set(p.fabric_package for p in self.pathways.values())
+        batch_fabric: Dict[str, Dict] = {}
+        for pkg_id in unique_packages:
+            if pkg_id == 'none':
+                n = len(df)
+                batch_fabric['none'] = {
+                    'capex_per_home': np.zeros(n),
+                    'annual_kwh_saving_pct': np.zeros(n),
+                    'flow_temp_reduction_k': np.zeros(n),
+                }
+            elif pkg_id in self.packages:
+                logger.info(f"  Computing batch results for fabric package '{pkg_id}'...")
+                batch_fabric[pkg_id] = self.package_analyzer.calculate_batch_package_results(
+                    df, self.packages[pkg_id]
+                )
+
+        flow_temps = (
+            df_with_flow['estimated_flow_temp'].fillna(self.min_flow_temp).values.astype(float)
+        )
+        property_ids = (
+            df['LMK_KEY'].values if 'LMK_KEY' in df.columns
+            else np.full(len(df), 'unknown', dtype=object)
+        )
+
+        return {
+            'df_index': df.index,
+            'energy_intensity': energy_intensity,
+            'baseline_demand': baseline_demand,
+            'baseline_bill': baseline_bill,
+            'baseline_co2': baseline_co2,
+            'baseline_flow_temps': flow_temps,
+            'batch_fabric': batch_fabric,
+            'property_ids': property_ids,
+        }
+
+    def _compute_pathway_vectorized(
+        self,
+        pathway: Pathway,
+        hn_access: pd.Series,
+        precomputed: Dict,
+    ) -> pd.DataFrame:
+        """Compute pathway results for all properties using array operations."""
+        n = len(precomputed['baseline_demand'])
+        baseline_demand = precomputed['baseline_demand']
+        baseline_bill = precomputed['baseline_bill']
+        baseline_co2 = precomputed['baseline_co2']
+        property_ids = precomputed['property_ids']
+        idx = precomputed['df_index']
+
+        fabric = precomputed['batch_fabric'][pathway.fabric_package]
+        fabric_capex = fabric['capex_per_home']
+        fabric_saving_frac = fabric['annual_kwh_saving_pct'] / 100.0
+        flow_temp_reduction = fabric['flow_temp_reduction_k']
+
+        post_fabric_demand = baseline_demand * (1.0 - fabric_saving_frac)
+        heating_after_fabric = post_fabric_demand * self.heating_fraction
+        residual_gas = np.maximum(post_fabric_demand - heating_after_fabric, 0.0)
+
+        flow_temp_after = np.maximum(
+            self.min_flow_temp,
+            precomputed['baseline_flow_temps'] - flow_temp_reduction,
+        )
+
+        cop_results = self.adjuster.derive_heat_pump_cop(
+            pd.Series(flow_temp_after, index=idx), include_bounds=True
+        )
+        _cop_central = cop_results['central'].values
+        _cop_low = cop_results['low'].values
+        _cop_high = cop_results['high'].values
+        hp_cop_central = np.where(~np.isnan(_cop_central), _cop_central, self.hp_scop).astype(float)
+        hp_cop_low = np.where(~np.isnan(_cop_low), _cop_low, hp_cop_central).astype(float)
+        hp_cop_high = np.where(~np.isnan(_cop_high), _cop_high, hp_cop_central).astype(float)
+
+        hp_install_cost = self.costs.get('ashp_installation', 12000)
+        hn_connection_cost = self.costs.get('district_heating_connection', 5000)
+        hn_mask = hn_access.values.astype(bool)
+        hn_eff = self.hn_efficiency if self.hn_efficiency > 0 else 1.0
+
+        if pathway.heat_source == 'gas':
+            hp_capex = np.zeros(n)
+            hn_capex = np.zeros(n)
+            heat_tech_capex = np.zeros(n)
+            annual_demand = post_fabric_demand
+            annual_bill = post_fabric_demand * self.gas_price
+            annual_co2 = (post_fabric_demand * self.gas_carbon) / 1000.0
+
+        elif pathway.heat_source == 'hp':
+            hp_capex = np.full(n, float(hp_install_cost))
+            hn_capex = np.zeros(n)
+            heat_tech_capex = hp_capex
+            hp_demand = np.where(hp_cop_central > 0, heating_after_fabric / hp_cop_central, heating_after_fabric)
+            annual_demand = residual_gas + hp_demand
+            annual_bill = hp_demand * self.elec_price + residual_gas * self.gas_price
+            annual_co2 = (hp_demand * self.elec_carbon + residual_gas * self.gas_carbon) / 1000.0
+
+        elif pathway.heat_source == 'hp_proxy':
+            proxy_scop = self.ground_loop_scop if (self.ground_loop_scop and self.ground_loop_scop > 0) else None
+            proxy_cop = np.full(n, float(proxy_scop)) if proxy_scop is not None else hp_cop_central
+            hp_capex = np.full(n, float(hp_install_cost) + self.ground_loop_capex_delta)
+            hn_capex = np.zeros(n)
+            heat_tech_capex = hp_capex
+            hp_demand = np.where(proxy_cop > 0, heating_after_fabric / proxy_cop, heating_after_fabric)
+            annual_demand = residual_gas + hp_demand
+            annual_bill = hp_demand * self.elec_price + residual_gas * self.gas_price
+            annual_co2 = (hp_demand * self.elec_carbon + residual_gas * self.gas_carbon) / 1000.0
+
+        elif pathway.heat_source == 'hn':
+            hp_capex = np.zeros(n)
+            hn_capex = np.full(n, float(hn_connection_cost))
+            heat_tech_capex = hn_capex
+            hn_demand = heating_after_fabric / hn_eff
+            annual_demand = residual_gas + heating_after_fabric
+            annual_bill = hn_demand * self.hn_tariff + residual_gas * self.gas_price
+            annual_co2 = (hn_demand * self.hn_carbon + residual_gas * self.gas_carbon) / 1000.0
+
+        elif pathway.heat_source == 'hp+hn':
+            hn_demand = heating_after_fabric / hn_eff
+            hp_demand = np.where(hp_cop_central > 0, heating_after_fabric / hp_cop_central, heating_after_fabric)
+            hp_capex = np.where(hn_mask, 0.0, float(hp_install_cost))
+            hn_capex = np.where(hn_mask, float(hn_connection_cost), 0.0)
+            heat_tech_capex = np.where(hn_mask, hn_capex, hp_capex)
+            annual_demand = np.where(hn_mask, residual_gas + heating_after_fabric, residual_gas + hp_demand)
+            annual_bill = np.where(
+                hn_mask,
+                hn_demand * self.hn_tariff + residual_gas * self.gas_price,
+                hp_demand * self.elec_price + residual_gas * self.gas_price,
+            )
+            annual_co2 = np.where(
+                hn_mask,
+                (hn_demand * self.hn_carbon + residual_gas * self.gas_carbon) / 1000.0,
+                (hp_demand * self.elec_carbon + residual_gas * self.gas_carbon) / 1000.0,
+            )
+        else:
+            raise ValueError(f"Unknown heat_source: {pathway.heat_source!r}")
+
+        total_capex = fabric_capex + heat_tech_capex
+        annual_bill_saving = baseline_bill - annual_bill
+        co2_saving = baseline_co2 - annual_co2
+        demand_reduction_kwh = baseline_demand - annual_demand
+        demand_reduction_pct = np.where(
+            baseline_demand > 0, demand_reduction_kwh / baseline_demand * 100.0, 0.0
+        )
+
+        with np.errstate(divide='ignore', invalid='ignore'):
+            simple_payback = np.where(
+                (annual_bill_saving > 0) & (total_capex > 0),
+                total_capex / annual_bill_saving,
+                np.where(total_capex <= 0, 0.0, np.inf),
+            )
+
+        discounted_payback = self._calculate_discounted_payback_array(total_capex, annual_bill_saving)
+
+        analysis_horizon = int(self.financial.get('analysis_horizon_years', 20))
+        total_co2_abated = co2_saving * analysis_horizon
+        with np.errstate(divide='ignore', invalid='ignore'):
+            carbon_abatement = np.where(total_co2_abated > 0, total_capex / total_co2_abated, np.inf)
+
+        max_payback_threshold = get_cost_effectiveness_params().get('max_payback_years', 20)
+        upgrade_recommended = np.isfinite(simple_payback) & (simple_payback > 0) & (simple_payback <= max_payback_threshold)
+
+        return pd.DataFrame({
+            'property_id': property_ids,
+            'pathway_id': pathway.pathway_id,
+            'has_hn_access': hn_mask,
+
+            'heat_pump_flow_temp_c': flow_temp_after,
+            'heat_pump_cop_central': hp_cop_central,
+            'heat_pump_cop_low': hp_cop_low,
+            'heat_pump_cop_high': hp_cop_high,
+
+            'baseline_demand_kwh': baseline_demand,
+            'baseline_bill': baseline_bill,
+            'baseline_co2_tonnes': baseline_co2,
+
+            'annual_demand_kwh': annual_demand,
+            'annual_bill': annual_bill,
+            'annual_co2_tonnes': annual_co2,
+
+            'demand_reduction_kwh': demand_reduction_kwh,
+            'demand_reduction_pct': demand_reduction_pct,
+            'annual_bill_saving': annual_bill_saving,
+            'co2_saving_tonnes': co2_saving,
+
+            'fabric_capex': fabric_capex,
+            'hp_capex': hp_capex,
+            'hn_capex': hn_capex,
+            'heat_tech_capex': heat_tech_capex,
+            'total_capex': total_capex,
+
+            'simple_payback_years': simple_payback,
+            'discounted_payback_years': discounted_payback,
+
+            'carbon_abatement_cost': carbon_abatement,
+            'upgrade_recommended': upgrade_recommended,
+        })
+
     def analyze_all_pathways(
         self,
         df: pd.DataFrame,
-        hn_access_column: str = None
+        hn_access_column: str = None,
+        progress_callback: Optional[Callable[[Dict], None]] = None,
     ) -> pd.DataFrame:
         """
-        Analyze all pathways for all properties.
+        Analyze all pathways for all properties using vectorized array operations.
+
+        Processes each pathway across all properties simultaneously rather than
+        iterating row-by-row, giving a large speedup over the original iterrows loop.
 
         Args:
             df: Properties DataFrame
-            hn_access_column: Column name indicating HN access (if None, uses random based on penetration)
+            hn_access_column: Column name indicating HN access
+            progress_callback: Optional callable receiving progress dicts per pathway.
+                Dict keys: event, current, total, elapsed, rows_per_second, eta_seconds.
 
         Returns:
             DataFrame with results for each property × pathway combination
         """
-        logger.info(f"Analyzing pathways for {len(df):,} properties...")
+        logger.info(f"Analyzing pathways for {len(df):,} properties (vectorized)...")
 
         df_ready = self._ensure_adjusted_baseline(df)
         hn_access = self._get_hn_access(df_ready, hn_access_column=hn_access_column)
+        total = len(df_ready)
+        n_pathways = len(self.pathways)
 
-        results = []
+        precomputed = self._precompute_property_arrays(df_ready)
+        _start_time = time.time()
 
-        for idx, (row_idx, property_data) in enumerate(df_ready.iterrows()):
-            if idx % 1000 == 0:
-                logger.info(f"  Processing property {idx + 1:,}/{len(df_ready):,}...")
+        pathway_dfs = []
+        for i, (pathway_id, pathway) in enumerate(self.pathways.items()):
+            logger.info(f"  Pathway {i + 1}/{n_pathways}: {pathway_id}...")
+            pathway_df = self._compute_pathway_vectorized(pathway, hn_access, precomputed)
+            pathway_dfs.append(pathway_df)
 
-            has_hn = hn_access.loc[row_idx]
+            if progress_callback is not None:
+                elapsed = time.time() - _start_time
+                pathways_done = i + 1
+                rate = pathways_done / elapsed if elapsed > 0 else 0.0
+                eta = (n_pathways - pathways_done) / rate if rate > 0 else None
+                try:
+                    progress_callback({
+                        "event": "property_progress",
+                        "current": pathways_done,
+                        "total": n_pathways,
+                        "elapsed": elapsed,
+                        "rows_per_second": rate,
+                        "eta_seconds": eta,
+                    })
+                except Exception:
+                    pass
 
-            for pathway_id, pathway in self.pathways.items():
-                result = self.calculate_property_pathway(
-                    property_data, pathway, has_hn_access=has_hn
-                )
-                results.append(result)
-
-        results_df = pd.DataFrame(results)
-        logger.info(f"Generated {len(results_df):,} pathway results")
+        results_df = pd.concat(pathway_dfs, ignore_index=True)
+        elapsed_total = time.time() - _start_time
+        logger.info(
+            f"Generated {len(results_df):,} pathway results in {elapsed_total:.1f}s "
+            f"({total * n_pathways / elapsed_total:,.0f} property-pathways/s)"
+        )
 
         return results_df
 
     def model_all_pathways(
         self,
         df: pd.DataFrame,
-        hn_access_column: str = None
+        hn_access_column: str = None,
+        progress_callback: Optional[Callable[[Dict], None]] = None,
     ) -> pd.DataFrame:
         """Alias for analyze_all_pathways for backwards compatibility."""
-        return self.analyze_all_pathways(df, hn_access_column=hn_access_column)
+        return self.analyze_all_pathways(
+            df, hn_access_column=hn_access_column, progress_callback=progress_callback
+        )
 
     def generate_pathway_summary(self, results_df: pd.DataFrame) -> pd.DataFrame:
         """

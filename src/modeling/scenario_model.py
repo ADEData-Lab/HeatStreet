@@ -8,7 +8,7 @@ Implements Section 4 of the project specification.
 import pandas as pd
 import numpy as np
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from dataclasses import dataclass, field, asdict
 from loguru import logger
 from concurrent.futures import ProcessPoolExecutor
@@ -709,12 +709,17 @@ class ScenarioModeler:
         fallback['tier_number'] = pd.to_numeric(fallback['tier_number'], errors='coerce').fillna(5).astype(int)
         return fallback
 
-    def model_all_scenarios(self, df: pd.DataFrame) -> Dict:
+    def model_all_scenarios(
+        self,
+        df: pd.DataFrame,
+        progress_callback: Optional[Callable[[Dict], None]] = None,
+    ) -> Dict:
         """
         Model all decarbonization scenarios for the dataset.
 
         Args:
             df: Validated EPC DataFrame with property characteristics
+            progress_callback: Optional callable receiving progress dicts per scenario/chunk.
 
         Returns:
             Dictionary containing results for all scenarios
@@ -726,7 +731,19 @@ class ScenarioModeler:
 
         for scenario_name, scenario_config in self.scenarios.items():
             logger.info(f"\nModeling scenario: {scenario_name}")
-            self.results[scenario_name] = self.model_scenario(df_with_flags, scenario_name, scenario_config)
+            if progress_callback is not None:
+                try:
+                    progress_callback({"event": "scenario_started", "scenario_name": scenario_name})
+                except Exception:
+                    pass
+            self.results[scenario_name] = self.model_scenario(
+                df_with_flags, scenario_name, scenario_config, progress_callback=progress_callback
+            )
+            if progress_callback is not None:
+                try:
+                    progress_callback({"event": "scenario_completed", "scenario_name": scenario_name})
+                except Exception:
+                    pass
 
         logger.info("\nAll scenario modeling complete!")
         return self.results
@@ -735,7 +752,8 @@ class ScenarioModeler:
         self,
         df: pd.DataFrame,
         scenario_name: str,
-        scenario_config: Dict
+        scenario_config: Dict,
+        progress_callback: Optional[Callable[[Dict], None]] = None,
     ) -> Dict:
         """
         Model a single decarbonization scenario with memory-efficient chunked processing.
@@ -822,6 +840,20 @@ class ScenarioModeler:
 
             chunk_time = time.time() - chunk_time_start
             logger.info(f"    Chunk {chunk_idx + 1} complete in {chunk_time:.1f}s ({len(chunk_df) / chunk_time:.0f} props/sec)")
+
+            if progress_callback is not None:
+                props_done = min((chunk_idx + 1) * chunk_size, total_properties)
+                try:
+                    progress_callback({
+                        "event": "scenario_chunk_progress",
+                        "scenario_name": scenario_name,
+                        "chunk_idx": chunk_idx + 1,
+                        "num_chunks": num_chunks,
+                        "properties_done": props_done,
+                        "total_properties": total_properties,
+                    })
+                except Exception:
+                    pass
 
             # Force garbage collection between chunks to release memory
             del property_dicts, args_list, chunk_upgrades

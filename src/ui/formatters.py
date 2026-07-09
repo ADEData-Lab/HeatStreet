@@ -118,3 +118,54 @@ def status_label(status: Any) -> str:
 def phase_label(name: Any) -> str:
     """Normalize a phase name for compact dashboard display."""
     return safe_text(name, max_length=42)
+
+
+def format_currency(value: Any, *, symbol: str = "GBP") -> str:
+    """Format a monetary value with currency symbol."""
+    try:
+        if value is None or (isinstance(value, float) and math.isnan(value)):
+            return "-"
+        amount = float(value)
+        prefix = "GBP " if symbol == "GBP" else f"{symbol} "
+        if abs(amount) >= 1_000_000:
+            return f"{prefix}{amount / 1_000_000:.1f}M"
+        if abs(amount) >= 1_000:
+            return f"{prefix}{amount:,.0f}"
+        return f"{prefix}{amount:.2f}"
+    except (TypeError, ValueError):
+        return safe_text(value)
+
+
+def format_carbon(value: Any) -> str:
+    """Format a carbon value in tonnes CO2."""
+    try:
+        if value is None or (isinstance(value, float) and math.isnan(value)):
+            return "-"
+        amount = float(value)
+        if abs(amount) >= 1_000:
+            return f"{amount / 1_000:.1f}ktCO2"
+        return f"{amount:.1f}tCO2"
+    except (TypeError, ValueError):
+        return safe_text(value)
+
+
+def truncate_text(text: Any, max_len: int, *, middle: bool = True) -> str:
+    """Truncate text, optionally from the middle (useful for paths)."""
+    s = safe_text(text)
+    if len(s) <= max_len or max_len < 5:
+        return s[:max_len] if max_len >= 0 else s
+    if middle:
+        half = (max_len - 3) // 2
+        return f"{s[:half]}...{s[-(max_len - 3 - half):]}"
+    return f"{s[: max_len - 3]}..."
+
+
+def terminal_width_safe(width: int, *, fallback: int = 80) -> int:
+    """Clamp a terminal width to a safe printable range."""
+    try:
+        w = int(width)
+        if w < 20:
+            return fallback
+        return min(w, 300)
+    except (TypeError, ValueError):
+        return fallback

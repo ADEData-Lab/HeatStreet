@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 from typing import Any, Dict, Mapping, Tuple
 
+import numpy as np
 from loguru import logger
 
 
@@ -256,3 +257,51 @@ class CostCalculator:
             )
 
         return " ".join(pieces)
+
+    def get_size_adjustment_factor_array(self, floor_areas: np.ndarray) -> np.ndarray:
+        """Vectorized get_size_adjustment_factor for an array of floor areas."""
+        thresholds = [t for t, _ in self.SIZE_ADJUSTMENT_THRESHOLDS[:-1]]
+        factors = [f for _, f in self.SIZE_ADJUSTMENT_THRESHOLDS]
+        conditions = [floor_areas <= t for t in thresholds]
+        return np.select(conditions, factors[:-1], default=factors[-1]).astype(float)
+
+    def measure_cost_array(self, measure: str, floor_areas: np.ndarray, size_factors: np.ndarray) -> np.ndarray:
+        """Vectorized measure_cost computing costs for all properties at once."""
+        normalized = self.ALIAS_MAP.get(measure, measure)
+        rule = self.rules.get(normalized, {}) or {}
+        n = len(floor_areas)
+
+        if not rule:
+            base_cost = float(self.costs.get(normalized, 0))
+            return (base_cost * size_factors).astype(float)
+
+        basis = rule.get('basis')
+        if basis == 'per_m2':
+            area_share = float(rule.get('area_share_of_floor', 1.0))
+            area_multiplier = float(rule.get('area_multiplier', 1.0))
+            rate = float(rule.get('rate', 0))
+            cost = floor_areas * area_share * area_multiplier * rate
+        elif basis == 'per_unit':
+            unit_size = float(rule.get('unit_size_m2', 1))
+            unit_rate = float(rule.get('unit_rate', 0))
+            min_units = int(rule.get('min_units', 0))
+            if unit_size > 0:
+                safe = np.nan_to_num(floor_areas, nan=0.0)
+                units = np.maximum(min_units, np.ceil(safe / unit_size).astype(int))
+            else:
+                units = np.full(n, min_units, dtype=int)
+            cost = units.astype(float) * unit_rate
+        else:
+            base_cost = float(rule.get('fixed_cost', self.costs.get(normalized, 0)))
+            apply_size_adj = rule.get('apply_size_adjustment', True)
+            cost = base_cost * (size_factors if apply_size_adj else np.ones(n, dtype=float))
+
+        min_total = rule.get('min_total')
+        if min_total is not None:
+            cost = np.maximum(float(min_total), cost)
+
+        cap = rule.get('cap_per_home')
+        if cap is not None:
+            cost = np.minimum(float(cap), cost)
+
+        return cost.astype(float)

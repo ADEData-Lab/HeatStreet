@@ -148,31 +148,38 @@
   "glazingData": [
     {
       "type": "Double",
-      "count": 164098,
-      "share": 9007.27,
-      "percentage": 9007.27,
+      "count": 163993,
+      "share": 9001.5,
+      "percentage": 9001.5,
       "uValue": 2.0
     },
     {
       "type": "Single",
-      "count": 13944,
-      "share": 765.38,
-      "percentage": 765.38,
+      "count": 14127,
+      "share": 775.42,
+      "percentage": 775.42,
       "uValue": 4.8
     },
     {
-      "type": "Unknown",
-      "count": 3812,
-      "share": 209.24,
-      "percentage": 209.24,
+      "type": "Mixed",
+      "count": 3720,
+      "share": 204.19,
+      "percentage": 204.19,
       "uValue": 2.8
     },
     {
       "type": "Triple",
-      "count": 330,
-      "share": 18.11,
-      "percentage": 18.11,
+      "count": 332,
+      "share": 18.22,
+      "percentage": 18.22,
       "uValue": 1.0
+    },
+    {
+      "type": "Unknown",
+      "count": 12,
+      "share": 0.66,
+      "percentage": 0.66,
+      "uValue": 2.8
     }
   ],
   "loftInsulationData": [
@@ -360,65 +367,65 @@
   "retrofitReadinessData": [
     {
       "tier": "Tier 1",
-      "properties": 5397,
-      "percentage": 2.96,
-      "avgCost": 1551.6173800259403,
-      "fabricCost": 1551.6173800259403,
-      "systemCost": 13818.851213637206,
-      "totalCost": 15370.468593663147,
-      "totalCostFullAshp": 15370.468593663147,
+      "properties": 5351,
+      "percentage": 2.94,
+      "avgCost": 1553.9583255466268,
+      "fabricCost": 1553.9583255466268,
+      "systemCost": 13830.02055690525,
+      "totalCost": 15383.978882451878,
+      "totalCostFullAshp": 15383.978882451878,
       "systemTechnology": "ashp"
     },
     {
       "tier": "Tier 2",
-      "properties": 1917,
-      "percentage": 1.05,
-      "avgCost": 2890.5774647887324,
-      "fabricCost": 2890.5774647887324,
-      "systemCost": 13959.05059989567,
-      "totalCost": 16849.628064684402,
-      "totalCostFullAshp": 16849.628064684402,
+      "properties": 1961,
+      "percentage": 1.08,
+      "avgCost": 2996.7899031106576,
+      "fabricCost": 2996.7899031106576,
+      "systemCost": 13923.069862315146,
+      "totalCost": 16919.859765425805,
+      "totalCostFullAshp": 16919.859765425805,
       "systemTechnology": "ashp"
     },
     {
       "tier": "Tier 3",
-      "properties": 83433,
-      "percentage": 45.8,
-      "avgCost": 10566.224012081551,
-      "fabricCost": 10566.224012081551,
-      "systemCost": 13660.477029472751,
-      "totalCost": 24226.7010415543,
-      "totalCostFullAshp": 24226.7010415543,
+      "properties": 83333,
+      "percentage": 45.74,
+      "avgCost": 10565.415321661287,
+      "fabricCost": 10565.415321661287,
+      "systemCost": 13659.065436261744,
+      "totalCost": 24224.480757923033,
+      "totalCostFullAshp": 24224.480757923033,
       "systemTechnology": "ashp"
     },
     {
       "tier": "Tier 4",
-      "properties": 82058,
-      "percentage": 45.04,
-      "avgCost": 11938.385312827511,
-      "fabricCost": 11938.385312827511,
-      "systemCost": 10787.809110629067,
-      "totalCost": 22726.194423456578,
-      "totalCostFullAshp": 26582.915279436496,
+      "properties": 82136,
+      "percentage": 45.08,
+      "avgCost": 11946.852257231909,
+      "fabricCost": 11946.852257231909,
+      "systemCost": 10787.187834810558,
+      "totalCost": 22734.040092042465,
+      "totalCostFullAshp": 26591.023631537937,
       "systemTechnology": "hybrid_ashp"
     },
     {
       "tier": "Tier 5",
-      "properties": 9379,
-      "percentage": 5.15,
-      "avgCost": 16964.9254717987,
-      "fabricCost": 16964.9254717987,
-      "systemCost": 15142.844652948075,
-      "totalCost": 32107.770124746774,
-      "totalCostFullAshp": 32107.770124746774,
+      "properties": 9403,
+      "percentage": 5.16,
+      "avgCost": 16970.05147293417,
+      "fabricCost": 16970.05147293417,
+      "systemCost": 15140.865681165586,
+      "totalCost": 32110.917154099756,
+      "totalCostFullAshp": 32110.917154099756,
       "systemTechnology": "ashp"
     }
   ],
   "interventionData": [
     {
       "intervention": "Radiator Upsizing",
-      "percentage": 86.07,
-      "count": 156811
+      "percentage": 86.06,
+      "count": 156784
     },
     {
       "intervention": "Loft Insulation",
@@ -432,8 +439,8 @@
     },
     {
       "intervention": "Glazing Upgrade",
-      "percentage": 7.65,
-      "count": 13944
+      "percentage": 7.75,
+      "count": 14127
     },
     {
       "intervention": "Solid Wall Insulation",
@@ -450,12 +457,12 @@
     {
       "tier": "Tier 1",
       "tierLabel": "Ready Now",
-      "properties": 5397,
-      "share": 3.0,
-      "fabricCost": 1552.0,
-      "systemCost": 13819.0,
-      "totalCost": 15370.0,
-      "totalCostFullAshp": 15370.0,
+      "properties": 5351,
+      "share": 2.9,
+      "fabricCost": 1554.0,
+      "systemCost": 13830.0,
+      "totalCost": 15384.0,
+      "totalCostFullAshp": 15384.0,
       "systemTechnology": "ashp",
       "heatDemand": 96.0,
       "reduction": 144.0,
@@ -465,12 +472,12 @@
     {
       "tier": "Tier 2",
       "tierLabel": "Minor Work",
-      "properties": 1917,
+      "properties": 1961,
       "share": 1.1,
-      "fabricCost": 2891.0,
-      "systemCost": 13959.0,
-      "totalCost": 16850.0,
-      "totalCostFullAshp": 16850.0,
+      "fabricCost": 2997.0,
+      "systemCost": 13923.0,
+      "totalCost": 16920.0,
+      "totalCostFullAshp": 16920.0,
       "systemTechnology": "ashp",
       "heatDemand": 115.0,
       "reduction": 125.0,
@@ -480,12 +487,12 @@
     {
       "tier": "Tier 3",
       "tierLabel": "Moderate Work",
-      "properties": 83433,
-      "share": 45.8,
-      "fabricCost": 10566.0,
-      "systemCost": 13660.0,
-      "totalCost": 24227.0,
-      "totalCostFullAshp": 24227.0,
+      "properties": 83333,
+      "share": 45.7,
+      "fabricCost": 10565.0,
+      "systemCost": 13659.0,
+      "totalCost": 24224.0,
+      "totalCostFullAshp": 24224.0,
       "systemTechnology": "ashp",
       "heatDemand": 134.0,
       "reduction": 106.0,
@@ -495,12 +502,12 @@
     {
       "tier": "Tier 4",
       "tierLabel": "Major Work",
-      "properties": 82058,
-      "share": 45.0,
-      "fabricCost": 11938.0,
-      "systemCost": 10788.0,
-      "totalCost": 22726.0,
-      "totalCostFullAshp": 26583.0,
+      "properties": 82136,
+      "share": 45.1,
+      "fabricCost": 11947.0,
+      "systemCost": 10787.0,
+      "totalCost": 22734.0,
+      "totalCostFullAshp": 26591.0,
       "systemTechnology": "hybrid_ashp",
       "heatDemand": 153.0,
       "reduction": 86.0,
@@ -510,12 +517,12 @@
     {
       "tier": "Tier 5",
       "tierLabel": "Extensive Work",
-      "properties": 9379,
-      "share": 5.1,
-      "fabricCost": 16965.0,
-      "systemCost": 15143.0,
-      "totalCost": 32108.0,
-      "totalCostFullAshp": 32108.0,
+      "properties": 9403,
+      "share": 5.2,
+      "fabricCost": 16970.0,
+      "systemCost": 15141.0,
+      "totalCost": 32111.0,
+      "totalCostFullAshp": 32111.0,
       "systemTechnology": "ashp",
       "heatDemand": 173.0,
       "reduction": 67.0,
@@ -1235,40 +1242,40 @@
       "pathwayId": "fabric_only",
       "pathwayName": "Fabric Only",
       "homes": 182184,
-      "capexMean": 15492.65,
-      "billSavingMean": 584.45,
-      "co2SavingMean": 1.714,
-      "paybackMean": 28.61,
+      "capexMean": 25751.11,
+      "billSavingMean": 692.23,
+      "co2SavingMean": 2.0301,
+      "paybackMean": 40.41,
       "paybackNote": "Tariff context: heat network GBP 0.0800/kWh vs gas GBP 0.0624/kWh; carbon factors HN 0.073 vs gas 0.183 kgCO2/kWh."
     },
     {
       "pathwayId": "fabric_plus_hp_only",
       "pathwayName": "Fabric + Heat Pump",
       "homes": 182184,
-      "capexMean": 27492.65,
-      "billSavingMean": 455.49,
-      "co2SavingMean": 2.7557,
-      "paybackMean": 74.83,
+      "capexMean": 37751.11,
+      "billSavingMean": 604.4,
+      "co2SavingMean": 2.9358,
+      "paybackMean": 69.1,
       "paybackNote": "Tariff context: heat network GBP 0.0800/kWh vs gas GBP 0.0624/kWh; carbon factors HN 0.073 vs gas 0.183 kgCO2/kWh."
     },
     {
       "pathwayId": "fabric_plus_hn_only",
       "pathwayName": "Fabric + Heat Network",
       "homes": 182184,
-      "capexMean": 20492.65,
-      "billSavingMean": 339.98,
-      "co2SavingMean": 2.6544,
-      "paybackMean": 64.73,
+      "capexMean": 30751.11,
+      "billSavingMean": 484.36,
+      "co2SavingMean": 2.8297,
+      "paybackMean": 72.21,
       "paybackNote": "HN has lower capex, but modeled payback can be longer because the HN tariff exceeds the gas price (HN GBP 0.0800/kWh vs gas GBP 0.0624/kWh); its main advantage is carbon reduction (HN 0.073 vs gas 0.183 kgCO2/kWh)."
     },
     {
       "pathwayId": "fabric_plus_hp_plus_hn",
       "pathwayName": "Hybrid: Fabric + HP + HN",
       "homes": 182184,
-      "capexMean": 24490.95,
-      "billSavingMean": 404.58,
-      "co2SavingMean": 2.711,
-      "paybackMean": 71.87,
+      "capexMean": 34749.41,
+      "billSavingMean": 551.76,
+      "co2SavingMean": 2.8893,
+      "paybackMean": 70.6,
       "paybackNote": "HN has lower capex, but modeled payback can be longer because the HN tariff exceeds the gas price (HN GBP 0.0800/kWh vs gas GBP 0.0624/kWh); its main advantage is carbon reduction (HN 0.073 vs gas 0.183 kgCO2/kWh)."
     }
   ],
@@ -1281,15 +1288,15 @@
     },
     {
       "stage": "After Fabric",
-      "estimate": 134.98,
-      "lower": 114.73,
-      "upper": 155.23
+      "estimate": 134.97,
+      "lower": 114.72,
+      "upper": 155.21
     },
     {
       "stage": "Full Retrofit",
-      "estimate": 134.98,
-      "lower": 121.48,
-      "upper": 148.48
+      "estimate": 134.97,
+      "lower": 121.47,
+      "upper": 148.47
     }
   ],
   "sensitivityData": [
@@ -1418,14 +1425,9 @@
       "savings": 655.0
     },
     {
-      "measure": "Triple Glazing Upgrade (Danish standard)",
-      "cost": 38700.0,
-      "savings": 697.0
-    },
-    {
       "measure": "Double Glazing Upgrade (from single)",
-      "cost": 44700.0,
-      "savings": 721.0
+      "cost": 35700.0,
+      "savings": 683.0
     }
   ],
   "costLeversData": {
@@ -1475,12 +1477,12 @@
   },
   "summaryStats": {
     "totalProperties": 182184,
-    "meanFabricCost": 11165.860569534098,
-    "meanSystemCost": 12450.737715715979,
-    "meanTotalRetrofitCost": 23616.59828525008,
-    "meanTotalCostFullAshp": 25353.71460721029,
-    "heatDemandReduction": 43.71855852821836,
-    "readyOrNearReady": 4.0146225793703065,
+    "meanFabricCost": 11172.637234883414,
+    "meanSystemCost": 12448.648070082992,
+    "meanTotalRetrofitCost": 23621.285304966408,
+    "meanTotalCostFullAshp": 25360.17126641198,
+    "heatDemandReduction": 43.723729068783584,
+    "readyOrNearReady": 4.01352478812629,
     "belowBandC": 77.99,
     "gasBoilerDependency": 97.01181223378562,
     "meanSAPScore": 61.41774799104202,

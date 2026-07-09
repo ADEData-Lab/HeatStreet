@@ -50,6 +50,99 @@ HeatStreet/
 └── requirements-spatial.txt  # Optional spatial dependencies (GDAL/geopandas)
 ```
 
+## HeatStreet Studio
+
+HeatStreet Studio is the built-in terminal application for running and monitoring the analysis pipeline. It replaces the earlier Rich live dashboard with a full-screen Textual TUI and stable fallbacks for all terminal types.
+
+### TUI Modes
+
+| Command | Mode | Best for |
+|---|---|---|
+| `python run_analysis.py` | Auto-detect | Interactive terminals |
+| `python run_analysis.py --tui textual` | Full Textual TUI | Windows Terminal, PowerShell, VS Code |
+| `python run_analysis.py --tui rich` | Rich compact display | Any colour terminal |
+| `python run_analysis.py --simple-tui` | One line per phase | Anaconda Prompt, limited terminals |
+| `python run_analysis.py --no-tui` | Silent | CI, automation, log files |
+
+### Text Mockup
+
+```
++-- HeatStreet Studio -----------------------------------------+
+| Elapsed: 14m 32s | Phase 6/12: Scenario Modeling | Hybrid HP  |
++---------------------------------------------------------------+
+| Phases          | Current Work            | Modelling Counters |
+| [+] 1 Preflight | Scenario Modeling       | properties: 42,150 |
+| [+] 2 Download  | Action: Heat pump calc  | scenarios:  5      |
+| [+] 3 Validation| Elapsed: 6m 18s         | tier 1 ready: 8,420|
+| [+] 4 Adjustmts | [######......] 62.4%    | solid wall: 34,200 |
+| [>] 5 Archetypes| ETA: 3m 44s | 1,240/s  |                    |
+| [>] 6 Scenarios |                         |                    |
+| [ ] 7 Retrofit  +-------------------------+--------------------+
+| [ ] 8 Spatial   |
++-----+-----------+
+| Scenarios       | Status   | Cost/home |
+| Heat pump       | running  | GBP 8,200 |
+| Hybrid HP       | pending  | -         |
+| Heat network    | pending  | -         |
+| Fabric first    | pending  | -         |
++---------------------------------------------------+
+| Tabs: [1]Overview [2]Acquisition [3]Validation [4]Archetypes |
+|       [5]Scenarios [6]Retrofit [7]Spatial [8]Outputs [9]Logs |
+| Keys: q=quit  o=outputs  l=logs  s=scenarios  ?=help         |
++--------------------------------------------------------------+
+```
+
+### Keyboard Shortcuts
+
+| Key | Action |
+|---|---|
+| `q` | Request quit / cancel |
+| `1`-`9` | Switch to tab by number |
+| `o` | Outputs tab |
+| `l` | Logs tab |
+| `s` | Scenarios tab |
+| `a` | Acquisition tab |
+| `v` | Validation tab |
+| `w` | Warnings drawer |
+| `p` / `r` | Pause / resume display updates |
+| `?` | Show shortcuts |
+
+### Vector Assets
+
+After the run completes, SVG diagrams are saved to `data/outputs/ui_assets/`:
+- `pipeline_flow.svg` - full pipeline with status styling
+- `acquisition_flow.svg` - API to stock dataset flow
+- `validation_funnel.svg` - input to validated dataset
+- `epc_distribution.svg` - EPC band bar chart
+- `scenario_swimlanes.svg` - scenario status lanes
+- `scenario_comparison.svg` - cost and carbon comparison
+- `retrofit_readiness.svg` - tier distribution
+- `run_summary.svg` - shareable one-page summary
+
+The terminal shows simplified previews; the SVG files are the full vector graphics.
+
+### Windows Terminal Guidance
+
+- **Best experience**: Windows Terminal or PowerShell with `--tui textual`
+- **Stable fallback**: Anaconda Prompt with `--simple-tui`
+- **Conda launchers** (`run-conda.bat` / `run-conda.ps1`) remain the recommended way to run with spatial analysis
+
+### Troubleshooting TUI
+
+| Problem | Fix |
+|---|---|
+| Flicker or garbled output | Use `--simple-tui` or `--tui rich` |
+| Bad or missing icons | Use `--simple-tui` (ASCII mode) |
+| No colours | Set `TERM=xterm-256color` or use `--no-tui` |
+| Text wrapping / overflow | Widen your terminal window |
+| Textual unavailable | `pip install textual>=0.47.0` or use `--tui rich` |
+| CI mode | `--no-tui` or set `CI=true`; logs always written |
+| HEATSTREET_TUI env var | `HEATSTREET_TUI=0` disables all UI; `=1` enables |
+
+### Assurance
+
+UI changes in HeatStreet Studio do not alter analytical assumptions, EPC filtering logic, scenario modelling semantics, spatial classification, or output file schemas. All analytical outputs remain byte-for-byte compatible with prior runs.
+
 ## Installation
 
 ### Prerequisites

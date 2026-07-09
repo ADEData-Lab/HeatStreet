@@ -559,6 +559,97 @@ class RetrofitPackageAnalyzer:
 
         return np.inf
 
+    def _is_measure_applicable_vectorized(self, measure: Measure, df: pd.DataFrame) -> np.ndarray:
+        """Return boolean array: True where measure is applicable to each property."""
+        n = len(df)
+        if not measure.requires_check:
+            return np.ones(n, dtype=bool)
+
+        measure_id = measure.measure_id
+
+        def _col(col: str, default) -> pd.Series:
+            return df[col] if col in df.columns else pd.Series(default, index=df.index)
+
+        if measure_id == 'loft_insulation':
+            roof = pd.to_numeric(_col('roof_insulation_thickness_mm', np.nan), errors='coerce')
+            return (~(roof >= 270)).values
+
+        if measure_id == 'cavity_wall_insulation':
+            wall_type = _col('wall_type', '').fillna('').str.lower()
+            wall_ins = _col('wall_insulated', False).fillna(False).astype(bool)
+            return (wall_type.str.contains('cavity', regex=False) & ~wall_ins).values
+
+        if measure_id in ('solid_wall_insulation_ewi', 'solid_wall_insulation_iwi'):
+            wall_type = _col('wall_type', '').fillna('').str.lower()
+            wall_ins = _col('wall_insulated', False).fillna(False).astype(bool)
+            is_solid = wall_type.str.contains('solid|brick|stone', regex=True)
+            return (is_solid & ~wall_ins).values
+
+        if measure_id == 'floor_insulation':
+            floor_ins = _col('floor_insulation_present', False).fillna(False).astype(bool)
+            return (~floor_ins).values
+
+        if measure_id == 'double_glazing_upgrade':
+            glazing = _col('glazing_type', '').fillna('').str.lower()
+            return glazing.str.contains('single', regex=False).values
+
+        if measure_id == 'triple_glazing_upgrade':
+            glazing = _col('glazing_type', '').fillna('').str.lower()
+            return glazing.isin(['single', 'double', 'mixed']).values
+
+        return np.ones(n, dtype=bool)
+
+    def calculate_batch_package_results(self, df: pd.DataFrame, package: 'RetrofitPackage') -> Dict[str, np.ndarray]:
+        """
+        Compute package results for all properties at once using vectorized array operations.
+
+        Returns a dict with numpy arrays: capex_per_home, annual_kwh_saving_pct, flow_temp_reduction_k.
+        These are the three quantities needed by the vectorized pathway modeller.
+        """
+        n = len(df)
+        floor_area = pd.to_numeric(
+            df['TOTAL_FLOOR_AREA'] if 'TOTAL_FLOOR_AREA' in df.columns else pd.Series(100, index=df.index),
+            errors='coerce',
+        ).fillna(100).values.astype(float)
+
+        if self.cost_calculator is not None:
+            size_factors = self.cost_calculator.get_size_adjustment_factor_array(floor_area)
+        else:
+            size_factors = np.ones(n, dtype=float)
+
+        total_capex = np.zeros(n)
+        remaining_demand = np.ones(n)
+        total_flow_temp_reduction = np.zeros(n)
+
+        for measure_id in package.measures:
+            if measure_id not in self.catalogue:
+                continue
+            measure = self.catalogue[measure_id]
+            mask = self._is_measure_applicable_vectorized(measure, df)
+
+            if self.cost_calculator is not None:
+                cost_arr = self.cost_calculator.measure_cost_array(measure_id, floor_area, size_factors)
+            else:
+                cost_arr = measure.capex_per_home * size_factors
+
+            total_capex += np.where(mask, cost_arr, 0.0)
+            remaining_demand = np.where(
+                mask,
+                remaining_demand * (1.0 - measure.annual_kwh_saving_pct),
+                remaining_demand,
+            )
+            total_flow_temp_reduction = np.where(
+                mask,
+                total_flow_temp_reduction + measure.flow_temp_reduction_k,
+                total_flow_temp_reduction,
+            )
+
+        return {
+            'capex_per_home': total_capex,
+            'annual_kwh_saving_pct': (1.0 - remaining_demand) * 100.0,
+            'flow_temp_reduction_k': total_flow_temp_reduction,
+        }
+
     def analyze_all_packages(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Analyze all packages for all properties.

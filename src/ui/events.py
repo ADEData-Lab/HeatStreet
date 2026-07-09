@@ -15,18 +15,25 @@ UI_EVENT_TYPES = (
     "phase_progress",
     "phase_completed",
     "phase_failed",
+    "phase_skipped",
     "metric_updated",
+    "counter_updated",
     "output_registered",
     "warning",
     "info",
     "prompt_pending",
     "prompt_completed",
+    "visualization_updated",
+    "scenario_started",
+    "scenario_progress",
+    "scenario_completed",
+    "menu_action",
 )
 
 
 @dataclass(frozen=True)
 class UIEvent:
-    """Structured event consumed by LiveDashboard."""
+    """Structured event consumed by all HeatStreet Studio renderers."""
 
     event_type: str
     message: str = ""
@@ -34,6 +41,8 @@ class UIEvent:
     metric: Optional[str] = None
     value: Any = None
     group: Optional[str] = None
+    counter_key: Optional[str] = None
+    counter_value: Any = None
     payload: Dict[str, Any] = field(default_factory=dict)
     timestamp: datetime = field(default_factory=datetime.now)
 

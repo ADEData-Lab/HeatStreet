@@ -52,6 +52,7 @@ from src.utils.staged_processing import (
     validate_staged_dataset,
 )
 from src.ui import create_dashboard
+from src.ui.formatters import format_duration
 
 
 console = Console()
@@ -151,6 +152,32 @@ def _ui_info(ui, message: str) -> None:
 def _ui_suppresses_progress(ui) -> bool:
     """Return True when external progress bars should stay silent."""
     return bool(getattr(ui, "suppress_external_progress", False))
+
+
+def _ui_scenario_started(ui, name: str) -> None:
+    _ui_call(ui, "scenario_started", name)
+
+
+def _ui_scenario_progress(ui, name: str, completed=None, total=None, metrics=None) -> None:
+    _ui_call(ui, "scenario_progress", name, completed=completed, total=total, metrics=metrics)
+
+
+def _ui_scenario_completed(ui, name: str, metrics=None, outputs=None) -> None:
+    _ui_call(ui, "scenario_completed", name, metrics=metrics, outputs=outputs)
+
+
+def _tui_prompt(ui, prompt_type: str, **kwargs) -> Optional[Any]:
+    """Request a TUI modal prompt if the UI supports it; return None to fall back."""
+    if ui is None:
+        return None
+    prompt_fn = getattr(ui, "prompt_request", None)
+    if prompt_fn is None:
+        return None
+    try:
+        return prompt_fn(prompt_type, **kwargs)
+    except Exception:
+        logger.warning("TUI prompt_request raised; falling back to questionary", exc_info=True)
+        return None
 
 
 def _render_console_message(objects: tuple[Any, ...], kwargs: Dict[str, Any]) -> str:
@@ -314,26 +341,47 @@ def _make_epc_progress_callback(ui):
         "Parquet parts written": 0,
     }
 
+    def _update_acq_state(key: str, value) -> None:
+        """Update DashboardState.acquisition directly if the UI has rich state."""
+        try:
+            state = getattr(ui, "state", None) or getattr(getattr(ui, "_base", None), "state", None)
+            if state is not None:
+                acq = getattr(state, "acquisition", None)
+                if acq is not None:
+                    setattr(acq, key, value)
+        except Exception:
+            pass
+
     def callback(event: Dict[str, Any]) -> None:
         try:
             event_type = event.get("event")
             if event_type == "reusable_staged_dataset_accepted":
                 _ui_info(ui, "Reusable staged EPC full-load dataset accepted")
                 if event.get("row_count") is not None:
-                    _ui_metric(ui, "rows retained", event.get("row_count"), group=PHASE_ACQUISITION)
+                    row_count = event.get("row_count")
+                    _ui_metric(ui, "rows retained", row_count, group=PHASE_ACQUISITION)
+                    _update_acq_state("rows_retained", row_count)
                 if event.get("dataset_path"):
                     _ui_output(ui, "Reusable EPC staged dataset", event.get("dataset_path"))
             elif event_type == "attempt_directory_created":
                 _ui_info(ui, "Created EPC full-load attempt directory")
             elif event_type == "zip_download_started":
                 _ui_phase_progress(ui, "Data Download", "Downloading EPC full-load ZIP")
+                _update_acq_state("zip_status", "downloading")
             elif event_type == "zip_validation_complete":
-                _ui_metric(ui, "EPC ZIP bytes", event.get("size_bytes", 0), group=PHASE_ACQUISITION)
+                size = event.get("size_bytes", 0)
+                _ui_metric(ui, "EPC ZIP bytes", size, group=PHASE_ACQUISITION)
+                _update_acq_state("zip_bytes_total", size)
+                _update_acq_state("zip_status", "done")
             elif event_type == "member_selection_complete":
-                counters["certificate members selected"] = len(event.get("selected_certificate_members") or [])
-                counters["recommendation members ignored"] = len(event.get("ignored_recommendation_members") or [])
-                _ui_metric(ui, "certificate members selected", counters["certificate members selected"], group=PHASE_ACQUISITION)
-                _ui_metric(ui, "recommendation members ignored", counters["recommendation members ignored"], group=PHASE_ACQUISITION)
+                selected = len(event.get("selected_certificate_members") or [])
+                ignored = len(event.get("ignored_recommendation_members") or [])
+                counters["certificate members selected"] = selected
+                counters["recommendation members ignored"] = ignored
+                _ui_metric(ui, "certificate members selected", selected, group=PHASE_ACQUISITION)
+                _ui_metric(ui, "recommendation members ignored", ignored, group=PHASE_ACQUISITION)
+                _update_acq_state("members_selected", selected)
+                _update_acq_state("members_ignored", ignored)
             elif event_type == "member_started":
                 _ui_phase_progress(ui, "Data Download", f"Reading {event.get('member')}")
             elif event_type == "chunk_parsed":
@@ -341,19 +389,87 @@ def _make_epc_progress_callback(ui):
                 counters["rows retained"] += int(event.get("rows_retained", 0) or 0)
                 _ui_metric(ui, "rows read", counters["rows read"], group=PHASE_ACQUISITION)
                 _ui_metric(ui, "rows retained", counters["rows retained"], group=PHASE_ACQUISITION)
+                _update_acq_state("rows_read", counters["rows read"])
+                _update_acq_state("rows_retained", counters["rows retained"])
             elif event_type == "parquet_part_written":
                 counters["Parquet parts written"] += 1
                 _ui_metric(ui, "Parquet parts written", counters["Parquet parts written"], group=PHASE_ACQUISITION)
+                _update_acq_state("parquet_parts", counters["Parquet parts written"])
             elif event_type == "member_complete":
                 counters["members processed"] += 1
-                counters["malformed rows skipped"] += int(event.get("malformed_rows_skipped", 0) or 0)
+                malformed = int(event.get("malformed_rows_skipped", 0) or 0)
+                counters["malformed rows skipped"] += malformed
                 _ui_metric(ui, "members processed", counters["members processed"], group=PHASE_ACQUISITION)
                 _ui_metric(ui, "malformed rows skipped", counters["malformed rows skipped"], group=PHASE_ACQUISITION)
+                _update_acq_state("members_processed", counters["members processed"])
+                _update_acq_state("rows_malformed", counters["malformed rows skipped"])
             elif event_type == "dataset_reference_created":
-                _ui_metric(ui, "rows retained", event.get("row_count", 0), group=PHASE_ACQUISITION)
+                row_count = event.get("row_count", 0)
+                _ui_metric(ui, "rows retained", row_count, group=PHASE_ACQUISITION)
                 _ui_output(ui, "National EPC staged dataset", event.get("parquet_path"))
+                _update_acq_state("rows_retained", row_count)
+            elif event_type in ("stock_filtered", "subset_materialized"):
+                count = event.get("row_count") or event.get("record_count")
+                if count is not None:
+                    key = "london_records" if event_type == "subset_materialized" else "stock_records"
+                    _update_acq_state(key, count)
         except Exception:
             return None
+
+    return callback
+
+
+def _make_pathway_progress_callback(ui):
+    """Translate property_progress events into dashboard progress updates for pathway modeling."""
+    if ui is None:
+        return None
+
+    def callback(event: Dict[str, Any]) -> None:
+        try:
+            if event.get("event") != "property_progress":
+                return
+            current = event.get("current", 0)
+            total = event.get("total", 0)
+            rate = event.get("rows_per_second", 0.0)
+            eta = event.get("eta_seconds")
+            rate_str = f"  {rate:.2f}/s" if rate > 0 else ""
+            eta_str = "calculating..." if eta is None else format_duration(eta)
+            msg = f"Pathway {current}/{total}{rate_str}  ETA {eta_str}"
+            _ui_phase_progress(ui, "Pathway Modeling", msg)
+            _ui_call(ui, "progress", current, total)
+        except Exception:
+            pass
+
+    return callback
+
+
+def _make_scenario_progress_callback(ui):
+    """Translate scenario_* events into dashboard updates during scenario modeling."""
+    if ui is None:
+        return None
+
+    def callback(event: Dict[str, Any]) -> None:
+        try:
+            event_type = event.get("event")
+            scenario_name = event.get("scenario_name", "")
+
+            if event_type == "scenario_started":
+                _ui_scenario_started(ui, scenario_name)
+                _ui_phase_progress(ui, "Scenario Modeling", f"Modeling {scenario_name}...")
+
+            elif event_type == "scenario_chunk_progress":
+                chunk_idx = event.get("chunk_idx", 0)
+                num_chunks = event.get("num_chunks", 0)
+                props_done = event.get("properties_done", 0)
+                total_props = event.get("total_properties", 0)
+                msg = f"{scenario_name}: chunk {chunk_idx}/{num_chunks}  {props_done:,}/{total_props:,} properties"
+                _ui_phase_progress(ui, "Scenario Modeling", msg)
+                _ui_scenario_progress(ui, scenario_name, completed=props_done, total=total_props)
+
+            elif event_type == "scenario_completed":
+                _ui_scenario_completed(ui, scenario_name)
+        except Exception:
+            pass
 
     return callback
 
@@ -792,14 +908,28 @@ def _argparse_iso_date(value: str) -> date_cls:
 
 
 def parse_args(argv=None) -> argparse.Namespace:
-    """Parse HeatStreet Mission Control runner arguments."""
+    """Parse HeatStreet Studio runner arguments."""
     parser = argparse.ArgumentParser(
-        description="Run the HeatStreet Mission Control analysis pipeline.",
+        description="Run the HeatStreet Studio analysis pipeline.",
     )
     tui_group = parser.add_mutually_exclusive_group()
-    tui_group.add_argument("--tui", dest="tui", action="store_true", help="Enable the Rich live dashboard when the terminal supports it.")
-    tui_group.add_argument("--no-tui", dest="tui", action="store_false", help="Disable the Rich live dashboard.")
-    parser.set_defaults(tui=None)
+    tui_group.add_argument(
+        "--tui",
+        dest="tui_mode",
+        nargs="?",
+        const="textual",
+        choices=["textual", "rich"],
+        metavar="MODE",
+        help="TUI mode: textual (default) or rich. --tui alone selects textual.",
+    )
+    tui_group.add_argument(
+        "--no-tui",
+        dest="no_tui",
+        action="store_true",
+        help="Disable all terminal UI output.",
+    )
+    parser.set_defaults(tui_mode=None, no_tui=False)
+
     parser.add_argument("--simple-tui", action="store_true", help="Use a stable line-oriented terminal dashboard.")
     parser.add_argument(
         "--tui-refresh-rate",
@@ -839,6 +969,16 @@ def parse_args(argv=None) -> argparse.Namespace:
         parser.error("--sample-start cannot be after --sample-end")
     if args.borough and args.download_scope is None:
         args.download_scope = "single-borough"
+
+    # Backwards-compatibility shim: expose args.tui as a bool for legacy code
+    # that predates tui_mode/no_tui. create_dashboard() reads tui_mode/no_tui.
+    if args.no_tui:
+        args.tui = False
+    elif args.tui_mode is not None:
+        args.tui = True
+    else:
+        args.tui = None
+
     return args
 
 
@@ -887,6 +1027,19 @@ def compute_sample_start_date(sample_end_date: date_cls) -> date_cls:
 def prompt_sample_end_date(ui=None) -> date_cls:
     """Prompt for the sample end date, defaulting to yesterday for API safety."""
     default_value = (date_cls.today() - timedelta(days=1)).isoformat()
+
+    # Try TUI modal first
+    tui_result = _tui_prompt(
+        ui, "text",
+        title="Sample window",
+        message="Sample end date (YYYY-MM-DD):",
+        default=default_value,
+        validate_fn=validate_end_date,
+    )
+    if tui_result is not None:
+        return parse_iso_date(tui_result)
+
+    # Questionary fallback
     with _ui_suspend(ui, "Waiting for sample end date"):
         sample_end_text = questionary.text(
             "Sample end date (YYYY-MM-DD):",
@@ -904,6 +1057,20 @@ def prompt_sample_window(ui=None) -> Tuple[date_cls, date_cls]:
     """Prompt for a fully configurable sample window."""
     sample_end_date = prompt_sample_end_date(ui=ui)
     default_start_date = compute_sample_start_date(sample_end_date).isoformat()
+
+    # Try TUI modal first
+    tui_result = _tui_prompt(
+        ui, "text",
+        title="Sample window",
+        message="Sample start date (YYYY-MM-DD):",
+        default=default_start_date,
+        validate_fn=lambda value: validate_start_date(value, sample_end_date),
+    )
+    if tui_result is not None:
+        sample_start_date = parse_iso_date(tui_result)
+        return sample_start_date, sample_end_date
+
+    # Questionary fallback
     with _ui_suspend(ui, "Waiting for sample start date"):
         sample_start_text = questionary.text(
             "Sample start date (YYYY-MM-DD):",
@@ -1217,14 +1384,21 @@ def download_data(
     }
     download_scope = scope_map.get(download_scope, download_scope)
     if download_scope is None:
-        with _ui_suspend(ui, "Waiting for EPC download scope"):
-            download_scope = questionary.select(
-                "Select download scope:",
-                choices=[
-                    "All London boroughs (full dataset)",
-                    "Single borough (testing)",
-                ],
-            ).ask()
+        _scope_choices = ["All London boroughs (full dataset)", "Single borough (testing)"]
+        tui_scope = _tui_prompt(
+            ui, "select",
+            title="Download scope",
+            message="Select EPC download scope:",
+            choices=_scope_choices,
+        )
+        if tui_scope is not None:
+            download_scope = tui_scope
+        else:
+            with _ui_suspend(ui, "Waiting for EPC download scope"):
+                download_scope = questionary.select(
+                    "Select download scope:",
+                    choices=_scope_choices,
+                ).ask()
 
     if not download_scope:
         raise AnalysisCancelled("Download cancelled by user")
@@ -1232,11 +1406,21 @@ def download_data(
     selected_borough = borough
     if download_scope == "Single borough (testing)":
         if not selected_borough:
-            with _ui_suspend(ui, "Waiting for borough selection"):
-                selected_borough = questionary.autocomplete(
-                    "Select borough:",
-                    choices=list(EPCAPIDownloader.LONDON_LA_CODES.keys()),
-                ).ask()
+            _borough_list = sorted(EPCAPIDownloader.LONDON_LA_CODES.keys())
+            tui_borough = _tui_prompt(
+                ui, "select",
+                title="Borough selection",
+                message="Select London borough:",
+                choices=_borough_list,
+            )
+            if tui_borough is not None:
+                selected_borough = tui_borough
+            else:
+                with _ui_suspend(ui, "Waiting for borough selection"):
+                    selected_borough = questionary.autocomplete(
+                        "Select borough:",
+                        choices=list(EPCAPIDownloader.LONDON_LA_CODES.keys()),
+                    ).ask()
 
         if not selected_borough:
             raise AnalysisCancelled("Download cancelled by user")
@@ -1858,7 +2042,7 @@ def apply_methodological_adjustments(
     return df_adjusted, summary
 
 
-def ensure_hp_hn_comparison_outputs(df=None, analysis_logger: AnalysisLogger = None):
+def ensure_hp_hn_comparison_outputs(df=None, analysis_logger: AnalysisLogger = None, ui=None):
     """Ensure the HP-vs-HN comparison artefacts exist, rebuilding them if required."""
     global _hp_hn_comparison_outputs_cache
 
@@ -1904,7 +2088,10 @@ def ensure_hp_hn_comparison_outputs(df=None, analysis_logger: AnalysisLogger = N
                 raise ValueError("No source dataframe available to rebuild HP vs HN comparison outputs")
 
             console.print("[cyan]Running pathway modeling to regenerate comparison inputs...[/cyan]")
-            pathway_results = pathway_modeler.model_all_pathways(df)
+            _ui_phase_started(ui, "Pathway Modeling", f"Analyzing pathways for {len(df):,} properties")
+            pathway_cb = _make_pathway_progress_callback(ui)
+            pathway_results = pathway_modeler.model_all_pathways(df, progress_callback=pathway_cb)
+            _ui_phase_completed(ui, "Pathway Modeling", "Pathway analysis complete")
             pathway_summary = pathway_modeler.generate_pathway_summary(pathway_results)
             property_results_path, summary_path = pathway_modeler.export_results(
                 pathway_results,
@@ -2018,7 +2205,8 @@ def model_scenarios(df, analysis_logger: AnalysisLogger = None, ui=None):
     console.print("[cyan]Modeling decarbonization scenarios...[/cyan]")
 
     modeler = ScenarioModeler()
-    scenario_results = modeler.model_all_scenarios(df)
+    scenario_cb = _make_scenario_progress_callback(ui)
+    scenario_results = modeler.model_all_scenarios(df, progress_callback=scenario_cb)
 
     console.print(f"[green]✓[/green] Scenario modeling complete")
 
@@ -2088,7 +2276,7 @@ def model_scenarios(df, analysis_logger: AnalysisLogger = None, ui=None):
     # Generate pathway-level outputs and HP vs HN comparisons for both report modes.
     console.print()
     console.print("[cyan]Building pathway modeling outputs and HP vs HN comparisons...[/cyan]")
-    ensure_hp_hn_comparison_outputs(df, analysis_logger)
+    ensure_hp_hn_comparison_outputs(df, analysis_logger, ui=ui)
 
     if analysis_logger:
         analysis_logger.add_metric("scenarios_modeled", len(scenario_results), "Decarbonization scenarios analyzed")
@@ -2365,14 +2553,23 @@ def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None, one_stop_on
                 console.print()
                 print_windows_spatial_guidance()
 
-                with _ui_suspend(ui, "Waiting for spatial dependency decision"):
-                    choice = questionary.select(
-                        "How would you like to proceed?",
-                        choices=[
-                            questionary.Choice("Pause/abort so I can fix the Conda environment", value="abort"),
-                            questionary.Choice("Continue without spatial results", value="skip"),
-                        ],
-                    ).ask()
+                choice = _tui_prompt(
+                    ui, "select",
+                    title="Spatial dependencies missing",
+                    message="How would you like to proceed?",
+                    choices=["abort", "skip"],
+                    labels=["Pause/abort so I can fix the Conda environment", "Continue without spatial results"],
+                )
+                if choice is None:
+                    with _ui_suspend(ui, "Waiting for spatial dependency decision"):
+                        raw = questionary.select(
+                            "How would you like to proceed?",
+                            choices=[
+                                questionary.Choice("Pause/abort so I can fix the Conda environment", value="abort"),
+                                questionary.Choice("Continue without spatial results", value="skip"),
+                            ],
+                        ).ask()
+                        choice = raw
             else:
                 install_command = (
                     f"conda install -n {conda_env} -c conda-forge "
@@ -2380,15 +2577,28 @@ def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None, one_stop_on
                 )
                 console.print(f"Recommended Windows fix: [bold]{install_command}[/bold]")
                 console.print()
-                with _ui_suspend(ui, "Waiting for spatial dependency decision"):
-                    choice = questionary.select(
-                        "How would you like to proceed?",
-                        choices=[
-                            questionary.Choice("Attempt to install spatial dependencies now (conda)", value="install"),
-                            questionary.Choice("Pause/abort to install manually", value="abort"),
-                            questionary.Choice("Continue without spatial results", value="skip"),
-                        ],
-                    ).ask()
+                choice = _tui_prompt(
+                    ui, "select",
+                    title="Spatial dependencies missing",
+                    message="How would you like to proceed?",
+                    choices=["install", "abort", "skip"],
+                    labels=[
+                        "Attempt to install spatial dependencies now (conda)",
+                        "Pause/abort to install manually",
+                        "Continue without spatial results",
+                    ],
+                )
+                if choice is None:
+                    with _ui_suspend(ui, "Waiting for spatial dependency decision"):
+                        raw = questionary.select(
+                            "How would you like to proceed?",
+                            choices=[
+                                questionary.Choice("Attempt to install spatial dependencies now (conda)", value="install"),
+                                questionary.Choice("Pause/abort to install manually", value="abort"),
+                                questionary.Choice("Continue without spatial results", value="skip"),
+                            ],
+                        ).ask()
+                        choice = raw
 
                 if choice == "install":
                     console.print()
@@ -2425,15 +2635,28 @@ def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None, one_stop_on
             install_command = "pip install -r requirements-spatial.txt"
             console.print(f"Recommended fix for this environment: [bold]{install_command}[/bold]")
             console.print()
-            with _ui_suspend(ui, "Waiting for spatial dependency decision"):
-                choice = questionary.select(
-                    "How would you like to proceed?",
-                    choices=[
-                        questionary.Choice("Attempt to install requirements-spatial.txt now (pip)", value="install"),
-                        questionary.Choice("Pause/abort to install manually", value="abort"),
-                        questionary.Choice("Continue without spatial results", value="skip"),
-                    ],
-                ).ask()
+            choice = _tui_prompt(
+                ui, "select",
+                title="Spatial dependencies missing",
+                message="How would you like to proceed?",
+                choices=["install", "abort", "skip"],
+                labels=[
+                    "Attempt to install requirements-spatial.txt now (pip)",
+                    "Pause/abort to install manually",
+                    "Continue without spatial results",
+                ],
+            )
+            if choice is None:
+                with _ui_suspend(ui, "Waiting for spatial dependency decision"):
+                    raw = questionary.select(
+                        "How would you like to proceed?",
+                        choices=[
+                            questionary.Choice("Attempt to install requirements-spatial.txt now (pip)", value="install"),
+                            questionary.Choice("Pause/abort to install manually", value="abort"),
+                            questionary.Choice("Continue without spatial results", value="skip"),
+                        ],
+                    ).ask()
+                    choice = raw
 
             if choice == "install":
                 console.print()
@@ -2741,7 +2964,7 @@ def generate_one_stop_report(df=None, analysis_logger: AnalysisLogger = None, ui
     console.print("[cyan]Generating one-stop JSON report...[/cyan]")
     _ui_phase_started(ui, "One-Stop Report", "Generating one-stop JSON report")
 
-    ensure_hp_hn_comparison_outputs(df, analysis_logger)
+    ensure_hp_hn_comparison_outputs(df, analysis_logger, ui=ui)
 
     from src.reporting.one_stop_report import OneStopReportGenerator
 
@@ -3060,7 +3283,7 @@ def package_dashboard_assets(
             "Export latest analysis results for the React dashboard",
         )
 
-    ensure_hp_hn_comparison_outputs(df_validated, analysis_logger)
+    ensure_hp_hn_comparison_outputs(df_validated, analysis_logger, ui=ui)
 
     try:
         from src.reporting.dashboard_data_builder import DashboardDataBuilder
@@ -3489,10 +3712,19 @@ def main(argv=None):
     # dataset_is_empty(df), ensure_dataframe(df_adjusted)
     args = parse_args([] if argv is None else argv)
     ui = create_dashboard(args, console=console, env=os.environ)
+
+    # Textual mode: run the Textual app in the main thread, pipeline in bg
+    try:
+        from src.ui.textual_app import TextualUIAdapter, run_with_textual, _TEXTUAL_AVAILABLE
+        if isinstance(ui, TextualUIAdapter) and _TEXTUAL_AVAILABLE:
+            return _run_with_textual_main(args, ui)
+    except ImportError:
+        pass
+
+    # Non-Textual mode: run pipeline in main thread as before
     ui.start()
     analysis_logger = AnalysisLogger()
     start_time = time.time()
-
     try:
         with _configure_tui_logging(ui), _route_console_output_for_tui(ui):
             _ui_call(ui, "run_started", "HeatStreet analysis started")
@@ -3503,6 +3735,57 @@ def main(argv=None):
         raise
     finally:
         _ui_call(ui, "stop")
+
+
+def _run_with_textual_main(args: argparse.Namespace, ui) -> int:
+    """Run the pipeline in a background thread while Textual app is in main."""
+    import threading
+    from src.ui.textual_app import HeatStreetStudioApp
+
+    result: Dict[str, Any] = {"exit_code": EXIT_SUCCESS}
+
+    def _pipeline_thread_fn() -> None:
+        analysis_logger = AnalysisLogger()
+        start_time = time.time()
+        try:
+            with _configure_tui_logging(ui), _route_console_output_for_tui(ui):
+                _ui_call(ui, "run_started", "HeatStreet analysis started")
+                print_header()
+                code = _main_impl(args, ui, analysis_logger, start_time)
+                result["exit_code"] = code or EXIT_SUCCESS
+        except SystemExit as e:
+            result["exit_code"] = e.code or EXIT_SUCCESS
+        except KeyboardInterrupt:
+            result["exit_code"] = EXIT_CANCELLED
+        except Exception as exc:
+            _ui_call(ui, "run_failed", str(exc))
+            result["exit_code"] = EXIT_ANALYSIS_FAILED
+        finally:
+            _ui_call(ui, "stop")
+
+    pipeline_thread = threading.Thread(
+        target=_pipeline_thread_fn, daemon=True, name="hs-pipeline"
+    )
+    pipeline_thread.start()
+
+    app = HeatStreetStudioApp(
+        state=ui.state,
+        event_queue=ui._event_queue,
+        cancel_event=ui._cancel_event,
+        prompt_request_queue=ui._prompt_request_queue,
+        prompt_response_queue=ui._prompt_response_queue,
+    )
+    ui._app = app
+    try:
+        app.run()
+    except Exception:
+        pass
+    finally:
+        ui._cancel_event.set()
+        ui._prompt_response_queue.put_nowait(None)
+
+    pipeline_thread.join(timeout=60)
+    return result.get("exit_code", EXIT_SUCCESS)
 
 
 def _main_impl(args: argparse.Namespace, ui, analysis_logger: AnalysisLogger, start_time: float):
@@ -3578,14 +3861,24 @@ def _main_impl(args: argparse.Namespace, ui, analysis_logger: AnalysisLogger, st
             use_existing = True
         else:
             # Ask user whether to use existing data or download new
-            with _ui_suspend(ui, "Waiting for existing-data decision"):
-                use_existing = questionary.select(
-                    "Existing data found. What would you like to do?",
-                    choices=[
-                        questionary.Choice("Use existing data", value=True),
-                        questionary.Choice("Download new data (will overwrite existing)", value=False),
-                    ],
-                ).ask()
+            tui_choice = _tui_prompt(
+                ui, "select",
+                title="Existing data found",
+                message="Existing data found. What would you like to do?",
+                choices=[True, False],
+                labels=["Use existing data", "Download new data (will overwrite existing)"],
+            )
+            if tui_choice is not None:
+                use_existing = tui_choice
+            else:
+                with _ui_suspend(ui, "Waiting for existing-data decision"):
+                    use_existing = questionary.select(
+                        "Existing data found. What would you like to do?",
+                        choices=[
+                            questionary.Choice("Use existing data", value=True),
+                            questionary.Choice("Download new data (will overwrite existing)", value=False),
+                        ],
+                    ).ask()
 
         if use_existing is None:
             console.print("[yellow]Analysis cancelled by user[/yellow]")

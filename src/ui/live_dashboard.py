@@ -27,6 +27,15 @@ from .formatters import (
     safe_text,
     status_label,
 )
+from .state import (
+    AcquisitionCounters,
+    ValidationFunnel as _ValidationFunnel,
+    ArchetypeState,
+    ScenarioState,
+    RetrofitTierState,
+    SpatialState,
+    OutputEntry,
+)
 
 
 METRIC_GROUPS = ("Acquisition", "Validation", "Modelling", "Outputs")
@@ -116,7 +125,7 @@ def _metric_map() -> Dict[str, "OrderedDict[str, str]"]:
 
 @dataclass
 class DashboardState:
-    """Mutable state observed by dashboard renderers."""
+    """Mutable state observed by all HeatStreet Studio dashboard renderers."""
 
     start_time: Optional[float] = None
     completed_at: Optional[float] = None
@@ -132,16 +141,37 @@ class DashboardState:
     metrics: Dict[str, "OrderedDict[str, str]"] = field(default_factory=_metric_map)
     scenario_rows: "OrderedDict[str, OrderedDict[str, str]]" = field(default_factory=OrderedDict)
     events: Deque[str] = field(default_factory=lambda: deque(maxlen=6))
-    warnings: Deque[str] = field(default_factory=lambda: deque(maxlen=3))
+    warnings: Deque[str] = field(default_factory=lambda: deque(maxlen=10))
     outputs: "OrderedDict[str, str]" = field(default_factory=OrderedDict)
     completion_paths: "OrderedDict[str, str]" = field(default_factory=OrderedDict)
     last_render_at: float = 0.0
     properties_analysed: Optional[int] = None
 
+    # Phase-specific rich state (used by Textual widgets)
+    acquisition: AcquisitionCounters = field(default_factory=AcquisitionCounters)
+    validation: "_ValidationFunnel" = field(default_factory=_ValidationFunnel)
+    archetype: ArchetypeState = field(default_factory=ArchetypeState)
+    scenario_states: "OrderedDict[str, ScenarioState]" = field(default_factory=OrderedDict)
+    retrofit: RetrofitTierState = field(default_factory=RetrofitTierState)
+    spatial: SpatialState = field(default_factory=SpatialState)
+    svg_assets: Dict[str, str] = field(default_factory=dict)
+
     def elapsed(self, now: float) -> float:
         if self.start_time is None:
             return 0.0
         return max(0.0, (self.completed_at or now) - self.start_time)
+
+    def phase_count_done(self) -> int:
+        return sum(1 for s in self.phases.values() if s == "completed")
+
+    def phase_count_total(self) -> int:
+        return len(self.phases)
+
+    def phase_count_failed(self) -> int:
+        return sum(1 for s in self.phases.values() if s == "failed")
+
+    def phase_count_skipped(self) -> int:
+        return sum(1 for s in self.phases.values() if s == "skipped")
 
 
 class DashboardBase:
@@ -900,16 +930,25 @@ def create_dashboard(
     *,
     console: Optional[Console] = None,
     env: Optional[Mapping[str, str]] = None,
-) -> DashboardBase | NullDashboard:
-    """Create the dashboard selected by CLI arguments and terminal policy."""
+) -> "DashboardBase | NullDashboard":
+    """Create the dashboard selected by CLI arguments and terminal policy.
+
+    Supports both legacy bool ``args.tui`` and new string ``args.tui_mode``.
+    New modes: ``args.tui_mode in ("textual", "rich")`` or ``args.no_tui``.
+    """
     env = os.environ if env is None else env
     console = console or Console()
     quiet = bool(getattr(args, "quiet", False))
     verbose = bool(getattr(args, "verbose", False))
     simple = bool(getattr(args, "simple_tui", False))
-    requested = getattr(args, "tui", None)
+    no_tui = bool(getattr(args, "no_tui", False))
 
-    if quiet or requested is False:
+    # Resolve TUI mode from new (tui_mode string) or legacy (tui bool) arg
+    tui_mode_arg = getattr(args, "tui_mode", None)  # "textual" | "rich" | None
+    tui_legacy = getattr(args, "tui", None)          # True | False | None (legacy)
+
+    # Hard disable conditions
+    if quiet or no_tui or tui_legacy is False:
         return NullDashboard()
 
     refresh_rate = resolve_refresh_rate(
@@ -927,11 +966,59 @@ def create_dashboard(
             refresh_per_second=refresh_rate,
         )
 
-    if verbose and requested is not True:
+    # Explicit textual mode (only when --tui textual is set, NOT legacy bool tui=True)
+    if tui_mode_arg == "textual":
+        from .terminal import _textual_importable
+        from .compat import live_rendering_allowed
+        if _textual_importable() and live_rendering_allowed(console=console, env=env):
+            from .textual_app import TextualUIAdapter
+            return TextualUIAdapter(enabled=True, quiet=quiet, verbose=verbose)
+        # Textual unavailable - fall through to Rich
+        tui_mode_arg = "rich"
+
+    # Legacy bool: HEATSTREET_TUI=1 or old --tui flag -> use Rich Live dashboard
+    if tui_legacy is True:
+        tui_mode_arg = "rich"
+
+    # Explicit rich mode
+    if tui_mode_arg == "rich":
+        from .compat import live_rendering_allowed
+        if live_rendering_allowed(console=console, env=env):
+            from .rich_fallback import RichFallback
+            return RichFallback(
+                enabled=True,
+                quiet=quiet,
+                verbose=verbose,
+                console=console,
+                refresh_per_second=refresh_rate,
+            )
         return NullDashboard()
 
+    # Auto-detect mode
+    if verbose:
+        return NullDashboard()
+
+    from .terminal import recommended_tui_mode, _textual_importable
+    mode = recommended_tui_mode(env=env)
+
+    if mode == "none":
+        return NullDashboard()
+
+    if mode == "simple":
+        return SimpleDashboard(
+            enabled=True, quiet=quiet, verbose=verbose,
+            console=console, refresh_per_second=refresh_rate,
+        )
+
+    if mode == "textual" and _textual_importable():
+        from .compat import live_rendering_allowed
+        if live_rendering_allowed(console=console, env=env):
+            from .textual_app import TextualUIAdapter
+            return TextualUIAdapter(enabled=True, quiet=quiet, verbose=verbose)
+
+    # Default: Rich live dashboard
     enabled = should_enable_live(
-        requested=requested,
+        requested=tui_legacy,
         quiet=quiet,
         console=console,
         env=env,
