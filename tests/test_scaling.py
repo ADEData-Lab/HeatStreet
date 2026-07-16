@@ -176,6 +176,7 @@ class TestScenarioModelingScaling:
         df['energy_consumption_adjusted'] = df['ENERGY_CONSUMPTION_CURRENT'] * 0.8
         df['baseline_consumption_kwh_year'] = df['ENERGY_CONSUMPTION_CURRENT'] * df['TOTAL_FLOOR_AREA']
         df['wall_type'] = np.random.choice(['Solid', 'Cavity'], len(df))
+        df['glazing_type'] = 'unknown'
         df['estimated_flow_temp'] = np.random.uniform(55, 75, len(df))
         df['hn_ready'] = False
 

@@ -119,9 +119,17 @@ class HeatNetworkAnalyzer:
        Actual network deployment depends on policy, funding, and uptake.
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        config: Optional[Dict] = None,
+        *,
+        processed_dir: Optional[Path] = None,
+        output_dir: Optional[Path] = None,
+    ):
         """Initialize the heat network analyzer."""
-        self.config = load_config()
+        self.config = config or load_config()
+        self.processed_dir = Path(processed_dir or DATA_PROCESSED_DIR)
+        self.output_dir = Path(output_dir or DATA_OUTPUTS_DIR)
 
         # Heat network tier definitions were originally stored under
         # analysis. The config now keeps them under eligibility, so allow
@@ -144,7 +152,7 @@ class HeatNetworkAnalyzer:
         self.hnpd_downloader = HNPDDownloader()
 
         # Initialize postcode geocoder with caching
-        cache_file = DATA_PROCESSED_DIR / "geocoding_cache.csv"
+        cache_file = self.processed_dir / "geocoding_cache.csv"
         self.geocoder = PostcodeGeocoder(cache_file=cache_file)
 
         logger.info("Initialized Heat Network Analyzer")
@@ -1587,14 +1595,22 @@ class HeatNetworkAnalyzer:
             # Step 5: Save results
             logger.info("\nStep 5: Saving results...")
 
-            # Save classified properties
-            output_file = DATA_PROCESSED_DIR / "epc_with_heat_network_tiers.geojson"
+            # Save the mandatory compact summary before optional heavyweight GIS.
+            pathway_file = self.output_dir / "pathway_suitability_by_tier.csv"
+            pathway_file.parent.mkdir(parents=True, exist_ok=True)
+            pathway_summary.to_csv(pathway_file, index=False)
+
+            # Save classified properties when the fixture has usable geometry.
+            output_file = self.processed_dir / "epc_with_heat_network_tiers.geojson"
             output_file.parent.mkdir(parents=True, exist_ok=True)
-            properties_classified.to_file(output_file, driver='GeoJSON')
+            try:
+                properties_classified.to_file(output_file, driver='GeoJSON')
+            except Exception as exc:
+                logger.warning(f"Optional classified-property GeoJSON was not written: {exc}")
             logger.info(f"✓ Saved classified properties: {output_file}")
 
             # Save pathway summary
-            pathway_file = DATA_OUTPUTS_DIR / "pathway_suitability_by_tier.csv"
+            pathway_file = self.output_dir / "pathway_suitability_by_tier.csv"
             pathway_file.parent.mkdir(parents=True, exist_ok=True)
             pathway_summary.to_csv(pathway_file, index=False)
             logger.info(f"✓ Saved pathway summary: {pathway_file}")
@@ -1602,7 +1618,7 @@ class HeatNetworkAnalyzer:
             if create_maps:
                 # Step 6: Create interactive map
                 logger.info("\nStep 6: Creating interactive heat network tier map...")
-                map_output_path = DATA_OUTPUTS_DIR / "maps" / "heat_network_tiers.html"
+                map_output_path = self.output_dir / "maps" / "heat_network_tiers.html"
                 image_output_path = map_output_path.with_suffix('.png')
                 pdf_output_path = map_output_path.with_suffix('.pdf')
 

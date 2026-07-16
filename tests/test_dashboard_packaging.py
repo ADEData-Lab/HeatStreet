@@ -50,10 +50,8 @@ def test_package_dashboard_assets_still_exports_when_one_stop_only(monkeypatch, 
 
     assert result is True
     assert outputs_dataset.exists()
-    assert public_dataset.exists()
-    assert json.loads(outputs_dataset.read_text(encoding="utf-8")) == json.loads(
-        public_dataset.read_text(encoding="utf-8")
-    )
+    assert not public_dataset.exists()
+    assert json.loads(outputs_dataset.read_text(encoding="utf-8"))["epcBandData"]
 
 
 def test_dashboard_cost_levers_are_config_backed(tmp_path):

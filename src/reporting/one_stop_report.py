@@ -32,7 +32,13 @@ from loguru import logger
 # Ensure project root is on sys.path so `config.*` imports work when running as a script
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
-from config.config import DATA_OUTPUTS_DIR, DATA_PROCESSED_DIR, load_config
+from config.config import DATA_OUTPUTS_DIR, DATA_PROCESSED_DIR, load_config, get_scenario_policy
+from src.utils.run_integrity import (
+    RunContext,
+    require_current_artifact,
+    stamp_artifact,
+    validate_scenario_invariants,
+)
 
 
 @dataclass
@@ -128,6 +134,22 @@ def _serialize_dataframe(df: pd.DataFrame, caption: str = "") -> Dict[str, Any]:
     }
 
 
+def _explicit_int(value: Any, label: str) -> int:
+    if value is None or (isinstance(value, float) and pd.isna(value)):
+        raise RuntimeError(f"Missing explicit current-run metric for {label}")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(f"Invalid count for {label}: {value!r}") from exc
+    if not numeric.is_integer() or numeric < 0:
+        raise RuntimeError(f"Invalid count for {label}: {value!r}")
+    return int(numeric)
+
+
+def _sum_explicit_counts(values: Iterable[Any], label: str) -> int:
+    return sum(_explicit_int(value, label) for value in values)
+
+
 def _read_json(path: Path) -> Dict[str, Any]:
     """Read JSON file safely."""
     if not path.exists():
@@ -193,34 +215,90 @@ class OneStopReportGenerator:
         output_dir: Optional[Path] = None,
         processed_dir: Optional[Path] = None,
         config: Optional[Dict[str, Any]] = None,
+        run_id: Optional[str] = None,
+        dataset_fingerprint: Optional[str] = None,
+        authoritative_cohort_size: Optional[int] = None,
+        run_context: Optional[RunContext] = None,
     ):
         self.output_dir = Path(output_dir) if output_dir else DATA_OUTPUTS_DIR
         self.processed_dir = Path(processed_dir) if processed_dir else DATA_PROCESSED_DIR
         self.config = config or load_config()
         self.output_path = self.output_dir / "one_stop_output.json"
         self._sections: Dict[str, Any] = {}
+        supplied_context = run_context is not None or run_id is not None or dataset_fingerprint is not None
+        if supplied_context and not (run_id and dataset_fingerprint):
+            if run_context is None:
+                raise ValueError("run_id and dataset_fingerprint must be supplied together")
+        self.run_context = run_context or (
+            RunContext(run_id, dataset_fingerprint) if supplied_context else None
+        )
+        self.authoritative_cohort_size = authoritative_cohort_size
+        if self.run_context and authoritative_cohort_size is None:
+            raise ValueError("authoritative_cohort_size is required for a provenance-gated report")
 
     def generate(self) -> Path:
         """Generate the complete one-stop JSON report."""
         logger.info("Generating comprehensive one-stop JSON report...")
 
-        # Load all data sources
-        run_metadata = _read_json(self.output_dir / "run_metadata.json")
-        validation_report = _read_json(self.processed_dir / "validation_report.json")
-        adjustment_summary = _read_json(self.processed_dir / "methodological_adjustments_summary.json")
-        archetype_json = _read_json(self.output_dir / "archetype_analysis_results.json")
-        readiness_df = _read_csv(self.output_dir / "retrofit_readiness_analysis.csv")
-        scenario_df = _read_csv(self.output_dir / "scenario_results_summary.csv")
-        spatial_tier_df = _read_csv(self.output_dir / "pathway_suitability_by_tier.csv")
-        hn_vs_hp_df = _read_csv(self.output_dir / "comparisons" / "hn_vs_hp_comparison.csv")
-        tipping_point_df = _read_csv(self.output_dir / "fabric_tipping_point_curve.csv")
-        subsidy_df = _read_csv(self.output_dir / "subsidy_sensitivity_analysis.csv")
-        borough_df = _read_csv(self.output_dir / "borough_breakdown.csv")
-        borough_priority_df = _read_csv(self.output_dir / "reports" / "borough_priority_ranking.csv")
-        tenure_segmentation_df = _read_csv(self.output_dir / "reports" / "tenure_segmentation.csv")
-        heat_network_threshold_df = _read_csv(self.output_dir / "heat_network_connection_thresholds.csv")
-        case_street_df = _read_csv(self.output_dir / "shakespeare_crescent_extract.csv")
+        paths = {
+            "run_metadata": self.output_dir / "run_metadata.json",
+            "validation_report": self.processed_dir / "validation_report.json",
+            "adjustment_summary": self.processed_dir / "methodological_adjustments_summary.json",
+            "archetype": self.output_dir / "archetype_analysis_results.json",
+            "readiness": self.output_dir / "retrofit_readiness_analysis.csv",
+            "scenario": self.output_dir / "scenario_results_summary.csv",
+            "spatial": self.output_dir / "pathway_suitability_by_tier.csv",
+            "comparison": self.output_dir / "comparisons" / "hn_vs_hp_comparison.csv",
+            "tipping": self.output_dir / "fabric_tipping_point_curve.csv",
+            "subsidy": self.output_dir / "subsidy_sensitivity_analysis.csv",
+            "borough": self.output_dir / "borough_breakdown.csv",
+            "borough_priority": self.output_dir / "reports" / "borough_priority_ranking.csv",
+            "tenure": self.output_dir / "reports" / "tenure_segmentation.csv",
+            "network_threshold": self.output_dir / "heat_network_connection_thresholds.csv",
+            "case_street": self.output_dir / "shakespeare_crescent_extract.csv",
+        }
+        if self.run_context:
+            required = {
+                "run_metadata", "validation_report", "adjustment_summary", "archetype",
+                "readiness", "scenario", "spatial", "borough", "tenure",
+            }
+            for name, path in paths.items():
+                if name in required or path.exists():
+                    require_current_artifact(path, self.run_context)
+
+        # Load all data sources only after provenance has passed.
+        run_metadata = _read_json(paths["run_metadata"])
+        validation_report = _read_json(paths["validation_report"])
+        adjustment_summary = _read_json(paths["adjustment_summary"])
+        archetype_json = _read_json(paths["archetype"])
+        readiness_df = _read_csv(paths["readiness"])
+        scenario_df = _read_csv(paths["scenario"])
+        spatial_tier_df = _read_csv(paths["spatial"])
+        hn_vs_hp_df = _read_csv(paths["comparison"])
+        tipping_point_df = (
+            _read_csv(paths["tipping"])
+            if 'fabric_to_tipping_point' in set(get_scenario_policy()['publish'])
+            else None
+        )
+        subsidy_df = _read_csv(paths["subsidy"])
+        borough_df = _read_csv(paths["borough"])
+        borough_priority_df = _read_csv(paths["borough_priority"])
+        tenure_segmentation_df = _read_csv(paths["tenure"])
+        heat_network_threshold_df = _read_csv(paths["network_threshold"])
+        case_street_df = _read_csv(paths["case_street"])
         lodgements_by_year_band_df = self._build_epc_lodgements_by_year_band()
+
+        if self.run_context:
+            self._assert_run_metadata(run_metadata)
+            self._assert_cohort_integrity(
+                validation_report=validation_report,
+                archetype_json=archetype_json,
+                readiness_df=readiness_df,
+                scenario_df=scenario_df,
+                spatial_tier_df=spatial_tier_df,
+                borough_df=borough_df,
+                tenure_df=tenure_segmentation_df,
+            )
 
         # Build all 13 sections
         self._sections["section_1"] = self._build_section_1(run_metadata)
@@ -248,7 +326,13 @@ class OneStopReportGenerator:
                 "title": "Heat Street — One-Stop Report",
                 "subtitle": "Low-Carbon Heating Potential for London's Edwardian Terraced Housing",
                 "generated": datetime.now().isoformat(),
-                "version": "2.0"
+                "version": "2.0",
+                "run_id": self.run_context.run_id if self.run_context else run_metadata.get("run_id"),
+                "dataset_fingerprint": (
+                    self.run_context.dataset_fingerprint
+                    if self.run_context else run_metadata.get("dataset_fingerprint")
+                ),
+                **(self.run_context.to_dict() if self.run_context else {}),
             },
             "sections": self._sections
         }
@@ -259,11 +343,143 @@ class OneStopReportGenerator:
         # Write output
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.output_path.write_text(json.dumps(output, indent=2, ensure_ascii=False), encoding="utf-8")
+        if self.run_context:
+            stamp_artifact(
+                self.output_path,
+                self.run_context,
+                record_count=self.authoritative_cohort_size,
+            )
 
         total_datapoints = sum(len(s.get("datapoints", [])) for s in self._sections.values())
         logger.info(f"One-stop JSON report written to {self.output_path}")
         logger.info(f"Total datapoints: {total_datapoints}")
         return self.output_path
+
+    def _assert_run_metadata(self, run_metadata: Dict[str, Any]) -> None:
+        # Report generation validates complete provenance and timing, while the
+        # pipeline marks the run complete only after every required report and
+        # package has passed its own contract.
+        self.run_context.validate_production_report(require_complete=False)
+        expected = self.run_context.to_dict()
+        for key, value in expected.items():
+            if run_metadata.get(key) != value:
+                raise RuntimeError(
+                    f"Run metadata provenance mismatch: {key}={run_metadata.get(key)!r}, "
+                    f"expected {value!r}"
+                )
+
+    def _assert_cohort_integrity(
+        self,
+        *,
+        validation_report: Dict[str, Any],
+        archetype_json: Dict[str, Any],
+        readiness_df: Optional[pd.DataFrame],
+        scenario_df: Optional[pd.DataFrame],
+        spatial_tier_df: Optional[pd.DataFrame],
+        borough_df: Optional[pd.DataFrame],
+        tenure_df: Optional[pd.DataFrame],
+    ) -> None:
+        """Reconcile every report cohort before one-stop serialization."""
+        cohort = int(self.authoritative_cohort_size)
+        required_validation = (
+            "total_records", "records_passed", "duplicates_removed", "invalid_records"
+        )
+        missing = [key for key in required_validation if key not in validation_report]
+        if missing:
+            raise RuntimeError(f"Validation report is missing explicit metrics: {missing}")
+
+        total = int(validation_report["total_records"])
+        passed = int(validation_report["records_passed"])
+        duplicates = int(validation_report["duplicates_removed"])
+        invalid = int(validation_report["invalid_records"])
+        if total != passed + duplicates + invalid:
+            raise RuntimeError(
+                "Validation arithmetic mismatch: total_records must equal "
+                "records_passing_validation + duplicates_removed + invalid_records"
+            )
+
+        checks: list[tuple[str, int]] = [("Section 2 records passing validation", passed)]
+        epc_frequency = archetype_json.get("epc_bands", {}).get("frequency")
+        heating_types = archetype_json.get("heating_systems", {}).get("types")
+        if not isinstance(epc_frequency, dict) or not isinstance(heating_types, dict):
+            raise RuntimeError("Archetype output lacks explicit EPC band or heating-system totals")
+        checks.extend([
+            ("archetype band totals", _sum_explicit_counts(epc_frequency.values(), "archetype bands")),
+            ("heating-system totals", _sum_explicit_counts(heating_types.values(), "heating systems")),
+        ])
+
+        if readiness_df is None or "hp_readiness_tier" not in readiness_df.columns:
+            raise RuntimeError("Readiness output lacks hp_readiness_tier")
+        readiness_tiers = readiness_df["hp_readiness_tier"]
+        readiness_tier_counts = readiness_tiers.value_counts()
+        checks.extend([
+            ("readiness row count", len(readiness_df)),
+            (
+                "readiness tier totals",
+                sum(int(readiness_tier_counts.get(tier, 0)) for tier in range(1, 6)),
+            ),
+        ])
+
+        if scenario_df is None or scenario_df.empty or "total_properties" not in scenario_df.columns:
+            raise RuntimeError("Scenario output lacks explicit total_properties values")
+        if 'model_family' not in scenario_df or 'headline_reporting_eligible' not in scenario_df:
+            raise RuntimeError("Client scenario output lacks model-family metadata")
+        eligible = scenario_df['headline_reporting_eligible'].astype(str).str.casefold().isin(['true', '1'])
+        if not eligible.all():
+            raise RuntimeError("Client headline table contains ineligible model rows")
+        if scenario_df['model_family'].dropna().nunique() != 1:
+            raise RuntimeError("Client headline table mixes model families")
+        for index, row in scenario_df.iterrows():
+            label = row.get("scenario", row.get("scenario_id", index))
+            checks.append((f"scenario {label!r} total_properties", _explicit_int(row["total_properties"], "scenario total_properties")))
+        if self.run_context.mode == 'production' or cohort == 168_051:
+            if int(validation_report["total_records"]) != 183_376 or (
+                int(validation_report["duplicates_removed"]) + int(validation_report["invalid_records"]) + cohort
+                != 183_376
+            ):
+                raise RuntimeError("Volume identity must equal 183,376 = 168,051 + 14,432 + 893")
+            validate_scenario_invariants(
+                scenario_df,
+                authoritative_cohort=cohort,
+                analysis_horizon_years=int(self.config['financial']['analysis_horizon_years']),
+            )
+
+        if spatial_tier_df is None or "Property Count" not in spatial_tier_df.columns:
+            raise RuntimeError("Spatial output lacks Property Count")
+        checks.append(("spatial tier totals", _sum_explicit_counts(spatial_tier_df["Property Count"], "spatial tiers")))
+
+        if borough_df is None or "property_count" not in borough_df.columns:
+            raise RuntimeError("Borough output lacks property_count")
+        checks.append(("borough totals", _sum_explicit_counts(borough_df["property_count"], "boroughs")))
+
+        if tenure_df is None or "property_count" not in tenure_df.columns:
+            raise RuntimeError("Tenure output lacks property_count")
+        checks.append(("tenure totals", _sum_explicit_counts(tenure_df["property_count"], "tenure")))
+
+        if "scenario" in scenario_df.columns:
+            scenario_labels = scenario_df["scenario"]
+        elif "scenario_id" in scenario_df.columns:
+            scenario_labels = scenario_df["scenario_id"]
+        else:
+            raise RuntimeError("Scenario output lacks scenario identifiers")
+        hybrid_mask = scenario_labels.astype(str).str.contains("hybrid", case=False, na=False)
+        hybrid_rows = scenario_df[hybrid_mask]
+        if hybrid_rows.empty:
+            raise RuntimeError("Scenario output lacks an explicit hybrid pathway allocation")
+        for _, row in hybrid_rows.iterrows():
+            if "hn_assigned_properties" not in row or "ashp_assigned_properties" not in row:
+                raise RuntimeError("Hybrid scenario lacks explicit pathway allocation fields")
+            allocated = _explicit_int(row["hn_assigned_properties"], "hybrid HN allocation") + _explicit_int(
+                row["ashp_assigned_properties"], "hybrid ASHP allocation"
+            )
+            checks.append(("hybrid pathway allocations", allocated))
+
+        mismatches = [f"{name}={actual:,}" for name, actual in checks if actual != cohort]
+        if mismatches:
+            raise RuntimeError(
+                f"Cohort integrity failure; authoritative final adjusted cohort={cohort:,}; "
+                + "; ".join(mismatches)
+            )
 
     def _build_epc_lodgements_by_year_band(self) -> Optional[pd.DataFrame]:
         """
@@ -278,7 +494,13 @@ class OneStopReportGenerator:
 
         df: Optional[pd.DataFrame] = None
         try:
-            if parquet_path.exists():
+            if self.run_context and csv_path.is_file():
+                require_current_artifact(csv_path, self.run_context)
+                df = pd.read_csv(csv_path, usecols=cols)
+            elif self.run_context:
+                logger.info("Skipping lodgement table: no provenance-carrying validated CSV")
+                return None
+            elif parquet_path.exists():
                 df = pd.read_parquet(parquet_path, columns=cols)
             elif csv_path.exists():
                 df = pd.read_csv(csv_path, usecols=cols)
@@ -554,6 +776,7 @@ class OneStopReportGenerator:
         epc_bands = archetype_json.get("epc_bands", {})
         sap_scores = archetype_json.get("sap_scores", {})
         wall_data = archetype_json.get("wall_construction", {})
+        floor_data = archetype_json.get("floor_insulation", {})
         loft_data = archetype_json.get("loft_insulation", {})
         glazing_data = archetype_json.get("glazing", {})
         heating_data = archetype_json.get("heating_systems", {})
@@ -630,6 +853,32 @@ class OneStopReportGenerator:
                 denominator="All properties in archetype analysis",
                 source="data/outputs/archetype_analysis_results.json -> wall_construction.insulation_rate",
                 usage="Fabric upgrade targeting",
+            ),
+            AnnotatedDatapoint(
+                name="Floor insulation distribution",
+                key="floor_insulation_distribution",
+                value={
+                    "insulated": floor_data.get("insulated", 0),
+                    "uninsulated": floor_data.get("uninsulated", 0),
+                    "unknown": floor_data.get("unknown", 0),
+                },
+                definition="Canonical floor-insulation counts, retaining unknown separately.",
+                denominator="All properties in archetype analysis",
+                source="data/outputs/archetype_analysis_results.json -> floor_insulation",
+                usage="Fabric upgrade targeting without treating unknown as insulated",
+            ),
+            AnnotatedDatapoint(
+                name="Floor insulation percentages",
+                key="floor_insulation_percentages",
+                value={
+                    "insulated": floor_data.get("insulated_pct", 0),
+                    "uninsulated": floor_data.get("uninsulated_pct", 0),
+                    "unknown": floor_data.get("unknown_pct", 0),
+                },
+                definition="Canonical floor-insulation percentages, including unknown.",
+                denominator="All properties in archetype analysis",
+                source="data/outputs/archetype_analysis_results.json -> floor_insulation",
+                usage="Fabric upgrade targeting and data-quality interpretation",
             ),
             AnnotatedDatapoint(
                 name="Loft/roof insulation status distribution",

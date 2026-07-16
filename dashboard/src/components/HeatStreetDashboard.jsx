@@ -25,7 +25,6 @@ import ComparisonDrawer from './ComparisonDrawer';
 import MapView from './MapView';
 import DrillDownModal from './DrillDownModal';
 import { useDashboard } from '../context/DashboardContext';
-import { defaultDashboardData } from '../data/dashboardData';
 
 const COLORS = {
   primary: '#1e3a5f',
@@ -79,9 +78,8 @@ export default function HeatStreetDashboard() {
   } = data || {};
 
   const mergedSummary = {
-    ...defaultDashboardData.summaryStats,
     ...summaryStats,
-    meanSAPScore: summaryStats.meanSAPScore ?? summaryStats.avgSAPScore ?? defaultDashboardData.summaryStats.meanSAPScore,
+    meanSAPScore: summaryStats.meanSAPScore ?? summaryStats.avgSAPScore,
   };
 
   const totalProperties = mergedSummary.totalProperties;
@@ -222,7 +220,7 @@ export default function HeatStreetDashboard() {
           {formatNumber(totalProperties)} properties · Source: {status.source || 'analysis JSON'}
         </p>
         <div style={styles.statusRow}>
-          <span style={styles.statusBadge}>Data source: {status.source === 'analysis' ? 'Latest run' : 'Bundled defaults'}</span>
+          <span style={styles.statusBadge}>Data source: {status.source === 'analysis' ? 'Validated latest run' : 'Unavailable'}</span>
           {status.error && <span style={styles.errorText}>Fallback used: {status.error}</span>}
           <button type="button" className="ghost" onClick={() => window.print()}>
             Print this view

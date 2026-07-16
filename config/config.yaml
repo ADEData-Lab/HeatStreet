@@ -192,6 +192,21 @@ eligibility:
 # - The hybrid scenario allocates HP or HN based on heat network viability
 #
 scenarios:
+  calculate:
+    - baseline
+    - fabric_only
+    - fabric_to_tipping_point
+    - minimum_fabric_hp_ready
+    - heat_pump
+    - heat_network
+    - hybrid
+  publish:
+    - fabric_only
+    - minimum_fabric_hp_ready
+    - heat_pump
+    - heat_network
+    - hybrid
+
   baseline:
     name: "No intervention"
     description: "Counterfactual baseline - no retrofit measures applied"

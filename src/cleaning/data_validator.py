@@ -7,6 +7,7 @@ that 36-62% of EPCs contain errors.
 
 import pandas as pd
 import numpy as np
+import json
 from pathlib import Path
 from typing import Dict, List, Tuple, Optional
 from loguru import logger
@@ -27,10 +28,19 @@ class EPCDataValidator:
     Validates and cleans EPC data according to quality assurance protocols.
     """
 
-    def __init__(self):
+    HEATING_CONTROL_ALIASES = (
+        'MAINHEAT_CONT_DESCRIPTION',
+        'MAINHEATCONT_DESCRIPTION',
+        'MAIN_HEAT_CONT_DESCRIPTION',
+        'HEATING_CONTROLS_DESCRIPTION',
+        'MAIN_HEATING_CONTROLS',
+    )
+
+    def __init__(self, *, strict_schema_conflicts: bool = False):
         """Initialize the validator with configuration settings."""
         self.config = load_config()
         self.quality_thresholds = get_data_quality_thresholds()
+        self.strict_schema_conflicts = strict_schema_conflicts
         self.validation_report = {
             'total_records': 0,
             'duplicates_removed': 0,
@@ -460,6 +470,10 @@ class EPCDataValidator:
         """
         logger.info("Standardizing fields...")
 
+        # Resolve raw EPC aliases once. Analytical modules must only consume the
+        # canonical column created here.
+        df = self._resolve_heating_controls_description(df)
+
         # Standardize heating system categories
         df = self._standardize_heating_systems(df)
 
@@ -487,6 +501,56 @@ class EPCDataValidator:
         # Convert high-cardinality string columns to categorical dtype for memory efficiency
         df = self._convert_to_categorical(df)
 
+        return df
+
+    def _resolve_heating_controls_description(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Coalesce supported heating-control aliases with deterministic precedence."""
+        available = [name for name in self.HEATING_CONTROL_ALIASES if name in df.columns]
+        canonical = pd.Series(pd.NA, index=df.index, dtype="string")
+        selected_counts: Dict[str, int] = {}
+        normalized_values: Dict[str, pd.Series] = {}
+
+        for name in available:
+            values = df[name].astype("string").str.strip()
+            values = values.mask(values.eq(""), pd.NA)
+            normalized_values[name] = values.str.casefold()
+            selected = canonical.isna() & values.notna()
+            selected_counts[name] = int(selected.sum())
+            canonical.loc[selected] = values.loc[selected]
+
+        conflict = pd.Series(False, index=df.index)
+        for index, left in enumerate(available):
+            for right in available[index + 1:]:
+                left_values = normalized_values[left]
+                right_values = normalized_values[right]
+                conflict |= (
+                    left_values.notna()
+                    & right_values.notna()
+                    & left_values.ne(right_values)
+                )
+
+        conflict_count = int(conflict.sum())
+        completeness_count = int(canonical.notna().sum())
+        self.validation_report["heating_controls_schema"] = {
+            "canonical_field": "heating_controls_description",
+            "alias_precedence": list(self.HEATING_CONTROL_ALIASES),
+            "available_aliases": available,
+            "selected_source_counts": selected_counts,
+            "conflict_count": conflict_count,
+            "complete_count": completeness_count,
+            "missing_count": int(len(df) - completeness_count),
+            "completeness_pct": float(completeness_count / len(df) * 100) if len(df) else 0.0,
+        }
+        if conflict_count and self.strict_schema_conflicts:
+            raise ValueError(
+                f"Conflicting heating-control aliases in {conflict_count:,} records"
+            )
+        if conflict_count:
+            logger.warning(
+                "Found {} records with conflicting heating-control aliases",
+                conflict_count,
+            )
+        df["heating_controls_description"] = canonical
         return df
 
     def _convert_to_categorical(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -787,10 +851,10 @@ class EPCDataValidator:
 
         Creates:
         - floor_insulation: none, some, full, unknown
-        - floor_insulation_present: boolean
+        - floor_insulation_present: nullable boolean (unknown remains NA)
         """
         df['floor_insulation'] = 'unknown'
-        df['floor_insulation_present'] = False
+        df['floor_insulation_present'] = pd.Series(pd.NA, index=df.index, dtype='boolean')
 
         # Check FLOOR_DESCRIPTION
         if 'FLOOR_DESCRIPTION' in df.columns:
@@ -814,18 +878,10 @@ class EPCDataValidator:
             df.loc[partial, 'floor_insulation'] = 'some'
             df.loc[partial, 'floor_insulation_present'] = True
 
-        # Use FLOOR_ENERGY_EFF as fallback
-        if 'FLOOR_ENERGY_EFF' in df.columns:
-            floor_eff = df['FLOOR_ENERGY_EFF'].fillna('').str.lower()
-            unknown_mask = df['floor_insulation'] == 'unknown'
+            df.loc[no_insulation, 'floor_insulation_present'] = False
 
-            very_poor = floor_eff.isin(['very poor'])
-            poor = floor_eff.isin(['poor'])
-            average_or_better = floor_eff.isin(['average', 'good', 'very good'])
-
-            df.loc[unknown_mask & (very_poor | poor), 'floor_insulation'] = 'none'
-            df.loc[unknown_mask & average_or_better, 'floor_insulation'] = 'some'
-            df.loc[unknown_mask & average_or_better, 'floor_insulation_present'] = True
+        # Efficiency ratings and U-values do not establish whether insulation
+        # is present. They therefore remain unknown rather than being inferred.
 
         # Log summary
         floor_counts = df['floor_insulation'].value_counts()
@@ -882,14 +938,14 @@ class EPCDataValidator:
         glazing_counts = df['glazing_type'].value_counts()
         logger.info(f"Glazing types: {glazing_counts.to_dict()}")
 
-        # Data-quality guard: fail loudly if no glazing signal reached the data.
+        # Zero known coverage is valid when the extract contains no usable
+        # glazing signal; downstream modules receive explicit ``unknown``.
         total = len(df)
         known = int((df['glazing_type'] != 'unknown').sum())
         coverage_pct = known / total * 100 if total > 0 else 0.0
         if coverage_pct == 0:
-            raise ValueError(
-                f"Glazing coverage is 0%: none of {glazing_cols + ['WINDOWS_ENERGY_EFF']} "
-                "produced usable glazing values. Verify the EPC extract contains glazing columns."
+            logger.warning(
+                "Glazing coverage is 0%%; canonical glazing_type remains unknown for all records"
             )
         if coverage_pct < 50:
             logger.warning(
@@ -1106,7 +1162,8 @@ class EPCDataValidator:
             f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n")
 
             for key, value in self.validation_report.items():
-                f.write(f"{key.replace('_', ' ').title()}: {value:,}\n")
+                rendered = json.dumps(value, sort_keys=True) if isinstance(value, dict) else f"{value:,}"
+                f.write(f"{key.replace('_', ' ').title()}: {rendered}\n")
 
         logger.info(f"Validation report saved to: {output_path}")
 

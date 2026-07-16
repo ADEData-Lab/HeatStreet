@@ -6,7 +6,9 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 import json
+import os
 import re
+import traceback as traceback_module
 
 import numpy as np
 from loguru import logger
@@ -133,6 +135,8 @@ class AnalysisLogger:
             logger.warning(f"Cannot add output '{output_path}' - no active phase")
             return
 
+        output_path = self._resolve_output_path(output_path)
+
         markdown_path = self._create_output_markdown(
             output_path=output_path,
             output_type=output_type,
@@ -146,6 +150,16 @@ class AnalysisLogger:
             'description': description,
             'documentation': str(markdown_path) if markdown_path else None,
         })
+
+    def _resolve_output_path(self, output_path: str) -> str:
+        """Route legacy data/outputs paths through this logger's scoped output root."""
+        path = Path(output_path)
+        if path.is_absolute():
+            return str(path)
+        parts = path.parts
+        if len(parts) >= 2 and parts[0].casefold() == "data" and parts[1].casefold() == "outputs":
+            return str(self.output_dir.joinpath(*parts[2:]))
+        return str(path)
 
     def complete_phase(self, success: bool = True, message: str = ""):
         """
@@ -175,6 +189,7 @@ class AnalysisLogger:
         logger.info(f"{status_emoji} Phase {self.current_phase['phase_number']} completed: {self.current_phase['phase_name']} ({duration:.1f}s)")
 
         self.current_phase = None
+        self.save_checkpoint(status="running")
 
     def _format_metric_value(self, value: Any) -> str:
         """
@@ -322,6 +337,7 @@ class AnalysisLogger:
             'metrics': {},
             'outputs': []
         })
+        self.save_checkpoint(status="running")
 
         logger.info(f"⊘ Phase skipped: {phase_name} - {reason}")
 
@@ -334,6 +350,51 @@ class AnalysisLogger:
             value: Metadata value
         """
         self.metadata[key] = value
+
+    def save_checkpoint(
+        self,
+        *,
+        status: str,
+        failed_phase: Optional[str] = None,
+        exception: Optional[BaseException] = None,
+        traceback_text: Optional[str] = None,
+    ) -> Path:
+        """Atomically persist lightweight run state without building a workbook."""
+        now = datetime.now()
+        payload = {
+            "metadata": convert_to_json_serializable(self.metadata),
+            "phases": convert_to_json_serializable(
+                self.phases + ([self.current_phase] if self.current_phase is not None else [])
+            ),
+            "run_status": status,
+            "failed_phase": failed_phase,
+            "exception_type": type(exception).__name__ if exception is not None else None,
+            "exception_message": str(exception) if exception is not None else None,
+            "traceback": traceback_text,
+            "elapsed_seconds": (now - self.start_time).total_seconds(),
+            "checkpoint_time": now.isoformat(),
+        }
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        path = self.output_dir / "analysis_checkpoint.json"
+        temp = path.with_suffix(".json.tmp")
+        temp.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+        os.replace(temp, path)
+        return path
+
+    def record_failure(self, exception: BaseException, *, failed_phase: Optional[str] = None) -> Path:
+        """Close the active phase and persist the outer failure traceback."""
+        if failed_phase is None and self.current_phase is not None:
+            failed_phase = self.current_phase.get("phase_name")
+        if self.current_phase is not None:
+            self.complete_phase(success=False, message=str(exception))
+        return self.save_checkpoint(
+            status="failed",
+            failed_phase=failed_phase,
+            exception=exception,
+            traceback_text="".join(
+                traceback_module.format_exception(type(exception), exception, exception.__traceback__)
+            ),
+        )
 
     def generate_text_summary(self) -> str:
         """
@@ -628,8 +689,24 @@ class AnalysisLogger:
         doc_rows: List[Dict[str, Any]] = []
 
         with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
+            provenance_rows = [
+                {"field": key, "value": value}
+                for key, value in self.metadata.items()
+                if key in {
+                    "run_id", "dataset_fingerprint", "authoritative_cohort_size",
+                    "sample_start_date", "sample_end_date", "analysis_start", "analysis_end",
+                    "git_commit", "configuration_sha256", "source_identifier", "source_fingerprint",
+                }
+            ]
+            if provenance_rows:
+                pd.DataFrame(provenance_rows).to_excel(writer, sheet_name='Provenance', index=False)
             for output in outputs:
                 path = Path(output.get('path', ''))
+                if any(marker in path.stem.lower() for marker in (
+                    'internal_scenario', 'fabric_tipping_point', 'tipping_point',
+                    'fabric_cost_performance',
+                )):
+                    continue
                 output_type = output.get('type', '')
                 description = output.get('description', '')
                 documentation = output.get('documentation')

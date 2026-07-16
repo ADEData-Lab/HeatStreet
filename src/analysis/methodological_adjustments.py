@@ -325,12 +325,11 @@ class MethodologicalAdjustments:
         if 'wall_insulated' in df.columns:
             flow_temp_adjustment += (~df_temp['wall_insulated']).astype(int) * 5
 
-        # Glazing type
-        if 'WINDOWS_DESCRIPTION' in df.columns:
-            single_glazed = df_temp['WINDOWS_DESCRIPTION'].str.contains(
-                'single', case=False, na=False
-            )
-            flow_temp_adjustment += single_glazed.astype(int) * 3
+        # Glazing type (canonical field from standardisation only)
+        if 'glazing_type' not in df.columns:
+            raise ValueError("Flow-temperature adjustment requires canonical glazing_type")
+        single_glazed = df_temp['glazing_type'].astype('string').eq('single')
+        flow_temp_adjustment += single_glazed.astype(int) * 3
 
         # Final flow temperature estimate
         df_temp['estimated_flow_temp'] = (

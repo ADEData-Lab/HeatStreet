@@ -171,8 +171,7 @@ class ArchetypeAnalyzer:
         logger.info("Analyzing wall construction...")
 
         if 'wall_type' not in df.columns or 'wall_insulated' not in df.columns:
-            logger.warning("Standardized wall columns not found")
-            return {}
+            raise ValueError("Archetype analysis requires canonical wall_type and wall_insulated fields")
 
         # Wall type distribution
         wall_types = df['wall_type'].value_counts().to_dict()
@@ -356,34 +355,35 @@ class ArchetypeAnalyzer:
         """Analyze floor insulation presence/absence."""
         logger.info("Analyzing floor insulation...")
 
-        floor_col = None
-        for col in ['FLOOR_DESCRIPTION', 'FLOOR_INSULATION']:
-            if col in df.columns:
-                floor_col = col
-                break
+        required = {'floor_insulation', 'floor_insulation_present'}
+        missing = required.difference(df.columns)
+        if missing:
+            raise ValueError(
+                f"Archetype analysis requires canonical floor fields: {sorted(missing)}"
+            )
 
-        if floor_col is None:
-            logger.warning("No floor insulation column found")
-            return {}
-
-        # Check for insulation presence
-        insulated_mask = df[floor_col].str.contains(
-            'insulated|insulation', case=False, na=False
-        )
-
-        insulated_count = insulated_mask.sum()
+        categories = df['floor_insulation'].astype('string')
+        insulated_count = int(categories.isin(['some', 'full']).sum())
+        uninsulated_count = int(categories.eq('none').sum())
+        unknown_count = int(categories.eq('unknown').sum() + categories.isna().sum())
         total = len(df)
         insulation_rate = (insulated_count / total * 100) if total > 0 else 0
 
         results = {
             'insulated': int(insulated_count),
-            'uninsulated': int(total - insulated_count),
-            'insulation_rate': float(insulation_rate)
+            'uninsulated': uninsulated_count,
+            'unknown': unknown_count,
+            'insulated_pct': float(insulation_rate),
+            'uninsulated_pct': float(uninsulated_count / total * 100) if total else 0.0,
+            'unknown_pct': float(unknown_count / total * 100) if total else 0.0,
+            'insulation_rate': float(insulation_rate),
+            'total': total,
         }
 
         logger.info(f"Floor Insulation:")
         logger.info(f"  Insulated: {insulated_count:,} ({insulation_rate:.1f}%)")
-        logger.info(f"  Uninsulated: {total - insulated_count:,} ({100-insulation_rate:.1f}%)")
+        logger.info(f"  Uninsulated: {uninsulated_count:,} ({results['uninsulated_pct']:.1f}%)")
+        logger.info(f"  Unknown: {unknown_count:,} ({results['unknown_pct']:.1f}%)")
 
         return results
 
@@ -394,26 +394,9 @@ class ArchetypeAnalyzer:
         # Use the standardized glazing_type column produced by data_validator (read-only).
         # Never overwrite df['glazing_type'] here — it is shared with downstream phases
         # (retrofit readiness, pathway model) that run after archetype analysis completes.
-        if 'glazing_type' in df.columns:
-            glazing_series = df['glazing_type']
-        else:
-            # Fallback: derive from raw EPC columns without writing back to df.
-            # 'GLAZED_TYPE' is the correct EPC full-load column name (not 'GLAZING_TYPE').
-            glazing_col = None
-            for col in ['WINDOWS_DESCRIPTION', 'GLAZED_TYPE']:
-                if col in df.columns:
-                    glazing_col = col
-                    break
-
-            if glazing_col is None:
-                logger.warning("No glazing column found (glazing_type absent, WINDOWS_DESCRIPTION/GLAZED_TYPE missing)")
-                return {}
-
-            glazing_series = pd.Series('unknown', index=df.index, dtype=object)
-            desc = df[glazing_col].fillna('').astype(str).str.lower()
-            glazing_series[desc.str.contains('triple', na=False)] = 'triple'
-            glazing_series[desc.str.contains('double', na=False)] = 'double'
-            glazing_series[desc.str.contains('single', na=False)] = 'single'
+        if 'glazing_type' not in df.columns:
+            raise ValueError("Archetype analysis requires canonical glazing_type field")
+        glazing_series = df['glazing_type']
 
         glazing_types = glazing_series.value_counts().to_dict()
         glazing_pct = glazing_series.value_counts(normalize=True).to_dict()
@@ -471,60 +454,39 @@ class ArchetypeAnalyzer:
 
         results = {}
 
-        # Find heating controls column
-        # EPC API uses 'mainheat-cont-description' -> 'MAINHEAT_CONT_DESCRIPTION'
-        # Try multiple possible column names to handle variations
-        control_col = None
-        possible_cols = [
-            'MAINHEAT_CONT_DESCRIPTION',  # Correct standardized name
-            'MAINHEATCONT_DESCRIPTION',    # Alternative
-            'MAIN_HEAT_CONT_DESCRIPTION',  # Another variation
-            'HEATING_CONTROLS_DESCRIPTION',
-            'MAIN_HEATING_CONTROLS',
-        ]
-
-        # Log available columns for debugging
-        heating_related_cols = [col for col in df.columns if any(
-            x in col.upper() for x in ['HEAT', 'CONT', 'CONTROL', 'TRV', 'THERM']
-        )]
-        if heating_related_cols:
-            logger.debug(f"Heating-related columns found: {heating_related_cols}")
-
-        for col in possible_cols:
-            if col in df.columns:
-                control_col = col
-                logger.info(f"Using heating controls column: {control_col}")
-                break
-
+        control_col = 'heating_controls_description'
+        if control_col not in df.columns:
+            raise ValueError("Archetype analysis requires canonical heating_controls_description field")
         if control_col:
             # Get non-null value count
-            non_null_count = df[control_col].notna().sum()
+            controls = df[control_col].astype('string').str.strip().replace('', pd.NA)
+            non_null_count = controls.notna().sum()
             results['data_completeness'] = float(non_null_count / len(df) * 100)
             logger.info(f"  Data completeness: {results['data_completeness']:.1f}%")
 
             # TRV presence
-            trv_mask = df[control_col].str.contains(
+            trv_mask = controls.str.contains(
                 'TRV|thermostatic radiator', case=False, na=False
             )
             results['trv_present'] = int(trv_mask.sum())
             results['trv_rate'] = float(trv_mask.sum() / len(df) * 100)
 
             # Programmer/timer presence
-            programmer_mask = df[control_col].str.contains(
+            programmer_mask = controls.str.contains(
                 'programmer|timer|time control', case=False, na=False
             )
             results['programmer_present'] = int(programmer_mask.sum())
             results['programmer_rate'] = float(programmer_mask.sum() / len(df) * 100)
 
             # Room thermostat
-            thermostat_mask = df[control_col].str.contains(
+            thermostat_mask = controls.str.contains(
                 'room thermostat|roomstat', case=False, na=False
             )
             results['room_thermostat_present'] = int(thermostat_mask.sum())
             results['room_thermostat_rate'] = float(thermostat_mask.sum() / len(df) * 100)
 
             # Smart controls
-            smart_mask = df[control_col].str.contains(
+            smart_mask = controls.str.contains(
                 'smart|learning|app|wireless', case=False, na=False
             )
             results['smart_controls_present'] = int(smart_mask.sum())

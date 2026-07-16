@@ -43,10 +43,17 @@ class PostcodeGeocoder:
 
         if cache_file and cache_file.exists():
             logger.info(f"Loading geocoding cache from {cache_file}")
-            cache_df = pd.read_csv(cache_file)
-            self.cache = dict(zip(cache_df['postcode'],
-                                 zip(cache_df['latitude'], cache_df['longitude'])))
-            logger.info(f"Loaded {len(self.cache):,} cached postcodes")
+            try:
+                cache_df = pd.read_csv(cache_file)
+                required = {'postcode', 'latitude', 'longitude'}
+                if not required.issubset(cache_df.columns):
+                    raise ValueError("cache has no postcode/latitude/longitude schema")
+                self.cache = dict(zip(cache_df['postcode'],
+                                     zip(cache_df['latitude'], cache_df['longitude'])))
+                logger.info(f"Loaded {len(self.cache):,} cached postcodes")
+            except (pd.errors.EmptyDataError, ValueError, KeyError) as exc:
+                logger.warning(f"Ignoring empty or invalid geocoding cache {cache_file}: {exc}")
+                self.cache = {}
 
     def clean_postcode(self, postcode: str) -> str:
         """

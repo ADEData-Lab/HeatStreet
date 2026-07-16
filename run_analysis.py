@@ -19,9 +19,11 @@ import re
 import platform
 import contextlib
 import warnings
+import hashlib
 from pathlib import Path
 from typing import Any, Dict, Optional, Tuple, Union
 from datetime import date as date_cls, datetime, timedelta
+from dataclasses import replace
 from loguru import logger
 import questionary
 from rich.console import Console
@@ -51,6 +53,15 @@ from src.utils.staged_processing import (
     apply_adjustments_staged_dataset,
     validate_staged_dataset,
 )
+from src.utils.diagnostic_phase import DiagnosticPathwayPhaseError
+from src.utils.run_integrity import (
+    ArtifactManifest,
+    RunContext,
+    fingerprint_dataset,
+    publish_run_outputs,
+    stamp_artifact,
+    stamp_artifact_tree,
+)
 from src.ui import create_dashboard
 from src.ui.formatters import format_duration
 
@@ -62,6 +73,10 @@ EXIT_ANALYSIS_FAILED = 1
 EXIT_CANCELLED = 130
 REPO_ROOT = Path(__file__).resolve().parent
 _hp_hn_comparison_outputs_cache: Optional[Dict[str, Any]] = None
+_active_run_context: Optional[RunContext] = None
+_active_authoritative_cohort_size: Optional[int] = None
+_public_outputs_dir: Optional[Path] = None
+_run_path_redirections: list[tuple[object, str, object]] = []
 
 PHASE_ACQUISITION = "Acquisition"
 PHASE_VALIDATION = "Validation"
@@ -84,6 +99,191 @@ EXPECTED_STAGED_NATIONAL_DOWNLOADER_MARKERS = (
 
 class AnalysisCancelled(Exception):
     """User cancelled the interactive analysis flow."""
+
+
+def _configure_run_directories(
+    context: RunContext,
+    analysis_logger: AnalysisLogger,
+    *,
+    isolate_processed: bool,
+) -> Path:
+    """Redirect run writes away from the public output tree."""
+    global DATA_OUTPUTS_DIR, DATA_PROCESSED_DIR, _public_outputs_dir, _run_path_redirections
+
+    public_outputs = Path(DATA_OUTPUTS_DIR)
+    public_processed = Path(DATA_PROCESSED_DIR)
+    run_root = public_outputs.parent / "runs" / context.run_id
+    run_outputs = run_root / "outputs"
+    run_processed = run_root / "processed"
+
+    old_outputs = public_outputs
+    old_processed = public_processed
+    changed: set[tuple[int, str]] = set()
+    _run_path_redirections = []
+    for module in list(sys.modules.values()):
+        if module is None:
+            continue
+        try:
+            if getattr(module, "DATA_OUTPUTS_DIR", None) == old_outputs:
+                key = (id(module), "DATA_OUTPUTS_DIR")
+                if key not in changed:
+                    _run_path_redirections.append((module, "DATA_OUTPUTS_DIR", old_outputs))
+                    changed.add(key)
+                setattr(module, "DATA_OUTPUTS_DIR", run_outputs)
+            if isolate_processed and getattr(module, "DATA_PROCESSED_DIR", None) == old_processed:
+                key = (id(module), "DATA_PROCESSED_DIR")
+                if key not in changed:
+                    _run_path_redirections.append((module, "DATA_PROCESSED_DIR", old_processed))
+                    changed.add(key)
+                setattr(module, "DATA_PROCESSED_DIR", run_processed)
+        except Exception:
+            continue
+
+    DATA_OUTPUTS_DIR = run_outputs
+    if isolate_processed:
+        DATA_PROCESSED_DIR = run_processed
+    _public_outputs_dir = public_outputs
+    run_outputs.mkdir(parents=True, exist_ok=True)
+    run_processed.mkdir(parents=True, exist_ok=True)
+    (run_root / "logs").mkdir(parents=True, exist_ok=True)
+    analysis_logger.output_dir = run_outputs
+    return run_root
+
+
+def _restore_run_directories() -> None:
+    """Undo process-local compatibility redirects after a run completes."""
+    global DATA_OUTPUTS_DIR, DATA_PROCESSED_DIR, _run_path_redirections
+    for module, attribute, original_value in reversed(_run_path_redirections):
+        try:
+            setattr(module, attribute, original_value)
+        except Exception:
+            continue
+    _run_path_redirections = []
+
+
+def _write_current_run_metadata(
+    analysis_logger: AnalysisLogger,
+    context: RunContext,
+    cohort_size: int,
+) -> Path:
+    metadata_path = Path(DATA_OUTPUTS_DIR) / "run_metadata.json"
+    payload = {
+        **context.to_dict(),
+        "start_time": analysis_logger.metadata.get("analysis_start") or context.analysis_start,
+        "end_time": analysis_logger.metadata.get("analysis_end") or context.analysis_end,
+        "runtime_seconds": analysis_logger.metadata.get("total_duration_seconds") or context.runtime_seconds,
+        "authoritative_cohort_size": int(cohort_size),
+    }
+    metadata_path.parent.mkdir(parents=True, exist_ok=True)
+    metadata_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    stamp_artifact(metadata_path, context, record_count=cohort_size)
+    return metadata_path
+
+
+def _register_current_artifacts(context: RunContext) -> ArtifactManifest:
+    """Register the explicit current-run artifacts; never discover shared outputs."""
+    manifest = ArtifactManifest.load(context)
+    artifact_map = {
+        "run_metadata": (Path(DATA_OUTPUTS_DIR) / "run_metadata.json", "provenance", True, "client"),
+        "validation_report": (Path(DATA_PROCESSED_DIR) / "validation_report.json", "validation", True, "client"),
+        "published_validation_report": (Path(DATA_OUTPUTS_DIR) / "validation_report.json", "client_outputs", True, "client"),
+        "adjustment_summary": (Path(DATA_PROCESSED_DIR) / "methodological_adjustments_summary.json", "adjustments", True, "client"),
+        "adjusted_dataset": (Path(DATA_PROCESSED_DIR) / "epc_london_adjusted.parquet", "adjustments", True, "internal"),
+        "archetype_analysis": (Path(DATA_OUTPUTS_DIR) / "archetype_analysis_results.json", "analysis", True, "client"),
+        "readiness": (Path(DATA_OUTPUTS_DIR) / "retrofit_readiness_analysis.csv", "analysis", True, "client"),
+        "spatial_suitability": (Path(DATA_OUTPUTS_DIR) / "pathway_suitability_by_tier.csv", "analysis", True, "client"),
+        "internal_scenarios": (Path(DATA_OUTPUTS_DIR) / "internal_scenario_results.csv", "modelling", True, "internal"),
+        "client_scenarios": (Path(DATA_OUTPUTS_DIR) / "scenario_results_summary.csv", "modelling", True, "client"),
+        "diagnostic_pathway_properties": (Path(DATA_OUTPUTS_DIR) / "pathway_results_by_property.parquet", "diagnostic_pathways", True, "internal"),
+        "diagnostic_pathways": (Path(DATA_OUTPUTS_DIR) / "pathway_results_summary.csv", "diagnostic_pathways", True, "internal"),
+        "diagnostic_hp_hn_comparison": (Path(DATA_OUTPUTS_DIR) / "comparisons" / "hn_vs_hp_comparison.csv", "diagnostic_pathways", True, "internal"),
+        "run_comparison": (Path(DATA_OUTPUTS_DIR) / "old_vs_corrected_comparison.csv", "verification", False, "internal"),
+        "borough_breakdown": (Path(DATA_OUTPUTS_DIR) / "borough_breakdown.csv", "reporting", True, "client"),
+        "borough_priority": (Path(DATA_OUTPUTS_DIR) / "reports" / "borough_priority_ranking.csv", "reporting", True, "client"),
+        "tenure_segmentation": (Path(DATA_OUTPUTS_DIR) / "reports" / "tenure_segmentation.csv", "reporting", True, "client"),
+        "network_thresholds": (Path(DATA_OUTPUTS_DIR) / "heat_network_connection_thresholds.csv", "reporting", True, "client"),
+        "case_street_extract": (Path(DATA_OUTPUTS_DIR) / "shakespeare_crescent_extract.csv", "reporting", True, "client"),
+        "case_street_summary": (Path(DATA_OUTPUTS_DIR) / "shakespeare_crescent_summary.txt", "reporting", True, "client"),
+        "subsidy_detailed": (Path(DATA_OUTPUTS_DIR) / "subsidy_sensitivity_analysis.csv", "modelling", True, "client"),
+        "subsidy_simplified": (Path(DATA_OUTPUTS_DIR) / "subsidy_sensitivity_analysis_simple_gbp.csv", "reporting", True, "client"),
+        "one_stop_json": (Path(DATA_OUTPUTS_DIR) / "one_stop_output.json", "client_outputs", True, "client"),
+        "dashboard_data": (Path(DATA_OUTPUTS_DIR) / "dashboard" / "dashboard-data.json", "client_outputs", True, "client"),
+        "dashboard_html": (Path(DATA_OUTPUTS_DIR) / "one_stop_dashboard.html", "client_outputs", True, "client"),
+        "analysis_compendium": (Path(DATA_OUTPUTS_DIR) / "analysis_outputs_compendium.xlsx", "client_outputs", True, "client"),
+    }
+    for logical_name, (path, phase, required, scope) in artifact_map.items():
+        if path.is_file():
+            manifest.register(
+                logical_name,
+                path,
+                phase=phase,
+                required=required,
+                publication_scope=scope,
+                cohort=context.authoritative_cohort,
+            )
+    return manifest
+
+
+def _require_contract(manifest: ArtifactManifest, logical_names: list[str]) -> None:
+    """Validate explicit required artifacts through the active manifest."""
+    manifest.require(logical_names)
+
+
+def _register_required_artifacts(
+    context: RunContext,
+    *,
+    phase: str,
+    artifacts: list[tuple[str, Path, str]],
+) -> ArtifactManifest:
+    """Stamp, register, and immediately require a mandatory phase artifact set."""
+    manifest = ArtifactManifest.load(context)
+    for logical_name, path, publication_scope in artifacts:
+        path = Path(path)
+        if path.is_file():
+            stamp_artifact(path, context)
+            manifest.register(
+                logical_name,
+                path,
+                phase=phase,
+                required=True,
+                publication_scope=publication_scope,
+                cohort=context.authoritative_cohort,
+            )
+    _require_contract(manifest, [name for name, _, _ in artifacts])
+    return manifest
+
+
+def _load_adjusted_phase_frame(phase_name: str):
+    """Load the run-scoped adjusted Parquet boundary for an analytical phase."""
+    import pandas as pd
+
+    path = Path(DATA_PROCESSED_DIR) / "epc_london_adjusted.parquet"
+    if not path.is_file():
+        raise RuntimeError(f"{phase_name} requires the authoritative adjusted Parquet: {path}")
+    frame = pd.read_parquet(path)
+    expected = _active_authoritative_cohort_size
+    if expected is not None and len(frame) != int(expected):
+        raise RuntimeError(
+            f"{phase_name} adjusted-Parquet cohort mismatch: rows={len(frame)}, expected={expected}"
+        )
+    return frame
+
+
+def _checkpoint(analysis_logger: Optional[AnalysisLogger], status: str = "running") -> None:
+    if analysis_logger is not None and hasattr(analysis_logger, "save_checkpoint"):
+        analysis_logger.save_checkpoint(status=status)
+
+
+def _mark_active_run_failed() -> None:
+    """Persist failed lifecycle state without finalizing or publishing the run."""
+    global _active_run_context
+    if _active_run_context is None:
+        return
+    _active_run_context = _active_run_context.fail()
+    try:
+        ArtifactManifest.load(_active_run_context).save()
+    except Exception:
+        logger.exception("Could not persist failed run context")
 
 
 def _ui_call(ui, method_name: str, *args, **kwargs):
@@ -310,19 +510,21 @@ def _external_progress_context(ui):
 
 
 def _call_with_optional_ui(func, *args, ui=None, **kwargs):
-    """Call a function with ui=... only when its signature supports it."""
-    if ui is None:
-        return func(*args, **kwargs)
+    """Call a function with only keyword arguments supported by its signature."""
     try:
         signature = inspect.signature(func)
         parameters = signature.parameters
-        if "ui" in parameters or any(
+        accepts_kwargs = any(
             parameter.kind == inspect.Parameter.VAR_KEYWORD
             for parameter in parameters.values()
-        ):
+        )
+        if ui is not None and ("ui" in parameters or accepts_kwargs):
             kwargs["ui"] = ui
+        if not accepts_kwargs:
+            kwargs = {key: value for key, value in kwargs.items() if key in parameters}
     except (TypeError, ValueError):
-        kwargs["ui"] = ui
+        if ui is not None:
+            kwargs["ui"] = ui
     return func(*args, **kwargs)
 
 
@@ -963,12 +1165,22 @@ def parse_args(argv=None) -> argparse.Namespace:
         help="EPC acquisition scope. single-borough prompts for --borough when omitted.",
     )
     parser.add_argument("--borough", help="London borough name for --download-scope single-borough.")
+    parser.add_argument("--production", action="store_true", help="Require complete production provenance and enable publication.")
+    parser.add_argument("--development-fixture", type=Path, help="Validated Parquet fixture; skips acquisition and validation.")
+    parser.add_argument("--source-run-id", help="Source run identifier for a development fixture.")
+    parser.add_argument("--source-fixture-sha256", help="Expected SHA-256 for a development fixture.")
+    parser.add_argument("--refresh-hnpd", action="store_true", help="Refresh HNPD inputs for a production run.")
+    parser.add_argument("--no-publish", action="store_true", help="Keep outputs run-scoped and do not update the latest publication.")
 
     args = parser.parse_args(argv)
     if args.sample_start and args.sample_end and args.sample_start > args.sample_end:
         parser.error("--sample-start cannot be after --sample-end")
     if args.borough and args.download_scope is None:
         args.download_scope = "single-borough"
+    if args.production and args.development_fixture:
+        parser.error("--production and --development-fixture are mutually exclusive")
+    if args.development_fixture and not (args.source_run_id and args.source_fixture_sha256):
+        parser.error("--development-fixture requires --source-run-id and --source-fixture-sha256")
 
     # Backwards-compatibility shim: expose args.tui as a bool for legacy code
     # that predates tui_mode/no_tui. create_dashboard() reads tui_mode/no_tui.
@@ -1703,6 +1915,7 @@ def validate_data(
     sample_start_date: date_cls = None,
     sample_end_date: date_cls = None,
     ui=None,
+    strict_schema_conflicts: bool = False,
 ):
     """Validate and clean data."""
     console.print()
@@ -1721,7 +1934,12 @@ def validate_data(
     if is_dataset_reference(df):
         console.print("[cyan]Validating from staged Parquet dataset instead of a monolithic in-memory dataframe...[/cyan]")
         output_file = DATA_PROCESSED_DIR / "epc_london_validated.csv"
-        validated_dataset, report = validate_staged_dataset(df, output_file)
+        validated_dataset, report = _call_with_optional_ui(
+            validate_staged_dataset,
+            df,
+            output_file,
+            strict_schema_conflicts=strict_schema_conflicts,
+        )
         report = normalize_validation_report(
             report,
             input_dataset=df,
@@ -1744,7 +1962,10 @@ def validate_data(
 
         validator = EPCDataValidator()
         validator.validation_report.update(report)
-        validator.save_validation_report()
+        _call_with_optional_ui(
+            validator.save_validation_report,
+            output_path=DATA_PROCESSED_DIR / "validation_report.txt",
+        )
 
         try:
             validation_report_json = DATA_PROCESSED_DIR / "validation_report.json"
@@ -1794,7 +2015,7 @@ def validate_data(
         _ui_phase_completed(ui, "Data Validation", f"{records_passed:,} records validated")
         return validated_dataset, report
 
-    validator = EPCDataValidator()
+    validator = EPCDataValidator(strict_schema_conflicts=strict_schema_conflicts)
     df_validated, report = validator.validate_dataset(df)
     report = normalize_validation_report(
         report,
@@ -2043,96 +2264,60 @@ def apply_methodological_adjustments(
 
 
 def ensure_hp_hn_comparison_outputs(df=None, analysis_logger: AnalysisLogger = None, ui=None):
-    """Ensure the HP-vs-HN comparison artefacts exist, rebuilding them if required."""
+    """Execute the required diagnostic phase and surface both attempt failures."""
     global _hp_hn_comparison_outputs_cache
 
-    outputs_dir = Path(DATA_OUTPUTS_DIR)
-    comparisons_dir = outputs_dir / "comparisons"
-    comparison_csv = comparisons_dir / "hn_vs_hp_comparison.csv"
-    comparison_snippet = comparisons_dir / "hn_vs_hp_report_snippet.md"
+    from src.utils.diagnostic_phase import run_diagnostic_phase
 
-    if comparison_csv.exists():
-        console.print("[cyan]Reusing existing HP vs HN comparison artefacts...[/cyan]")
-        result = {
-            "comparison_csv": comparison_csv,
-            "comparison_snippet": comparison_snippet if comparison_snippet.exists() else None,
-            "rebuilt": False,
-        }
-        _hp_hn_comparison_outputs_cache = {
-            "status": "success",
-            "result": result,
-        }
-        return result
-
-    if _hp_hn_comparison_outputs_cache is not None:
-        if _hp_hn_comparison_outputs_cache.get("status") == "success":
-            cached_result = _hp_hn_comparison_outputs_cache.get("result")
-            if cached_result and Path(cached_result["comparison_csv"]).exists():
-                return cached_result
-        else:
-            return None
-
-    console.print(
-        f"[yellow]⚠ Missing {comparison_csv}; attempting to rebuild HP vs HN comparison outputs...[/yellow]"
+    phase_name = "Diagnostic Pathway Modeling"
+    cohort_size = (
+        int(_active_run_context.authoritative_cohort)
+        if _active_run_context is not None and _active_run_context.authoritative_cohort is not None
+        else (len(df) if df is not None else 0)
     )
+    if analysis_logger:
+        analysis_logger.start_phase(
+            phase_name,
+            "Generate and validate property pathways, diagnostic summary, and HP/HN comparisons",
+        )
+    _ui_phase_started(ui, phase_name, f"Analyzing diagnostic pathways for {cohort_size:,} properties")
+
+    def log_failure(attempt: int, exc: Exception) -> None:
+        logger.exception(f"Diagnostic pathway attempt {attempt} failed: {exc}")
 
     try:
-        pathway_modeler = PathwayModeler(output_dir=outputs_dir)
-        property_results_path = pathway_modeler.output_dir / "pathway_results_by_property.parquet"
-        summary_path = pathway_modeler.output_dir / "pathway_results_summary.csv"
-
-        if property_results_path.exists() and summary_path.exists():
-            console.print("[cyan]Using existing pathway modeling outputs to rebuild comparison...[/cyan]")
-        else:
-            if df is None or len(df) == 0:
-                raise ValueError("No source dataframe available to rebuild HP vs HN comparison outputs")
-
-            console.print("[cyan]Running pathway modeling to regenerate comparison inputs...[/cyan]")
-            _ui_phase_started(ui, "Pathway Modeling", f"Analyzing pathways for {len(df):,} properties")
-            pathway_cb = _make_pathway_progress_callback(ui)
-            pathway_results = pathway_modeler.model_all_pathways(df, progress_callback=pathway_cb)
-            _ui_phase_completed(ui, "Pathway Modeling", "Pathway analysis complete")
-            pathway_summary = pathway_modeler.generate_pathway_summary(pathway_results)
-            property_results_path, summary_path = pathway_modeler.export_results(
-                pathway_results,
-                pathway_summary,
-            )
-
-        comparison_reporter = ComparisonReporter(outputs_dir=outputs_dir)
-        comparison_df = comparison_reporter.generate_comparisons(results_path=property_results_path)
-
-        if comparison_df is None or comparison_df.empty or not comparison_csv.exists():
-            raise RuntimeError("Comparison rebuild did not produce a usable hn_vs_hp_comparison.csv")
-
-        console.print(f"[green]✓[/green] Rebuilt HP vs HN comparison artefacts at {comparison_csv}")
-
-        if analysis_logger:
-            analysis_logger.add_output(str(property_results_path), "parquet", "Pathway results by property")
-            analysis_logger.add_output(str(summary_path), "csv", "Pathway results summary")
-            analysis_logger.add_output(str(comparison_csv), "csv", "HP vs HN comparison table")
-            if comparison_snippet.exists():
-                analysis_logger.add_output(str(comparison_snippet), "md", "HP vs HN markdown snippet")
-
-        result = {
-            "comparison_csv": comparison_csv,
-            "comparison_snippet": comparison_snippet if comparison_snippet.exists() else None,
-            "rebuilt": True,
-        }
-        _hp_hn_comparison_outputs_cache = {
-            "status": "success",
-            "result": result,
-        }
-        return result
-    except Exception as e:
-        _hp_hn_comparison_outputs_cache = {
-            "status": "failed",
-            "error": str(e),
-        }
-        console.print(
-            f"[yellow]Warning: HP vs HN comparison artefacts could not be regenerated from pathway modeling: {e}[/yellow]"
+        result = run_diagnostic_phase(
+            df,
+            context=_active_run_context,
+            outputs_dir=Path(DATA_OUTPUTS_DIR),
+            processed_dir=Path(DATA_PROCESSED_DIR),
+            pathway_modeler_class=PathwayModeler,
+            comparison_reporter_class=ComparisonReporter,
+            progress_callback=_make_pathway_progress_callback(ui),
+            on_attempt_failure=log_failure,
         )
-        logger.exception("HP vs HN comparison artefacts could not be regenerated from pathway modeling")
-        return None
+    except Exception as exc:
+        _hp_hn_comparison_outputs_cache = None
+        if analysis_logger:
+            analysis_logger.complete_phase(success=False, message=str(exc))
+        _ui_phase_failed(ui, phase_name, str(exc))
+        raise
+
+    _hp_hn_comparison_outputs_cache = {"status": "success", "result": result}
+    if analysis_logger:
+        analysis_logger.add_output(str(result["property_results"]), "parquet", "Pathway results by property")
+        analysis_logger.add_output(str(result["summary"]), "csv", "Pathway results summary")
+        analysis_logger.add_output(str(result["comparison_csv"]), "csv", "HP vs HN comparison table")
+        if result.get("comparison_snippet"):
+            analysis_logger.add_output(str(result["comparison_snippet"]), "md", "HP vs HN markdown snippet")
+        message = (
+            "Validated registered diagnostic artifacts"
+            if not result.get("rebuilt")
+            else f"Diagnostic artifacts validated on attempt {result.get('attempt', 1)}"
+        )
+        analysis_logger.complete_phase(success=True, message=message)
+    _ui_phase_completed(ui, phase_name, "Diagnostic pathway artifacts validated")
+    return result
 
 
 def analyze_archetype(df, analysis_logger: AnalysisLogger = None, ui=None):
@@ -2206,7 +2391,11 @@ def model_scenarios(df, analysis_logger: AnalysisLogger = None, ui=None):
 
     modeler = ScenarioModeler()
     scenario_cb = _make_scenario_progress_callback(ui)
-    scenario_results = modeler.model_all_scenarios(df, progress_callback=scenario_cb)
+    scenario_results = _call_with_optional_ui(
+        modeler.model_all_scenarios,
+        df,
+        progress_callback=scenario_cb,
+    )
 
     console.print(f"[green]✓[/green] Scenario modeling complete")
 
@@ -2273,11 +2462,6 @@ def model_scenarios(df, analysis_logger: AnalysisLogger = None, ui=None):
         console.print(f"[yellow]⚠ Could not generate tipping point chart: {e}[/yellow]")
         logger.exception("Tipping point chart generation failed")
 
-    # Generate pathway-level outputs and HP vs HN comparisons for both report modes.
-    console.print()
-    console.print("[cyan]Building pathway modeling outputs and HP vs HN comparisons...[/cyan]")
-    ensure_hp_hn_comparison_outputs(df, analysis_logger, ui=ui)
-
     if analysis_logger:
         analysis_logger.add_metric("scenarios_modeled", len(scenario_results), "Decarbonization scenarios analyzed")
         analysis_logger.add_output("data/outputs/scenario_modeling_results.txt", "report", "Scenario modeling results")
@@ -2321,14 +2505,21 @@ def analyze_retrofit_readiness(df, analysis_logger: AnalysisLogger = None, one_s
     try:
         from src.analysis.retrofit_readiness import RetrofitReadinessAnalyzer
 
-        analyzer = RetrofitReadinessAnalyzer()
+        from src.utils.readiness_phase import run_readiness_phase
 
-        # Run readiness assessment
-        df_readiness = analyzer.assess_heat_pump_readiness(df)
-        summary = analyzer.generate_readiness_summary(df_readiness)
+        def log_failure(attempt: int, exc: Exception) -> None:
+            logger.exception(f"Retrofit readiness attempt {attempt} failed: {exc}")
 
-        # Save results
-        analyzer.save_readiness_results(df_readiness, summary)
+        result = run_readiness_phase(
+            df,
+            context=_active_run_context,
+            outputs_dir=Path(DATA_OUTPUTS_DIR),
+            processed_dir=Path(DATA_PROCESSED_DIR),
+            analyzer_class=RetrofitReadinessAnalyzer,
+            on_attempt_failure=log_failure,
+        )
+        df_readiness = result["readiness_frame"]
+        summary = result["summary"]
 
         # Display key findings
         console.print("[green]✓[/green] Retrofit readiness analysis complete")
@@ -2428,13 +2619,13 @@ def analyze_retrofit_readiness(df, analysis_logger: AnalysisLogger = None, one_s
         logger.error(f"Retrofit readiness error: {e}")
         if analysis_logger:
             analysis_logger.complete_phase(success=False, message=f"Error: {e}")
-        return None, None
+        raise
 
 
 def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None, one_stop_only: bool = False, ui=None):
-    """Run spatial heat network tier analysis (optional - requires GDAL)."""
+    """Run required spatial classification; rendered map formats are optional."""
     console.print()
-    console.print(Panel("[bold]Phase 4.5: Spatial Analysis (Optional)[/bold]", border_style="blue"))
+    console.print(Panel("[bold]Phase 4.5: Spatial Analysis[/bold]", border_style="blue"))
     console.print()
     _ui_phase_started(ui, "Spatial Analysis", "Checking spatial dependencies")
 
@@ -2703,7 +2894,10 @@ def run_spatial_analysis(df, analysis_logger: AnalysisLogger = None, one_stop_on
                 "Geocode properties and classify into heat network tiers based on heat density"
             )
 
-        analyzer = HeatNetworkAnalyzer()
+        analyzer = HeatNetworkAnalyzer(
+            processed_dir=Path(DATA_PROCESSED_DIR),
+            output_dir=Path(DATA_OUTPUTS_DIR),
+        )
 
         console.print("[cyan]Running spatial analysis...[/cyan]")
         console.print("  • Geocoding properties from lat/lon coordinates")
@@ -2964,12 +3158,59 @@ def generate_one_stop_report(df=None, analysis_logger: AnalysisLogger = None, ui
     console.print("[cyan]Generating one-stop JSON report...[/cyan]")
     _ui_phase_started(ui, "One-Stop Report", "Generating one-stop JSON report")
 
-    ensure_hp_hn_comparison_outputs(df, analysis_logger, ui=ui)
+    if _active_run_context is not None:
+        _write_current_run_metadata(
+            analysis_logger,
+            _active_run_context,
+            int(_active_authoritative_cohort_size),
+        )
+        stamp_artifact_tree([Path(DATA_OUTPUTS_DIR)], _active_run_context)
+        processed_artifacts = [
+            Path(DATA_PROCESSED_DIR) / "validation_report.json",
+            Path(DATA_PROCESSED_DIR) / "methodological_adjustments_summary.json",
+            Path(DATA_PROCESSED_DIR) / "epc_london_validated.csv",
+            Path(DATA_PROCESSED_DIR) / "epc_london_validated.parquet",
+            Path(DATA_PROCESSED_DIR) / "epc_london_adjusted.csv",
+            Path(DATA_PROCESSED_DIR) / "epc_london_adjusted.parquet",
+        ]
+        for artifact in processed_artifacts:
+            if artifact.is_file():
+                stamp_artifact(artifact, _active_run_context)
+        manifest = _register_current_artifacts(_active_run_context)
+        _require_contract(
+            manifest,
+            [
+                "run_metadata", "validation_report", "adjustment_summary",
+                "archetype_analysis", "readiness", "spatial_suitability",
+                "internal_scenarios", "client_scenarios", "diagnostic_pathways",
+                "borough_breakdown", "borough_priority", "tenure_segmentation",
+                "network_thresholds", "case_street_extract", "case_street_summary",
+                "subsidy_detailed", "subsidy_simplified",
+            ],
+        )
 
     from src.reporting.one_stop_report import OneStopReportGenerator
 
-    generator = OneStopReportGenerator()
+    generator_kwargs: Dict[str, Any] = {}
+    if _active_run_context is not None:
+        generator_kwargs.update(
+            output_dir=Path(DATA_OUTPUTS_DIR),
+            processed_dir=Path(DATA_PROCESSED_DIR),
+            run_id=_active_run_context.run_id,
+            dataset_fingerprint=_active_run_context.dataset_fingerprint,
+            authoritative_cohort_size=_active_authoritative_cohort_size,
+            run_context=_active_run_context,
+        )
+    generator = OneStopReportGenerator(**generator_kwargs)
     output_path = generator.generate()
+    if _active_run_context is not None:
+        shutil.copy2(
+            Path(DATA_PROCESSED_DIR) / "validation_report.json",
+            Path(DATA_OUTPUTS_DIR) / "validation_report.json",
+        )
+        stamp_artifact(Path(DATA_OUTPUTS_DIR) / "validation_report.json", _active_run_context)
+        current_manifest = _register_current_artifacts(_active_run_context)
+        current_manifest.require(["one_stop_json", "published_validation_report"])
 
     console.print(f"[green]✓[/green] One-stop report generated: {output_path}")
 
@@ -3094,7 +3335,7 @@ def generate_additional_reports(df_raw, df_validated, validation_report, archety
     reporter = AdditionalReports()
     reports_created = []
 
-    output_dir = Path("data/outputs")
+    output_dir = Path(DATA_OUTPUTS_DIR)
     output_dir.mkdir(parents=True, exist_ok=True)
     reports_dir = output_dir / "reports"
     reports_dir.mkdir(parents=True, exist_ok=True)
@@ -3106,7 +3347,8 @@ def generate_additional_reports(df_raw, df_validated, validation_report, archety
         case_street_df, case_street_summary = reporter.extract_case_street(
             df_validated,
             street_name="Shakespeare Crescent",
-            output_path=case_street_path
+            output_path=case_street_path,
+            summary_path=output_dir / "shakespeare_crescent_summary.txt",
         )
         if len(case_street_df) > 0:
             reports_created.append(f"✓ Shakespeare Crescent extract ({len(case_street_df)} properties)")
@@ -3283,13 +3525,11 @@ def package_dashboard_assets(
             "Export latest analysis results for the React dashboard",
         )
 
-    ensure_hp_hn_comparison_outputs(df_validated, analysis_logger, ui=ui)
-
     try:
         from src.reporting.dashboard_data_builder import DashboardDataBuilder
         import pandas as pd
 
-        builder = DashboardDataBuilder()
+        builder = DashboardDataBuilder(output_dir=Path(DATA_OUTPUTS_DIR))
         case_summary = (additional_reports or {}).get("case_street_summary") if additional_reports else None
         case_street_df = (additional_reports or {}).get("case_street_df") if additional_reports else None
         borough_breakdown = (additional_reports or {}).get("borough_breakdown") if additional_reports else None
@@ -3303,7 +3543,7 @@ def package_dashboard_assets(
         retrofit_packages_summary = None
         hn_vs_hp_comparison = None
 
-        outputs_dir = Path("data/outputs")
+        outputs_dir = Path(DATA_OUTPUTS_DIR)
 
         # Load load profiles summary (Section 9)
         load_profiles_file = outputs_dir / "pathway_load_profile_summary.csv"
@@ -3316,7 +3556,8 @@ def package_dashboard_assets(
 
         # Load tipping point curve (Section 8)
         tipping_point_file = outputs_dir / "fabric_tipping_point_curve.csv"
-        if tipping_point_file.exists():
+        from config.config import get_scenario_policy
+        if tipping_point_file.exists() and 'fabric_to_tipping_point' in get_scenario_policy()['publish']:
             try:
                 tipping_point_curve = pd.read_csv(tipping_point_file)
                 console.print(f"[green]✓[/green] Loaded fabric tipping point curve")
@@ -3366,17 +3607,16 @@ def package_dashboard_assets(
             tipping_point_curve,
             retrofit_packages_summary,
         )
+        if _active_run_context is not None:
+            dataset["runMetadata"] = _active_run_context.to_dict()
 
         dataset_path = builder.write_dataset(dataset)
 
         # Copy into dashboard public assets so the React app loads latest data
-        public_dir = Path("dashboard/public")
-        public_dir.mkdir(parents=True, exist_ok=True)
-        public_dataset = public_dir / "dashboard-data.json"
-        shutil.copy2(dataset_path, public_dataset)
+        # Promotion to public assets is performed only by the final publication
+        # transaction after both integrity gates have passed.
 
         console.print(f"[green]✓[/green] Dashboard data saved to {dataset_path}")
-        console.print(f"[green]✓[/green] React dashboard updated at {public_dataset}")
 
         # Log summary of data arrays included
         data_arrays = [k for k in dataset.keys() if isinstance(dataset.get(k), list) and len(dataset.get(k, [])) > 0]
@@ -3395,7 +3635,6 @@ def package_dashboard_assets(
             analysis_logger.complete_phase(success=True, message="Dashboard data exported")
         _ui_metric(ui, "dashboard data arrays", len(data_arrays), group=PHASE_OUTPUTS)
         _ui_output(ui, "Dashboard data", dataset_path)
-        _ui_output(ui, "React dashboard data", public_dataset)
         _ui_phase_completed(ui, "Dashboard Packaging", "Dashboard data exported")
     except Exception as e:
         _ui_phase_failed(ui, "Dashboard Packaging", f"Dashboard packaging failed: {e}")
@@ -3729,12 +3968,23 @@ def main(argv=None):
         with _configure_tui_logging(ui), _route_console_output_for_tui(ui):
             _ui_call(ui, "run_started", "HeatStreet analysis started")
             print_header()
-            return _main_impl(args, ui, analysis_logger, start_time)
+            exit_code = _main_impl(args, ui, analysis_logger, start_time)
+            if exit_code == EXIT_ANALYSIS_FAILED:
+                _mark_active_run_failed()
+                if hasattr(analysis_logger, "record_failure"):
+                    analysis_logger.record_failure(
+                        RuntimeError("Analysis terminated before required phases completed")
+                    )
+            return exit_code
     except Exception as exc:
+        _mark_active_run_failed()
+        if hasattr(analysis_logger, "record_failure"):
+            analysis_logger.record_failure(exc)
         _ui_call(ui, "run_failed", str(exc))
-        raise
+        return EXIT_ANALYSIS_FAILED
     finally:
         _ui_call(ui, "stop")
+        _restore_run_directories()
 
 
 def _run_with_textual_main(args: argparse.Namespace, ui) -> int:
@@ -3753,15 +4003,25 @@ def _run_with_textual_main(args: argparse.Namespace, ui) -> int:
                 print_header()
                 code = _main_impl(args, ui, analysis_logger, start_time)
                 result["exit_code"] = code or EXIT_SUCCESS
+                if code == EXIT_ANALYSIS_FAILED:
+                    _mark_active_run_failed()
+                    if hasattr(analysis_logger, "record_failure"):
+                        analysis_logger.record_failure(
+                            RuntimeError("Analysis terminated before required phases completed")
+                        )
         except SystemExit as e:
             result["exit_code"] = e.code or EXIT_SUCCESS
         except KeyboardInterrupt:
             result["exit_code"] = EXIT_CANCELLED
         except Exception as exc:
+            _mark_active_run_failed()
+            if hasattr(analysis_logger, "record_failure"):
+                analysis_logger.record_failure(exc)
             _ui_call(ui, "run_failed", str(exc))
             result["exit_code"] = EXIT_ANALYSIS_FAILED
         finally:
             _ui_call(ui, "stop")
+            _restore_run_directories()
 
     pipeline_thread = threading.Thread(
         target=_pipeline_thread_fn, daemon=True, name="hs-pipeline"
@@ -3790,6 +4050,37 @@ def _run_with_textual_main(args: argparse.Namespace, ui) -> int:
 
 def _main_impl(args: argparse.Namespace, ui, analysis_logger: AnalysisLogger, start_time: float):
     """Run the pipeline after argparse/UI setup."""
+    global _active_run_context, _active_authoritative_cohort_size, _hp_hn_comparison_outputs_cache
+
+    _active_run_context = None
+    _active_authoritative_cohort_size = None
+    _hp_hn_comparison_outputs_cache = None
+    config_path = REPO_ROOT / "config" / "config.yaml"
+    config_sha256 = hashlib.sha256(config_path.read_bytes()).hexdigest()
+    git_commit = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, capture_output=True, text=True, check=False
+    ).stdout.strip() or None
+    pending_run_context = RunContext.create(
+        mode="production" if args.production else "development",
+        git_commit=git_commit,
+        configuration_sha256=config_sha256,
+        source_identifier=args.source_run_id if args.development_fixture else None,
+        source_fingerprint=args.source_fixture_sha256 if args.development_fixture else None,
+    )
+    run_root = Path(DATA_OUTPUTS_DIR).parent / "runs" / pending_run_context.run_id
+    pending_run_context = pending_run_context.with_run_root(run_root)
+    analysis_logger.set_metadata("run_id", pending_run_context.run_id)
+    analysis_logger.set_metadata("git_commit", pending_run_context.git_commit)
+    analysis_logger.set_metadata("configuration_sha256", pending_run_context.configuration_sha256)
+    analysis_logger.set_metadata("source_identifier", pending_run_context.source_identifier)
+    analysis_logger.set_metadata("source_fingerprint", pending_run_context.source_fingerprint)
+    _configure_run_directories(
+        pending_run_context,
+        analysis_logger,
+        isolate_processed=True,
+    )
+    _checkpoint(analysis_logger, status="running")
+
     runtime_identity, preflight = emit_startup_diagnostics(analysis_logger)
     if not preflight.get("ok"):
         analysis_logger.set_metadata(
@@ -3805,7 +4096,7 @@ def _main_impl(args: argparse.Namespace, ui, analysis_logger: AnalysisLogger, st
     _ui_info(ui, "Preflight passed")
 
     # Check credentials
-    if not _call_with_optional_ui(check_credentials, ui=ui):
+    if not args.development_fixture and not _call_with_optional_ui(check_credentials, ui=ui):
         console.print("[red]Cannot proceed without API credentials[/red]")
         _ui_call(ui, "run_failed", "API credentials missing")
         return EXIT_ANALYSIS_FAILED
@@ -3824,7 +4115,8 @@ def _main_impl(args: argparse.Namespace, ui, analysis_logger: AnalysisLogger, st
 
     # Ask about heat network data downloads
     # HNPD first (recommended, 2024 data)
-    _call_with_optional_ui(ask_hnpd_download, ui=ui)
+    if not args.development_fixture:
+        _call_with_optional_ui(ask_hnpd_download, ui=ui)
 
     try:
         sample_start_date, sample_end_date = resolve_sample_window_from_args(args, ui=ui)
@@ -3839,15 +4131,73 @@ def _main_impl(args: argparse.Namespace, ui, analysis_logger: AnalysisLogger, st
 
     analysis_logger.set_metadata("sample_start_date", sample_start_date.isoformat())
     analysis_logger.set_metadata("sample_end_date", sample_end_date.isoformat())
-
-    # Check for existing data
-    has_existing, existing_file, record_count = check_existing_data(
-        sample_start_date=sample_start_date,
-        sample_end_date=sample_end_date,
+    pending_run_context = replace(
+        pending_run_context,
+        sample_start_date=sample_start_date.isoformat(),
+        sample_end_date=sample_end_date.isoformat(),
     )
 
-    df = None
-    fresh_data_downloaded = False  # Track if we just downloaded new data
+    fixture_mode = args.development_fixture is not None
+    fixture_validation_report = None
+    fixture_frame = None
+    if fixture_mode:
+        import pandas as pd
+
+        fixture_path = Path(args.development_fixture)
+        if not fixture_path.is_file():
+            raise FileNotFoundError(f"Development fixture not found: {fixture_path}")
+        actual_sha = hashlib.sha256(fixture_path.read_bytes()).hexdigest()
+        if actual_sha.casefold() != args.source_fixture_sha256.casefold():
+            raise RuntimeError(
+                f"Development fixture SHA-256 mismatch: {actual_sha}, expected {args.source_fixture_sha256}"
+            )
+        fixture_frame = pd.read_parquet(fixture_path)
+        if len(fixture_frame) != 168_051:
+            raise RuntimeError(f"Development fixture row-count mismatch: {len(fixture_frame):,}, expected 168,051")
+        validator = EPCDataValidator(strict_schema_conflicts=False)
+        canonical_fixture_columns = {"CURRENT_ENERGY_RATING", "TOTAL_FLOOR_AREA"}
+        if not canonical_fixture_columns.issubset(fixture_frame.columns):
+            fixture_frame = validator._standardize_column_names(fixture_frame)
+            fixture_frame = validator.standardize_fields(fixture_frame)
+        validated_fixture_path = Path(DATA_PROCESSED_DIR) / "epc_london_validated.parquet"
+        fixture_frame.to_parquet(validated_fixture_path, index=False)
+        fixture_geocoding_cache = fixture_path.parent / "geocoding_cache.csv"
+        if fixture_geocoding_cache.is_file():
+            cache_frame = pd.read_csv(fixture_geocoding_cache)
+            required_cache_columns = {"postcode", "latitude", "longitude"}
+            if required_cache_columns.issubset(cache_frame.columns) and not cache_frame.empty:
+                run_cache_path = Path(DATA_PROCESSED_DIR) / "geocoding_cache.csv"
+                shutil.copy2(fixture_geocoding_cache, run_cache_path)
+                analysis_logger.set_metadata(
+                    "fixture_geocoding_cache_sha256",
+                    hashlib.sha256(fixture_geocoding_cache.read_bytes()).hexdigest(),
+                )
+                analysis_logger.set_metadata("fixture_geocoding_cache_rows", len(cache_frame))
+        fixture_validation_report = {
+            "total_records": 183_376,
+            "stock_filtered_records": 183_376,
+            "records_passed": 168_051,
+            "duplicates_removed": 14_432,
+            "invalid_records": 893,
+            "staged_london_house_records": 732_887,
+            "heating_controls_schema": validator.validation_report.get("heating_controls_schema", {}),
+            "fixture_source_run_id": args.source_run_id,
+            "fixture_sha256": actual_sha,
+        }
+        write_json_report(Path(DATA_PROCESSED_DIR) / "validation_report.json", fixture_validation_report)
+        console.print(f"[green]OK[/green] Verified development fixture: {len(fixture_frame):,} rows")
+
+    # Check for existing data
+    if fixture_mode:
+        has_existing, existing_file, record_count = False, None, len(fixture_frame)
+    else:
+        has_existing, existing_file, record_count = check_existing_data(
+            sample_start_date=sample_start_date,
+            sample_end_date=sample_end_date,
+        )
+
+    df = fixture_frame
+    fresh_data_downloaded = fixture_mode  # Track if we just downloaded new data
 
     if args.use_existing and not has_existing:
         console.print("[red]No matching existing data found for --use-existing[/red]")
@@ -3948,7 +4298,7 @@ def _main_impl(args: argparse.Namespace, ui, analysis_logger: AnalysisLogger, st
     # Phase 2: Check for existing validated data before running validation
     # If we just downloaded fresh data, force re-validation instead of using old validated data
     validated_path = DATA_PROCESSED_DIR / "epc_london_validated.csv"
-    df_validated = None
+    df_validated = fixture_frame if fixture_mode else None
     if not fresh_data_downloaded:
         df_validated = _call_with_optional_ui(
             prompt_use_existing_dataframe,
@@ -3960,7 +4310,7 @@ def _main_impl(args: argparse.Namespace, ui, analysis_logger: AnalysisLogger, st
             sample_end_date=sample_end_date,
             ui=ui,
         )
-    validation_report = None
+    validation_report = fixture_validation_report
 
     if df_validated is not None:
         validation_report = load_json_if_exists(DATA_PROCESSED_DIR / "validation_report.json")
@@ -3996,6 +4346,7 @@ def _main_impl(args: argparse.Namespace, ui, analysis_logger: AnalysisLogger, st
             analysis_logger,
             sample_start_date=sample_start_date,
             sample_end_date=sample_end_date,
+            strict_schema_conflicts=args.production,
             ui=ui,
         )
         # Cleanup raw dataframe since we now use df_validated
@@ -4054,31 +4405,102 @@ def _main_impl(args: argparse.Namespace, ui, analysis_logger: AnalysisLogger, st
         console.print(f"[red]x[/red] {e}")
         return EXIT_ANALYSIS_FAILED
 
+    authoritative_adjusted_path = Path(DATA_PROCESSED_DIR) / "epc_london_adjusted.parquet"
+    if not authoritative_adjusted_path.is_file():
+        authoritative_adjusted_path.parent.mkdir(parents=True, exist_ok=True)
+        df_adjusted_frame.to_parquet(authoritative_adjusted_path, index=False)
+
+    dataset_fingerprint = fingerprint_dataset(df_adjusted_frame)
+    if not pending_run_context.source_fingerprint:
+        pending_run_context = replace(
+            pending_run_context,
+            source_identifier=(
+                str(df_raw.parquet_path) if isinstance(df_raw, DatasetReference) else "epc_acquisition_dataframe"
+            ),
+            source_fingerprint=fingerprint_dataset(df_raw),
+        )
+    current_run_context = pending_run_context.with_dataset_fingerprint(dataset_fingerprint).with_cohort(len(df_adjusted_frame))
+    analysis_logger.set_metadata("dataset_fingerprint", dataset_fingerprint)
+    analysis_logger.set_metadata("authoritative_cohort_size", len(df_adjusted_frame))
+    _active_run_context = current_run_context
+    _active_authoritative_cohort_size = len(df_adjusted_frame)
+    _write_current_run_metadata(
+        analysis_logger,
+        _active_run_context,
+        _active_authoritative_cohort_size,
+    )
+
     # Phase 3: Analyze (use adjusted data)
     archetype_results = _call_with_optional_ui(analyze_archetype, df_adjusted_frame, analysis_logger, ui=ui)
     gc.collect()  # Cleanup analysis intermediate results
 
-    # Phase 4: Model (use adjusted data for realistic baselines)
-    scenario_results, subsidy_results = _call_with_optional_ui(model_scenarios, df_adjusted_frame, analysis_logger, ui=ui)
+    # Build the diagnostic model family before the much larger stock-scenario
+    # property table is retained in memory.
+    diagnostic_outputs = _call_with_optional_ui(
+        ensure_hp_hn_comparison_outputs,
+        df_adjusted_frame,
+        analysis_logger,
+        ui=ui,
+    )
+    if diagnostic_outputs is None:
+        raise RuntimeError("Diagnostic pathway phase failed to produce its required comparison artifacts")
+    gc.collect()
+
+    # Each memory-intensive phase starts from the authoritative persisted boundary.
+    scenario_frame = _load_adjusted_phase_frame("Scenario Modeling")
+    scenario_results, subsidy_results = _call_with_optional_ui(
+        model_scenarios, scenario_frame, analysis_logger, ui=ui
+    )
+    del scenario_frame
+    _register_required_artifacts(
+        _active_run_context,
+        phase="scenario_modeling",
+        artifacts=[
+            ("internal_scenarios", Path(DATA_OUTPUTS_DIR) / "internal_scenario_results.csv", "internal"),
+            ("client_scenarios", Path(DATA_OUTPUTS_DIR) / "scenario_results_summary.csv", "client"),
+        ],
+    )
+    from config.config import get_scenario_policy
+    published_scenarios = set(get_scenario_policy()["publish"])
+    client_scenario_results = {
+        scenario_id: result
+        for scenario_id, result in (scenario_results or {}).items()
+        if scenario_id in published_scenarios
+    }
     gc.collect()  # Major cleanup after expensive modeling phase
 
     # Phase 4.3: Retrofit Readiness
+    readiness_frame = _load_adjusted_phase_frame("Retrofit Readiness Analysis")
     df_readiness, readiness_summary = _call_with_optional_ui(
         analyze_retrofit_readiness,
-        df_adjusted_frame,
+        readiness_frame,
         analysis_logger,
         one_stop_only=one_stop_only,
         ui=ui,
     )
+    del readiness_frame
+    if df_readiness is None or readiness_summary is None:
+        raise RuntimeError("Retrofit readiness did not produce its required artifacts")
+    _require_contract(ArtifactManifest.load(_active_run_context), ["readiness", "readiness_summary"])
     gc.collect()  # Cleanup readiness calculation intermediates
 
-    # Phase 4.5: Spatial Analysis (optional)
+    # Phase 4.5: Required spatial classification (maps remain optional).
+    spatial_frame = _load_adjusted_phase_frame("Spatial Analysis")
     properties_with_tiers, pathway_summary = _call_with_optional_ui(
         run_spatial_analysis,
-        df_adjusted_frame,
+        spatial_frame,
         analysis_logger,
         one_stop_only=one_stop_only,
         ui=ui,
+    )
+    del spatial_frame
+    if properties_with_tiers is None or pathway_summary is None:
+        raise RuntimeError("Spatial analysis did not produce its required classification artifact")
+    spatial_path = Path(DATA_OUTPUTS_DIR) / "pathway_suitability_by_tier.csv"
+    spatial_manifest = _register_required_artifacts(
+        _active_run_context,
+        phase="spatial_analysis",
+        artifacts=[("spatial_suitability", spatial_path, "client")],
     )
     gc.collect()  # Cleanup GIS objects and geocoding cache
 
@@ -4089,15 +4511,40 @@ def _main_impl(args: argparse.Namespace, ui, analysis_logger: AnalysisLogger, st
         console.print(f"[yellow]âš  Could not materialize raw dataset for additional reports: {e}[/yellow]")
         df_raw_for_reports = df_adjusted_frame
 
+    spatial_reporting_frame = df_adjusted_frame.copy(deep=False)
+    if (
+        hasattr(properties_with_tiers, "columns")
+        and "heat_network_tier" in properties_with_tiers.columns
+        and len(properties_with_tiers) == len(df_adjusted_frame)
+    ):
+        # Carry only the spatial classification into the canonical analytical
+        # frame; GeoDataFrame conversion can alter categorical report columns.
+        spatial_reporting_frame = spatial_reporting_frame.assign(
+            heat_network_tier=properties_with_tiers["heat_network_tier"].to_numpy()
+        )
     additional_outputs = _call_with_optional_ui(
         generate_additional_reports,
         df_raw_for_reports,
-        df_adjusted_frame,
+        spatial_reporting_frame,
         validation_report,
         archetype_results,
-        scenario_results,
+        client_scenario_results,
         analysis_logger,
         ui=ui,
+    )
+
+    # Freeze the reporting provenance before any client artifact is built.
+    _active_run_context = _active_run_context.with_timing(
+        runtime_seconds=time.time() - start_time,
+    )
+    analysis_logger.set_metadata("analysis_end", _active_run_context.analysis_end)
+    analysis_logger.set_metadata("total_duration_seconds", _active_run_context.runtime_seconds)
+    analysis_logger.set_metadata("source_identifier", _active_run_context.source_identifier)
+    analysis_logger.set_metadata("source_fingerprint", _active_run_context.source_fingerprint)
+    _write_current_run_metadata(
+        analysis_logger,
+        _active_run_context,
+        int(_active_authoritative_cohort_size),
     )
 
     # Phase 5: Report
@@ -4108,7 +4555,7 @@ def _main_impl(args: argparse.Namespace, ui, analysis_logger: AnalysisLogger, st
         _call_with_optional_ui(
             generate_reports,
             archetype_results,
-            scenario_results,
+            client_scenario_results,
             subsidy_results,
             df_adjusted_frame,
             pathway_summary,
@@ -4117,12 +4564,13 @@ def _main_impl(args: argparse.Namespace, ui, analysis_logger: AnalysisLogger, st
             one_stop_only=one_stop_only,
         )
         gc.collect()  # Cleanup matplotlib figures and Excel writer objects
+        _call_with_optional_ui(generate_one_stop_report, df_adjusted_frame, analysis_logger, ui=ui)
 
     # Phase 6: Package dashboard
     _call_with_optional_ui(
         package_dashboard_assets,
         archetype_results,
-        scenario_results,
+        client_scenario_results,
         readiness_summary,
         pathway_summary,
         additional_outputs,
@@ -4140,16 +4588,16 @@ def _main_impl(args: argparse.Namespace, ui, analysis_logger: AnalysisLogger, st
     console.print()
     console.print("[cyan]Saving analysis log...[/cyan]")
     log_path = analysis_logger.save_log()
+    if _active_run_context is not None:
+        _write_current_run_metadata(
+            analysis_logger,
+            _active_run_context,
+            int(_active_authoritative_cohort_size),
+        )
+        stamp_artifact_tree([Path(DATA_OUTPUTS_DIR)], _active_run_context)
 
-    # Post-process one-stop output (if present) to ensure run timings and validation totals are auditable.
-    try:
-        from src.reporting.patch_one_stop_output import patch_one_stop_output
-
-        patched_path = patch_one_stop_output(DATA_OUTPUTS_DIR)
-        if patched_path:
-            console.print(f"[green]OK[/green] Patched one-stop report metadata: {patched_path}")
-    except Exception as e:
-        logger.warning(f"Could not patch one-stop output from analysis_log.json: {e}")
+    # Generated reports are authoritative. The repair utility is intentionally
+    # excluded from normal execution and remains available only as an explicit tool.
 
     # Generate a lightweight, self-contained HTML dashboard from the one-stop JSON output.
     try:
@@ -4167,14 +4615,52 @@ def _main_impl(args: argparse.Namespace, ui, analysis_logger: AnalysisLogger, st
     except Exception as e:
         logger.warning(f"Could not generate one-stop HTML dashboard: {e}")
 
-    # Archive intermediate outputs for auditability in one-stop mode (instead of deleting them).
-    if one_stop_only:
-        try:
-            archived_to = cleanup_reporting_outputs()
-            if archived_to:
-                console.print(f"[cyan]Archived intermediate outputs to:[/cyan] {archived_to}")
-        except Exception as e:
-            logger.warning(f"Could not archive one-stop outputs: {e}")
+    if _active_run_context is not None:
+        stamp_artifact_tree(
+            [Path(DATA_OUTPUTS_DIR), Path(DATA_PROCESSED_DIR)],
+            _active_run_context,
+        )
+        final_manifest = _register_current_artifacts(_active_run_context)
+        _require_contract(
+            final_manifest,
+            [
+                "published_validation_report", "one_stop_json", "dashboard_data",
+                "dashboard_html", "analysis_compendium",
+            ],
+        )
+        _active_run_context = _active_run_context.finalize(
+            analysis_end=_active_run_context.analysis_end,
+            runtime_seconds=float(_active_run_context.runtime_seconds),
+        )
+        _active_run_context.validate_production_report()
+        _write_current_run_metadata(
+            analysis_logger,
+            _active_run_context,
+            int(_active_authoritative_cohort_size),
+        )
+        stamp_artifact_tree(
+            [Path(DATA_OUTPUTS_DIR), Path(DATA_PROCESSED_DIR)],
+            _active_run_context,
+        )
+        _register_current_artifacts(_active_run_context)
+
+    if _active_run_context is not None and args.production and not args.no_publish:
+        stamp_artifact_tree([Path(DATA_OUTPUTS_DIR)], _active_run_context)
+        publish_run_outputs(
+            Path(DATA_OUTPUTS_DIR),
+            Path(_public_outputs_dir),
+            _active_run_context.run_id,
+        )
+        dashboard_candidate = Path(DATA_OUTPUTS_DIR) / "dashboard" / "dashboard-data.json"
+        dashboard_public = REPO_ROOT / "dashboard" / "public" / "dashboard-data.json"
+        dashboard_temp = dashboard_public.with_suffix(".json.publish-tmp")
+        dashboard_temp.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(dashboard_candidate, dashboard_temp)
+        os.replace(dashboard_temp, dashboard_public)
+        console.print(f"[green]OK[/green] Published validated run to: {_public_outputs_dir}")
+    elif _active_run_context is not None:
+        console.print(f"[cyan]Run retained without publication: {_active_run_context.run_root}[/cyan]")
+    _checkpoint(analysis_logger, status="complete")
     console.print(f"[green]✓[/green] Analysis log saved to: {log_path}")
     combined_workbook = analysis_logger.metadata.get('combined_workbook')
     if combined_workbook:

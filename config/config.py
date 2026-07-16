@@ -61,12 +61,38 @@ def get_data_quality_thresholds() -> Dict[str, Any]:
 def get_scenario_definitions() -> Dict[str, Any]:
     """Get scenario definitions from config."""
     config = load_config()
-    return config['scenarios']
+    scenarios = config['scenarios']
+    return scenarios.get(
+        'definitions',
+        {key: value for key, value in scenarios.items() if key not in {'calculate', 'publish'}},
+    )
+
+
+def get_scenario_policy() -> Dict[str, Any]:
+    """Return validated calculate/publish scenario lists."""
+    scenarios = load_config().get('scenarios', {})
+    definitions = scenarios.get(
+        'definitions',
+        {key: value for key, value in scenarios.items() if key not in {'calculate', 'publish'}},
+    )
+    calculate = scenarios.get('calculate', list(definitions))
+    publish = scenarios.get(
+        'publish',
+        ['fabric_only', 'minimum_fabric_hp_ready', 'heat_pump', 'heat_network', 'hybrid'],
+    )
+    if len(calculate) != len(set(calculate)) or len(publish) != len(set(publish)):
+        raise ValueError("Scenario calculate/publish lists must contain unique IDs")
+    unknown = (set(calculate) | set(publish)).difference(definitions)
+    if unknown:
+        raise ValueError(f"Scenario IDs lack definitions: {sorted(unknown)}")
+    if not set(publish).issubset(calculate):
+        raise ValueError("Scenario publish list must be a subset of calculate")
+    return {'calculate': calculate, 'publish': publish, 'definitions': definitions}
 
 
 def get_scenario_label_map() -> Dict[str, str]:
     """Return a mapping of scenario IDs to human-readable labels."""
-    scenarios = load_config().get('scenarios', {})
+    scenarios = get_scenario_definitions()
     return {
         scenario_id: (
             scenario_def.get('name', scenario_id)

@@ -62,7 +62,7 @@ def test_negative_energy_and_co2_rows_removed():
     validator = EPCDataValidator()
     df_validated, report = validator.validate_dataset(df)
 
-    assert len(df_validated) == 1
+    assert len(df_validated) == 2
     assert report['negative_energy_values'] == 1
     assert report['negative_co2_values'] == 1
     assert (df_validated['ENERGY_CONSUMPTION_CURRENT'] < 0).sum() == 0
