@@ -66,6 +66,7 @@ def test_hybrid_routing_and_costs(monkeypatch, scenario_modeler_factory):
         'TOTAL_FLOOR_AREA': 80,
         'ENERGY_CONSUMPTION_CURRENT': 150,
         'wall_type': 'Solid',
+        'glazing_type': 'unknown',
         'ashp_ready': True,
         'ashp_projected_ready': True,
         'hn_ready': True
@@ -76,6 +77,7 @@ def test_hybrid_routing_and_costs(monkeypatch, scenario_modeler_factory):
         'TOTAL_FLOOR_AREA': 80,
         'ENERGY_CONSUMPTION_CURRENT': 150,
         'wall_type': 'Cavity',
+        'glazing_type': 'unknown',
         'ashp_ready': True,
         'ashp_projected_ready': True,
         'hn_ready': False
@@ -134,7 +136,7 @@ def test_hn_ready_generation_drives_pathway(monkeypatch, scenario_modeler_factor
     modeler = scenario_modeler_factory(ready_postcodes={'AB1'})
 
     df = pd.DataFrame([
-        {'LMK_KEY': 'AB_PROP', 'POSTCODE': 'AB1', 'TOTAL_FLOOR_AREA': 70, 'ENERGY_CONSUMPTION_CURRENT': 140},
+        {'LMK_KEY': 'AB_PROP', 'POSTCODE': 'AB1', 'TOTAL_FLOOR_AREA': 70, 'ENERGY_CONSUMPTION_CURRENT': 140, 'glazing_type': 'unknown'},
     ])
 
     processed = modeler._preprocess_ashp_readiness(df)

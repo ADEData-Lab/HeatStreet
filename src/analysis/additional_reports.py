@@ -27,7 +27,8 @@ class AdditionalReports:
         self,
         df: pd.DataFrame,
         street_name: str = "Shakespeare Crescent",
-        output_path: Optional[Path] = None
+        output_path: Optional[Path] = None,
+        summary_path: Optional[Path] = None,
     ) -> Tuple[pd.DataFrame, Dict]:
         """
         Extract and analyze data for a specific case street.
@@ -51,6 +52,14 @@ class AdditionalReports:
 
         if len(case_street_df) == 0:
             logger.warning(f"No properties found on {street_name}")
+            if output_path:
+                output_path.parent.mkdir(parents=True, exist_ok=True)
+                df.head(0).to_csv(output_path, index=False)
+            if summary_path:
+                summary_path.write_text(
+                    f"CASE STREET SUMMARY\nStreet: {street_name}\nProperty Count: 0\n",
+                    encoding="utf-8",
+                )
             return pd.DataFrame(), {}
 
         logger.info(f"Found {len(case_street_df):,} properties on {street_name}")
@@ -64,8 +73,8 @@ class AdditionalReports:
             logger.info(f"Saved case street extract to {output_path}")
 
             # Save summary
-            summary_path = output_path.parent / f"{output_path.stem}_summary.txt"
-            self._save_case_street_summary(summary, summary_path)
+            resolved_summary_path = summary_path or output_path.parent / f"{output_path.stem}_summary.txt"
+            self._save_case_street_summary(summary, resolved_summary_path)
 
         return case_street_df, summary
 
@@ -168,8 +177,11 @@ class AdditionalReports:
         """
         logger.info("Generating borough-level breakdown...")
 
+        id_col = self._first_available_column(
+            df, ['CERTIFICATE_NUMBER', 'LMK_KEY']
+        )
         borough_breakdown = df.groupby('LOCAL_AUTHORITY').agg({
-            'LMK_KEY': 'count',  # Property count
+            id_col: 'count',  # Property count
             'CURRENT_ENERGY_EFFICIENCY': 'mean',
             'ENERGY_CONSUMPTION_CURRENT': 'mean',
             'CO2_EMISSIONS_CURRENT': 'mean',
@@ -193,6 +205,7 @@ class AdditionalReports:
 
         # Save if path provided
         if output_path:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
             borough_breakdown.to_csv(output_path)
             logger.info(f"Saved borough breakdown to {output_path}")
 
@@ -255,7 +268,7 @@ class AdditionalReports:
             df,
             ['energy_kwh_per_m2_year', 'ENERGY_CONSUMPTION_CURRENT']
         )
-        id_col = self._first_available_column(df, ['LMK_KEY'])
+        id_col = self._first_available_column(df, ['CERTIFICATE_NUMBER', 'LMK_KEY'])
 
         borough_df = df.copy()
         borough_df[borough_col] = borough_df[borough_col].fillna('Unknown').astype(str).str.strip()
@@ -678,13 +691,24 @@ class AdditionalReports:
         report_lines.append("KNOWN LIMITATIONS")
         report_lines.append("-" * 80)
 
+        controls_coverage = (
+            df_validated['heating_controls_description'].astype('string').str.strip().replace('', pd.NA).notna().mean() * 100
+            if 'heating_controls_description' in df_validated.columns and len(df_validated)
+            else 0.0
+        )
+        controls_limitation = (
+            f"3. Heating controls data incomplete for the majority of records "
+            f"({controls_coverage:.1f}% canonical coverage)"
+            if controls_coverage < 50
+            else f"3. Heating controls data has {controls_coverage:.1f}% canonical coverage; "
+                 "remaining missing records are retained as unknown"
+        )
         known_limitations = [
             "1. EPC measurement error: ±8 SAP points at lower ratings, ±2.4 at higher "
             "ratings (Crawley et al., 2019)",
             "2. Performance gap: EPCs systematically overpredict energy consumption by "
             "8-48% depending on band (Few et al., 2023). Prebound effect adjustment applied.",
-            "3. Heating controls data incomplete for majority of records - field often missing "
-            "or non-standardised in EPC database",
+            controls_limitation,
             "4. Emitter sizing not recorded in EPC data - heat pump radiator upgrade needs "
             "estimated from fabric performance",
             "5. Conservation area status not identified in EPC data - some wall insulation "

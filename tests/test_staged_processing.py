@@ -1,6 +1,8 @@
 from pathlib import Path
 
 import pandas as pd
+import pyarrow as pa
+import pyarrow.dataset as ds
 
 import run_analysis
 from src.utils.staged_dataset import (
@@ -86,6 +88,7 @@ def test_staged_validation_and_adjustment_create_parquet_outputs(tmp_path):
                 "ENERGY_CONSUMPTION_CURRENT": 200,
                 "CO2_EMISSIONS_CURRENT": 4.5,
                 "WALLS_DESCRIPTION": "Solid brick, as built, no insulation",
+                "FLOOR_DESCRIPTION": "Suspended timber, insulated",
                 "MAINHEAT_DESCRIPTION": "Boiler and radiators, mains gas",
             },
             {
@@ -101,6 +104,39 @@ def test_staged_validation_and_adjustment_create_parquet_outputs(tmp_path):
                 "ENERGY_CONSUMPTION_CURRENT": 220,
                 "CO2_EMISSIONS_CURRENT": 5.0,
                 "WALLS_DESCRIPTION": "Solid brick, as built, no insulation",
+                "FLOOR_DESCRIPTION": "Suspended timber, insulated",
+                "MAINHEAT_DESCRIPTION": "Boiler and radiators, mains gas",
+            },
+            {
+                "UPRN": "2",
+                "LODGEMENT_DATE": "2024-01-01",
+                "POSTCODE": "SW1A 1AA",
+                "PROPERTY_TYPE": "House",
+                "BUILT_FORM": "Mid-Terrace",
+                "CONSTRUCTION_AGE_BAND": "England and Wales: 1900-1929",
+                "CURRENT_ENERGY_RATING": "D",
+                "CURRENT_ENERGY_EFFICIENCY": 60,
+                "TOTAL_FLOOR_AREA": 100,
+                "ENERGY_CONSUMPTION_CURRENT": 200,
+                "CO2_EMISSIONS_CURRENT": 4.5,
+                "WALLS_DESCRIPTION": "Solid brick, as built, no insulation",
+                "FLOOR_DESCRIPTION": "Solid floor, no insulation",
+                "MAINHEAT_DESCRIPTION": "Boiler and radiators, mains gas",
+            },
+            {
+                "UPRN": "3",
+                "LODGEMENT_DATE": "2024-01-01",
+                "POSTCODE": "SW1A 1AA",
+                "PROPERTY_TYPE": "House",
+                "BUILT_FORM": "Mid-Terrace",
+                "CONSTRUCTION_AGE_BAND": "England and Wales: 1900-1929",
+                "CURRENT_ENERGY_RATING": "D",
+                "CURRENT_ENERGY_EFFICIENCY": 60,
+                "TOTAL_FLOOR_AREA": 100,
+                "ENERGY_CONSUMPTION_CURRENT": 200,
+                "CO2_EMISSIONS_CURRENT": 4.5,
+                "WALLS_DESCRIPTION": "Solid brick, as built, no insulation",
+                "FLOOR_DESCRIPTION": None,
                 "MAINHEAT_DESCRIPTION": "Boiler and radiators, mains gas",
             },
         ]
@@ -119,25 +155,41 @@ def test_staged_validation_and_adjustment_create_parquet_outputs(tmp_path):
     validated_dataset, report = validate_staged_dataset(
         raw_dataset,
         tmp_path / "validated.csv",
-        chunk_size=1,
+        chunk_size=10,
     )
 
     assert validated_dataset.parquet_path.exists()
     assert validated_dataset.csv_path.exists()
-    assert validated_dataset.row_count == 1
+    assert validated_dataset.row_count == 3
     assert report["duplicates_removed"] == 1
+    validated_floor = pd.read_parquet(validated_dataset.parquet_path)["floor_insulation_present"]
+    assert ds.dataset(validated_dataset.parquet_path).schema.field(
+        "floor_insulation_present"
+    ).type == pa.bool_()
+    assert int((validated_floor == True).sum()) == 1  # noqa: E712
+    assert int((validated_floor == False).sum()) == 1  # noqa: E712
+    assert int(validated_floor.isna().sum()) == 1
 
     adjusted_dataset, summary = apply_adjustments_staged_dataset(
         validated_dataset,
         tmp_path / "adjusted.csv",
-        chunk_size=1,
+        chunk_size=10,
     )
 
     assert adjusted_dataset.parquet_path.exists()
     assert adjusted_dataset.csv_path.exists()
-    assert adjusted_dataset.row_count == 1
+    assert adjusted_dataset.row_count == 3
     assert summary["prebound_adjustment"]["applied"] is True
     assert summary["flow_temperature"]["applied"] is True
+    adjusted_floor = pd.read_parquet(adjusted_dataset.parquet_path)["floor_insulation_present"]
+    assert ds.dataset(adjusted_dataset.parquet_path).schema.field(
+        "floor_insulation_present"
+    ).type == pa.bool_()
+    pd.testing.assert_series_equal(
+        adjusted_floor.reset_index(drop=True),
+        validated_floor.reset_index(drop=True),
+        check_names=False,
+    )
 
 
 def test_noninteractive_staged_download_validate_adjust_smoke(monkeypatch, tmp_path):

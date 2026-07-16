@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, Iterable, Iterator, Optional
 
+import numpy as np
 import pandas as pd
 import pyarrow.dataset as ds
 from loguru import logger
@@ -153,7 +154,16 @@ def prepare_dataframe_for_parquet(df: pd.DataFrame) -> pd.DataFrame:
         if pd.api.types.is_categorical_dtype(df_out[column]):
             df_out[column] = df_out[column].astype(str)
         elif df_out[column].dtype == "object":
-            df_out[column] = df_out[column].astype(str)
+            non_null = df_out[column].dropna()
+            if not non_null.empty and non_null.map(
+                lambda value: isinstance(value, (bool, np.bool_))
+            ).all():
+                # PyArrow returns nullable Boolean columns as object Series when
+                # converting batches to pandas. Preserve their logical type on
+                # the next staged write instead of turning True/False into text.
+                df_out[column] = df_out[column].astype("boolean")
+            else:
+                df_out[column] = df_out[column].astype(str)
     return df_out
 
 

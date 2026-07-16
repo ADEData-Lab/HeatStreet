@@ -9,6 +9,7 @@ import uuid
 from pathlib import Path
 
 import pandas as pd
+import pytest
 
 import run_analysis
 from src.acquisition.epc_api_downloader import EPCDownloadError, EPCRequestContext
@@ -354,13 +355,15 @@ def test_main_returns_non_zero_when_phase_one_has_no_data(monkeypatch):
     assert any("no data available" in message.lower() for message in fake_console.messages)
 
 
-def test_ensure_hp_hn_comparison_outputs_caches_failed_rebuild(monkeypatch):
+def test_ensure_hp_hn_comparison_outputs_raises_both_attempt_failures(monkeypatch):
     fake_console = FakeConsole()
     temp_root = Path("temp_verify_dir")
     temp_root.mkdir(exist_ok=True)
     test_root = temp_root / f"ensure_hp_hn_{uuid.uuid4().hex}"
     test_root.mkdir(parents=True, exist_ok=True)
     outputs_dir = test_root / "data" / "outputs"
+    processed_dir = test_root / "data" / "processed"
+    processed_dir.mkdir(parents=True, exist_ok=True)
     call_counts = {
         "pathway_modeler_inits": 0,
         "model_all_pathways": 0,
@@ -394,25 +397,22 @@ def test_ensure_hp_hn_comparison_outputs_caches_failed_rebuild(monkeypatch):
     monkeypatch.setattr(run_analysis, "console", fake_console)
     monkeypatch.setattr(run_analysis, "logger", fake_logger)
     monkeypatch.setattr(run_analysis, "DATA_OUTPUTS_DIR", outputs_dir)
+    monkeypatch.setattr(run_analysis, "DATA_PROCESSED_DIR", processed_dir)
     monkeypatch.setattr(run_analysis, "PathwayModeler", FakePathwayModeler)
     monkeypatch.setattr(run_analysis, "_hp_hn_comparison_outputs_cache", None)
 
     df = pd.DataFrame({"value": [1]})
+    df.to_parquet(processed_dir / "epc_london_adjusted.parquet", index=False)
 
-    first = run_analysis.ensure_hp_hn_comparison_outputs(df=df)
-    second = run_analysis.ensure_hp_hn_comparison_outputs(df=df)
-    third = run_analysis.ensure_hp_hn_comparison_outputs(df=df)
+    with pytest.raises(run_analysis.DiagnosticPathwayPhaseError) as caught:
+        run_analysis.ensure_hp_hn_comparison_outputs(df=df)
 
-    assert first is None
-    assert second is None
-    assert third is None
-    assert call_counts["pathway_modeler_inits"] == 1
-    assert call_counts["model_all_pathways"] == 1
-    assert fake_logger.exception_calls == 1
-
-    output = "\n".join(fake_console.messages).lower()
-    assert output.count("attempting to rebuild hp vs hn comparison outputs") == 1
-    assert output.count("could not be regenerated from pathway modeling") == 1
+    assert call_counts["pathway_modeler_inits"] == 2
+    assert call_counts["model_all_pathways"] == 2
+    assert fake_logger.exception_calls == 2
+    assert len(caught.value.failures) == 2
+    assert all(item["message"] == "baseline pathway rebuild failed" for item in caught.value.failures)
+    assert not list(outputs_dir.glob(".diagnostic-candidate-*"))
 
 
 def test_validate_data_writes_normalized_report_for_dataset_reference(monkeypatch, tmp_path):
@@ -568,6 +568,11 @@ def test_main_completes_staged_pipeline_without_dataframe_assumptions(monkeypatc
     monkeypatch.setattr(run_analysis, "validate_data", fake_validate_data)
     monkeypatch.setattr(run_analysis, "apply_methodological_adjustments", fake_apply_methodological_adjustments)
     monkeypatch.setattr(run_analysis, "analyze_archetype", lambda df, analysis_logger=None: {"rows": len(df)})
+    monkeypatch.setattr(
+        run_analysis,
+        "ensure_hp_hn_comparison_outputs",
+        lambda df=None, analysis_logger=None: {"comparison_csv": tmp_path / "comparison.csv"},
+    )
     monkeypatch.setattr(run_analysis, "model_scenarios", lambda df, analysis_logger=None: ({"heat_pump": {}}, {}))
     monkeypatch.setattr(
         run_analysis,
@@ -583,6 +588,7 @@ def test_main_completes_staged_pipeline_without_dataframe_assumptions(monkeypatc
     monkeypatch.setattr(run_analysis, "generate_reports", lambda *args, **kwargs: None)
     monkeypatch.setattr(run_analysis, "generate_one_stop_report", lambda *args, **kwargs: None)
     monkeypatch.setattr(run_analysis, "package_dashboard_assets", lambda *args, **kwargs: None)
+    monkeypatch.setattr(run_analysis, "_require_contract", lambda *args, **kwargs: None)
     monkeypatch.setattr(run_analysis, "cleanup_reporting_outputs", lambda: None)
     monkeypatch.setitem(
         sys.modules,

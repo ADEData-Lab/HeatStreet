@@ -71,7 +71,11 @@ def test_run_conda_only_prints_success_footer_on_zero_exit():
     assert "$analysisExitCode = $LASTEXITCODE" in text
     assert "if ($analysisExitCode -eq 0)" in text
     assert 'Write-Host "[OK] Analysis complete"' in text
-    assert 'Write-Host "[X] Analysis failed. Check the errors above."' in text
+    assert 'Write-Host "[X] Analysis failed."' in text
+    assert "analysis_checkpoint.json" in text
+    assert 'Write-Host "    Failed phase: $($failure.failed_phase)"' in text
+    assert 'Write-Host "    Error: $($failure.exception_message)"' in text
+    assert 'Write-Host "    Checkpoint: $($checkpoint.FullName)"' in text
     assert "exit $analysisExitCode" in text
 
 

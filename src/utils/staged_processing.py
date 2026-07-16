@@ -95,6 +95,7 @@ def validate_staged_dataset(
     output_csv_path: Path,
     *,
     chunk_size: int = 100_000,
+    strict_schema_conflicts: bool = False,
 ) -> Tuple[DatasetReference, Dict]:
     """
     Validate a staged raw dataset in chunked passes and persist a Parquet-first output.
@@ -106,6 +107,15 @@ def validate_staged_dataset(
     logger.info("Chosen validation attempt directory: {}", attempt_dir.resolve())
 
     aggregated_report = defaultdict(int)
+    heating_schema = {
+        "canonical_field": "heating_controls_description",
+        "alias_precedence": list(EPCDataValidator.HEATING_CONTROL_ALIASES),
+        "available_aliases": set(),
+        "selected_source_counts": defaultdict(int),
+        "conflict_count": 0,
+        "complete_count": 0,
+        "missing_count": 0,
+    }
     part_index = 0
 
     logger.info(
@@ -116,7 +126,7 @@ def validate_staged_dataset(
     )
 
     for chunk in iter_parquet_batches(input_dataset.parquet_path, batch_size=chunk_size):
-        validator = EPCDataValidator()
+        validator = EPCDataValidator(strict_schema_conflicts=strict_schema_conflicts)
 
         rows_before = len(chunk)
         chunk = validator._standardize_column_names(chunk)
@@ -135,6 +145,12 @@ def validate_staged_dataset(
 
         for key in VALIDATION_REPORT_KEYS:
             aggregated_report[key] += int(chunk_report.get(key, 0))
+        chunk_schema = chunk_report.get("heating_controls_schema", {})
+        heating_schema["available_aliases"].update(chunk_schema.get("available_aliases", []))
+        for alias, count in chunk_schema.get("selected_source_counts", {}).items():
+            heating_schema["selected_source_counts"][alias] += int(count)
+        for key in ("conflict_count", "complete_count", "missing_count"):
+            heating_schema[key] += int(chunk_schema.get(key, 0))
 
         write_parquet_part(chunk, staging_dir, part_index, prefix="validated")
         part_index += 1
@@ -168,6 +184,14 @@ def validate_staged_dataset(
         )
         write_dataset_manifest(output_dataset, extra={"validation_report": dict(aggregated_report)})
         return output_dataset, dict(aggregated_report)
+
+    heating_schema["available_aliases"] = sorted(heating_schema["available_aliases"])
+    heating_schema["selected_source_counts"] = dict(heating_schema["selected_source_counts"])
+    total_schema_rows = heating_schema["complete_count"] + heating_schema["missing_count"]
+    heating_schema["completeness_pct"] = (
+        heating_schema["complete_count"] / total_schema_rows * 100 if total_schema_rows else 0.0
+    )
+    aggregated_report["heating_controls_schema"] = heating_schema
 
     output_parquet_path = output_csv_path.with_suffix(".parquet")
     copy_query_to_parquet(_dedupe_query_for_dataset(staging_dir), output_parquet_path)

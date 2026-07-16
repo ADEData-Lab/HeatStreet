@@ -925,6 +925,15 @@ class PathwayModeler:
                 'pathway_id': pathway_id,
                 'pathway_name': pathway_name,
                 'heat_source': pathway.heat_source if pathway else '',
+                'model_family': 'full_fabric_pathway',
+                'model_purpose': 'diagnostic and distributional pathway assessment',
+                'fabric_package': pathway_id,
+                'heating_technology': pathway.heat_source if pathway else '',
+                'cost_boundary': 'property pathway measures; differs from stock scenario boundary',
+                'network_backbone_included': False,
+                'grid_reinforcement_included': False,
+                'intended_reporting_use': 'diagnostic_distributional_only',
+                'headline_reporting_eligible': False,
                 'n_properties': len(pathway_results),
 
                 # Costs

@@ -1,11 +1,7 @@
 import { useEffect, useState } from 'react';
-import { defaultDashboardData } from './dashboardData';
-
-const DEFAULT_SOURCE = 'fallback';
-
 export default function useDashboardData() {
-  const [data, setData] = useState(defaultDashboardData);
-  const [status, setStatus] = useState({ loading: true, error: null, source: DEFAULT_SOURCE });
+  const [data, setData] = useState(null);
+  const [status, setStatus] = useState({ loading: true, error: null, source: null });
 
   useEffect(() => {
     const controller = new AbortController();
@@ -22,13 +18,15 @@ export default function useDashboardData() {
         }
 
         const payload = await response.json();
-        setData({ ...defaultDashboardData, ...payload });
+        if (!payload?.runMetadata?.run_id || !payload?.runMetadata?.dataset_fingerprint) {
+          throw new Error('Dashboard payload lacks mandatory run provenance');
+        }
+        setData(payload);
         setStatus({ loading: false, error: null, source: 'analysis' });
       } catch (err) {
         if (err.name === 'AbortError') return;
-        // Fall back to bundled defaults to keep the UI usable
-        setData(defaultDashboardData);
-        setStatus({ loading: false, error: err.message, source: DEFAULT_SOURCE });
+        setData(null);
+        setStatus({ loading: false, error: err.message, source: 'error' });
       }
     }
 

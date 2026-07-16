@@ -18,6 +18,33 @@ from src.modeling.costing import CostCalculator
 from src.analysis.methodological_adjustments import MethodologicalAdjustments
 
 
+def _normalize_canonical_boolean(series: pd.Series, field_name: str) -> pd.Series:
+    """Return a nullable Boolean Series, accepting legacy Parquet text values."""
+    normalized = []
+    invalid_values = []
+
+    for value in series:
+        if pd.isna(value):
+            normalized.append(pd.NA)
+        elif isinstance(value, (bool, np.bool_)):
+            normalized.append(bool(value))
+        elif isinstance(value, str) and value.strip().casefold() in {"true", "false"}:
+            normalized.append(value.strip().casefold() == "true")
+        else:
+            normalized.append(pd.NA)
+            invalid_values.append(repr(value))
+
+    if invalid_values:
+        examples = ", ".join(dict.fromkeys(invalid_values[:5]))
+        raise ValueError(
+            f"Retrofit readiness schema contract violation for '{field_name}': "
+            "expected Boolean values, nulls, or legacy 'True'/'False' strings; "
+            f"unexpected value(s): {examples}"
+        )
+
+    return pd.Series(normalized, index=series.index, dtype="boolean", name=series.name)
+
+
 class RetrofitReadinessAnalyzer:
     """
     Analyzes property readiness for heat pump installation.
@@ -158,7 +185,19 @@ class RetrofitReadinessAnalyzer:
         """
         logger.info("Assessing heat pump readiness...")
 
+        required_canonical = {
+            'wall_type', 'wall_insulation_status', 'wall_insulated',
+            'floor_insulation', 'floor_insulation_present', 'glazing_type',
+        }
+        missing = required_canonical.difference(df.columns)
+        if missing:
+            raise ValueError(f"Retrofit readiness requires canonical EPC fields: {sorted(missing)}")
+
         df_readiness = df.copy()
+        df_readiness['floor_insulation_present'] = _normalize_canonical_boolean(
+            df_readiness['floor_insulation_present'],
+            'floor_insulation_present',
+        )
 
         # Calculate current heat demand (kWh/m²/year)
         df_readiness['heat_demand_kwh_m2'] = self._calculate_heat_demand(df_readiness)
@@ -299,46 +338,11 @@ class RetrofitReadinessAnalyzer:
         """
         Identify properties needing wall insulation.
 
-        Returns True if:
-        1. wall_insulated is False/NaN (from data_validator), OR
-        2. WALLS_DESCRIPTION contains 'no insulation'/'uninsulated', OR
-        3. WALLS_ENERGY_EFF is 'Poor' or 'Very Poor'
-
-        This function checks multiple indicators to avoid false negatives.
+        Unknown canonical values are treated conservatively as needing work.
         """
-        needs_wall = pd.Series(False, index=df.index)
-
-        # Primary check: wall_insulated boolean field (created by data_validator.py)
-        if 'wall_insulated' in df.columns:
-            # Need insulation if walls are uninsulated (False) or unknown (NaN)
-            # Convert boolean to proper mask, handling NaN values
-            wall_insulated = df['wall_insulated'].fillna(False)
-            needs_wall = ~wall_insulated
-
-            logger.debug(f"Wall insulation check from wall_insulated: {needs_wall.sum():,} need insulation")
-
-        # Secondary check: WALLS_DESCRIPTION text
-        if 'WALLS_DESCRIPTION' in df.columns:
-            walls_desc = df['WALLS_DESCRIPTION'].fillna('').str.lower()
-
-            # Check for explicit "no insulation" or similar
-            no_insulation_mask = (
-                walls_desc.str.contains('no insulation', na=False) |
-                walls_desc.str.contains('uninsulated', na=False) |
-                (walls_desc.str.contains('solid', na=False) & ~walls_desc.str.contains('insulation|insulated', na=False))
-            )
-
-            # Combine with primary check (OR logic - either indicates need)
-            needs_wall = needs_wall | no_insulation_mask
-
-            logger.debug(f"Wall insulation check from WALLS_DESCRIPTION: {no_insulation_mask.sum():,} need insulation")
-
-        # Tertiary check: WALLS_ENERGY_EFF efficiency rating
-        if 'WALLS_ENERGY_EFF' in df.columns:
-            poor_walls = df['WALLS_ENERGY_EFF'].isin(['Very Poor', 'very poor', 'Poor', 'poor'])
-            needs_wall = needs_wall | poor_walls
-
-            logger.debug(f"Wall insulation check from WALLS_ENERGY_EFF: {poor_walls.sum():,} have poor efficiency")
+        if 'wall_insulated' not in df.columns:
+            raise ValueError("Retrofit readiness requires canonical wall_insulated")
+        needs_wall = ~df['wall_insulated'].astype('boolean').fillna(False)
 
         # Log summary
         total_needs = needs_wall.sum()
@@ -370,7 +374,7 @@ class RetrofitReadinessAnalyzer:
     def _needs_glazing_upgrade(self, df: pd.DataFrame) -> pd.Series:
         """Identify properties needing glazing upgrade."""
         if 'glazing_type' not in df.columns:
-            return pd.Series(False, index=df.index)
+            raise ValueError("Retrofit readiness requires canonical glazing_type")
 
         # Need upgrade if single glazed
         needs_glazing = df['glazing_type'].str.contains('single', case=False, na=False)
@@ -471,14 +475,10 @@ class RetrofitReadinessAnalyzer:
         if 'glazing_type' in df.columns:
             single_glazed = df['glazing_type'].str.contains('Single|single', na=False)
             deficiency_scores += single_glazed.astype(float) * 1.0
-        elif 'WINDOWS_DESCRIPTION' in df.columns:
-            single_glazed = df['WINDOWS_DESCRIPTION'].str.contains('single', case=False, na=False)
-            deficiency_scores += single_glazed.astype(float) * 1.0
-
         # Floor insulation check
-        if 'FLOOR_ENERGY_EFF' in df.columns:
-            poor_floor = df['FLOOR_ENERGY_EFF'].isin(['Very Poor', 'very poor', 'Poor', 'poor'])
-            deficiency_scores += poor_floor.astype(float) * 0.5
+        if 'floor_insulation_present' in df.columns:
+            floor_needs_work = ~df['floor_insulation_present'].astype('boolean').fillna(False)
+            deficiency_scores += floor_needs_work.astype(float) * 0.5
 
         # SAP score as proxy for overall fabric performance
         if 'CURRENT_ENERGY_EFFICIENCY' in df.columns:
@@ -700,7 +700,13 @@ class RetrofitReadinessAnalyzer:
 
         return summary
 
-    def save_readiness_results(self, df_readiness: pd.DataFrame, summary: Dict, output_path: Optional[Path] = None):
+    def save_readiness_results(
+        self,
+        df_readiness: pd.DataFrame,
+        summary: Dict,
+        output_path: Optional[Path] = None,
+        summary_path: Optional[Path] = None,
+    ):
         """Save readiness analysis results."""
         if output_path is None:
             output_path = DATA_OUTPUTS_DIR / "retrofit_readiness_analysis.csv"
@@ -710,7 +716,8 @@ class RetrofitReadinessAnalyzer:
         logger.info(f"✓ Saved readiness analysis to {output_path}")
 
         # Save summary report
-        summary_path = DATA_OUTPUTS_DIR / "reports" / "retrofit_readiness_summary.txt"
+        if summary_path is None:
+            summary_path = DATA_OUTPUTS_DIR / "reports" / "retrofit_readiness_summary.txt"
         summary_path.parent.mkdir(parents=True, exist_ok=True)
 
         with open(summary_path, 'w', encoding='utf-8') as f:

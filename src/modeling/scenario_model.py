@@ -16,12 +16,14 @@ import multiprocessing
 import os
 import gc
 import time
+import tempfile
 
 import sys
 sys.path.append(str(Path(__file__).parent.parent.parent))
 from config.config import (
     load_config,
     get_scenario_definitions,
+    get_scenario_policy,
     get_cost_assumptions,
     get_cost_rules,
     get_analysis_horizon_years,
@@ -594,10 +596,32 @@ class ScenarioModeler:
     Models different decarbonization pathways for the housing stock.
     """
 
-    def __init__(self):
+    def __init__(self, config: Optional[Dict[str, Any]] = None, output_dir: Optional[Path] = None):
         """Initialize the scenario modeler."""
-        self.config = load_config()
-        self.scenarios = get_scenario_definitions()
+        self.config = config or load_config()
+        if config is None:
+            self.scenarios = get_scenario_definitions()
+            policy = get_scenario_policy()
+        else:
+            configured_scenarios = self.config.get('scenarios', {})
+            self.scenarios = configured_scenarios.get(
+                'definitions',
+                {key: value for key, value in configured_scenarios.items() if key not in {'calculate', 'publish'}},
+            )
+            policy = {
+                'calculate': configured_scenarios.get('calculate', list(self.scenarios)),
+                'publish': configured_scenarios.get(
+                    'publish',
+                    ['fabric_only', 'minimum_fabric_hp_ready', 'heat_pump', 'heat_network', 'hybrid'],
+                ),
+            }
+        self.calculate_scenarios = policy['calculate']
+        self.publish_scenarios = policy['publish']
+        requested_output = Path(output_dir) if output_dir else DATA_OUTPUTS_DIR
+        if os.name == 'nt' and str(requested_output) == r'\tmp':
+            requested_output = Path(tempfile.gettempdir())
+        self.output_dir = requested_output
+        self.output_dir.mkdir(parents=True, exist_ok=True)
         self.costs = get_cost_assumptions()
         self.cost_rules = get_cost_rules()
         self.cost_calculator = CostCalculator(self.costs, self.cost_rules)
@@ -633,7 +657,7 @@ class ScenarioModeler:
         self.ashp_min_epc_band = eligibility_cfg.get('min_epc_band', 'C')
 
         # Fabric bundles derived from marginal benefit analysis
-        tipping_analyzer = FabricTippingPointAnalyzer(output_dir=DATA_OUTPUTS_DIR)
+        tipping_analyzer = FabricTippingPointAnalyzer(output_dir=self.output_dir)
         curve_df, _ = tipping_analyzer.run_analysis()
         self.fabric_bundles = tipping_analyzer.derive_fabric_bundles(
             curve_df,
@@ -729,7 +753,8 @@ class ScenarioModeler:
         df_baseline = self._ensure_adjusted_baseline(df)
         df_with_flags = self._preprocess_ashp_readiness(df_baseline)
 
-        for scenario_name, scenario_config in self.scenarios.items():
+        for scenario_name in self.calculate_scenarios:
+            scenario_config = self.scenarios[scenario_name]
             logger.info(f"\nModeling scenario: {scenario_name}")
             if progress_callback is not None:
                 try:
@@ -1938,6 +1963,19 @@ class ScenarioModeler:
             rows.append({
                 'scenario_id': scenario,
                 'scenario': scenario_label,
+                'model_family': 'stock_scenario',
+                'model_purpose': 'London stock intervention comparison',
+                'fabric_package': scenario,
+                'heating_technology': (
+                    'heat_pump' if scenario in ('heat_pump', 'minimum_fabric_hp_ready')
+                    else 'heat_network' if scenario == 'heat_network'
+                    else 'mixed' if scenario == 'hybrid' else 'retained_baseline'
+                ),
+                'cost_boundary': 'property retrofit and connection costs',
+                'network_backbone_included': False,
+                'grid_reinforcement_included': False,
+                'intended_reporting_use': 'headline stock scenario comparison',
+                'headline_reporting_eligible': scenario in self.publish_scenarios,
                 'total_properties': results.get('total_properties'),
                 'capital_cost_total': results.get('capital_cost_total'),
                 'capital_cost_per_property': results.get('capital_cost_per_property'),
@@ -2086,8 +2124,13 @@ class ScenarioModeler:
         summary_path: Optional[Path] = None
         if self.results:
             summary_df = self._build_summary_dataframe()
+            internal_summary_path = DATA_OUTPUTS_DIR / "internal_scenario_results.csv"
+            summary_df.to_csv(internal_summary_path, index=False)
             summary_path = DATA_OUTPUTS_DIR / "scenario_results_summary.csv"
-            summary_df.to_csv(summary_path, index=False)
+            published = summary_df[summary_df['scenario_id'].isin(self.publish_scenarios)].copy()
+            if published.empty:
+                raise RuntimeError("Configured client scenario summary is empty")
+            published.to_csv(summary_path, index=False)
             logger.info(f"Scenario summary saved to: {summary_path}")
 
         property_path: Optional[Path] = None

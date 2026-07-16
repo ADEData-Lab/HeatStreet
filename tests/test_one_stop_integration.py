@@ -9,7 +9,7 @@ from src.reporting.dashboard_data_builder import DashboardDataBuilder
 from src.reporting.one_stop_report import OneStopReportGenerator
 
 
-def test_model_scenarios_generates_comparisons_when_one_stop_only(monkeypatch):
+def test_model_scenarios_leaves_comparison_generation_to_pipeline_phase(monkeypatch):
     comparison_calls = []
     temp_root = Path("temp_verify_dir")
     temp_root.mkdir(exist_ok=True)
@@ -96,10 +96,10 @@ def test_model_scenarios_generates_comparisons_when_one_stop_only(monkeypatch):
 
     assert scenario_results["heat_pump"]["capital_cost_per_property"] == 10000
     assert subsidy_results == {"base": {"capital_cost_per_property": 10000}}
-    assert len(comparison_calls) == 1
+    assert len(comparison_calls) == 0
 
 
-def test_generate_one_stop_report_attempts_comparison_rebuild(monkeypatch, tmp_path):
+def test_generate_one_stop_report_does_not_rerun_diagnostic_phase(monkeypatch, tmp_path):
     rebuild_calls = []
 
     def fake_ensure(df=None, analysis_logger=None):
@@ -132,6 +132,8 @@ def test_generate_one_stop_report_attempts_comparison_rebuild(monkeypatch, tmp_p
             return output_path
 
     monkeypatch.chdir(tmp_path)
+    fake_ensure()
+    rebuild_calls.clear()
     monkeypatch.setattr(run_analysis, "ensure_hp_hn_comparison_outputs", fake_ensure)
 
     import src.reporting.one_stop_report as one_stop_report
@@ -141,10 +143,10 @@ def test_generate_one_stop_report_attempts_comparison_rebuild(monkeypatch, tmp_p
     output_path = run_analysis.generate_one_stop_report(pd.DataFrame({"value": [1]}))
 
     assert output_path.exists()
-    assert rebuild_calls == [True]
+    assert rebuild_calls == []
 
 
-def test_package_dashboard_assets_rebuilds_missing_comparison_for_dashboard(monkeypatch, tmp_path):
+def test_package_dashboard_assets_consumes_existing_diagnostic_comparison(monkeypatch, tmp_path):
     def fake_ensure(df=None, analysis_logger=None):
         comparison_dir = tmp_path / "data" / "outputs" / "comparisons"
         comparison_dir.mkdir(parents=True, exist_ok=True)
@@ -165,12 +167,14 @@ def test_package_dashboard_assets_rebuilds_missing_comparison_for_dashboard(monk
         return {"comparison_csv": comparison_path, "rebuilt": True}
 
     monkeypatch.chdir(tmp_path)
+    fake_ensure()
     monkeypatch.setattr(run_analysis, "ensure_hp_hn_comparison_outputs", fake_ensure)
+    monkeypatch.setattr(run_analysis, "DATA_OUTPUTS_DIR", tmp_path / "data" / "outputs")
 
     import src.reporting.dashboard_data_builder as dashboard_data_builder
 
     class LocalBuilder(dashboard_data_builder.DashboardDataBuilder):
-        def __init__(self):
+        def __init__(self, output_dir=None):
             super().__init__(output_dir=tmp_path / "data" / "outputs")
 
     monkeypatch.setattr(dashboard_data_builder, "DashboardDataBuilder", LocalBuilder)

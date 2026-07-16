@@ -288,7 +288,7 @@ try {
     Write-Section "========================================"
     Write-Host ""
 
-    python run_analysis.py
+    python run_analysis.py @args
     $analysisExitCode = $LASTEXITCODE
 
     if ($analysisExitCode -eq 0) {
@@ -297,7 +297,35 @@ try {
         Write-Host "    Check data\outputs\ for reports, figures, maps, and GeoJSON exports." -ForegroundColor Cyan
     } else {
         Write-Host ""
-        Write-Host "[X] Analysis failed. Check the errors above." -ForegroundColor Red
+        Write-Host "[X] Analysis failed." -ForegroundColor Red
+
+        $checkpoint = Get-ChildItem -Path (Join-Path $repoRoot "data") -Filter "analysis_checkpoint.json" -Recurse -File -ErrorAction SilentlyContinue |
+            Sort-Object LastWriteTimeUtc -Descending |
+            Select-Object -First 1
+
+        if ($null -ne $checkpoint) {
+            try {
+                $failure = Get-Content -LiteralPath $checkpoint.FullName -Raw | ConvertFrom-Json
+                if ($failure.failed_phase) {
+                    Write-Host "    Failed phase: $($failure.failed_phase)" -ForegroundColor Red
+                }
+                if ($failure.exception_message) {
+                    Write-Host "    Error: $($failure.exception_message)" -ForegroundColor Red
+                }
+                Write-Host "    Checkpoint: $($checkpoint.FullName)" -ForegroundColor Cyan
+
+                $logPath = Join-Path $checkpoint.DirectoryName "analysis_log.txt"
+                if (Test-Path -LiteralPath $logPath) {
+                    Write-Host "    Log: $logPath" -ForegroundColor Cyan
+                } else {
+                    Write-Host "    Log directory: $($checkpoint.DirectoryName)" -ForegroundColor Cyan
+                }
+            } catch {
+                Write-Host "    Could not read failure checkpoint: $($checkpoint.FullName)" -ForegroundColor Yellow
+            }
+        } else {
+            Write-Host "    No analysis checkpoint was found under data\. Review the errors above." -ForegroundColor Yellow
+        }
     }
 
     exit $analysisExitCode

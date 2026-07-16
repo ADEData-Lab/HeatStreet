@@ -148,6 +148,7 @@ class DashboardDataBuilder:
             "heatingSystemData": self._format_heating(archetype_results),
             "glazingData": self._format_glazing(archetype_results),
             "loftInsulationData": self._format_loft_insulation(archetype_results, df_validated),
+            "floorInsulationData": self._format_floor_insulation(archetype_results),
 
             # Scenario and pathway data
             "scenarioData": self._format_scenarios(scenario_results),
@@ -190,6 +191,18 @@ class DashboardDataBuilder:
         }
 
         return convert_to_json_serializable(dataset)
+
+    def _format_floor_insulation(self, archetype_results: Optional[Dict]) -> List[Dict]:
+        """Expose insulated, uninsulated and unknown as distinct canonical groups."""
+        floor = archetype_results.get("floor_insulation", {}) if archetype_results else {}
+        return [
+            {
+                "status": status,
+                "count": int(floor.get(status, 0) or 0),
+                "percentage": round(float(floor.get(f"{status}_pct", 0) or 0), 2),
+            }
+            for status in ("insulated", "uninsulated", "unknown")
+        ]
 
     def write_dataset(self, dataset: Dict) -> Path:
         """Persist the dataset to the outputs directory."""
@@ -841,33 +854,7 @@ class DashboardDataBuilder:
                 })
             return grid_data
 
-        # Fallback: derive from scenario results if available
-        if scenario_results:
-            # Estimate based on typical load profiles
-            # Peak is typically ~1.9x average for heating
-            for scenario_name, results in scenario_results.items():
-                scenario_label = self._scenario_label(scenario_name, results)
-                avg_demand = results.get("average_heat_demand_kwh", 15000)
-                # Convert annual kWh to peak day kW (peak day = ~1.5% annual)
-                peak_day_kwh = avg_demand * 0.015
-                # Peak hour = ~1.9x average hour
-                avg_kw = peak_day_kwh / 24
-                peak_kw = avg_kw * 1.9
-
-                grid_data.append({
-                    "scenario": scenario_label,
-                    "peak": round(peak_kw, 1),
-                    "average": round(avg_kw, 1),
-                })
-            return grid_data
-
-        # Final fallback: typical values
-        return [
-            {"scenario": "Baseline", "peak": 5.2, "average": 3.2},
-            {"scenario": "Fabric Only", "peak": 4.4, "average": 2.7},
-            {"scenario": "Heat Pump", "peak": 3.1, "average": 1.9},
-            {"scenario": "Heat Network", "peak": 0.8, "average": 0.45},
-        ]
+        return []
 
     def _format_indoor_climate_data(self) -> List[Dict]:
         """Format indoor climate profile data.
@@ -875,15 +862,7 @@ class DashboardDataBuilder:
         Section 9: Load Profiles - typical daily temperature/humidity profiles.
         Based on typical UK domestic heating patterns.
         """
-        # Typical winter day indoor climate profile
-        return [
-            {"hour": "06:00", "temperature": 17.5, "humidity": 62},
-            {"hour": "09:00", "temperature": 18.9, "humidity": 58},
-            {"hour": "12:00", "temperature": 19.6, "humidity": 55},
-            {"hour": "15:00", "temperature": 20.4, "humidity": 53},
-            {"hour": "18:00", "temperature": 20.1, "humidity": 54},
-            {"hour": "21:00", "temperature": 19.3, "humidity": 57},
-        ]
+        return []
 
     def _format_cost_curve(
         self,
@@ -905,6 +884,10 @@ class DashboardDataBuilder:
                     "savings": round(float(row.get("cumulative_kwh_saved", 0)) * 0.0624, 0),  # Convert kWh to £
                 })
             return cost_data
+
+        # Tipping-point analysis is internal unless explicitly published; do
+        # not synthesize a client-visible curve from unrelated readiness data.
+        return []
 
         # Fallback: derive from readiness summary
         if readiness_summary:
@@ -948,6 +931,10 @@ class DashboardDataBuilder:
 
         Section 5: Payback Times combined with Section 2: Retrofit Measures.
         """
+        # A dedicated validated cost-benefit artifact is required; estimates
+        # are never bundled into client payloads.
+        return []
+
         if not readiness_summary:
             return []
 
