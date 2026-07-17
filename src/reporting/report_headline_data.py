@@ -322,9 +322,21 @@ def build_report_headline_dataframe(
                 "gbp",
             ),
             (
-                "scenario_average_payback_years",
-                results.get("average_payback_years"),
-                "Scenario average payback",
+                "scenario_aggregate_simple_payback_years",
+                results.get("aggregate_simple_payback_years"),
+                "Scenario aggregate simple payback",
+                "years",
+            ),
+            (
+                "scenario_property_simple_payback_mean_years",
+                results.get("property_simple_payback_mean_years"),
+                "Scenario property simple payback mean",
+                "years",
+            ),
+            (
+                "scenario_property_simple_payback_median_years",
+                results.get("property_simple_payback_median_years"),
+                "Scenario property simple payback median",
                 "years",
             ),
             (

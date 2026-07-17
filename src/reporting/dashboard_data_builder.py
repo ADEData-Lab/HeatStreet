@@ -21,6 +21,7 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 import json
 import pandas as pd
+from src.modeling.contracts import STOCK_SCENARIO, TIER_READINESS_LABELS, TIER_READINESS_INTERPRETATIONS
 
 BOROUGH_NAME_BY_CODE = {
     "E09000001": "City of London",
@@ -147,6 +148,7 @@ class DashboardDataBuilder:
             "wallTypeData": self._format_wall_types(archetype_results),
             "heatingSystemData": self._format_heating(archetype_results),
             "glazingData": self._format_glazing(archetype_results),
+            "windowEconomicsData": self._format_window_economics(),
             "loftInsulationData": self._format_loft_insulation(archetype_results, df_validated),
             "floorInsulationData": self._format_floor_insulation(archetype_results),
 
@@ -347,6 +349,16 @@ class DashboardDataBuilder:
 
         return glazing
 
+    def _format_window_economics(self) -> List[Dict]:
+        """Load traceable window economics generated from configuration."""
+        path = self.output_dir / "window_economics.csv"
+        if not path.is_file() and self.output_dir.name == "dashboard":
+            path = self.output_dir.parent / "window_economics.csv"
+        if not path.is_file():
+            return []
+        frame = pd.read_csv(path)
+        return frame.where(pd.notna(frame), None).to_dict(orient="records")
+
     def _format_scenarios(self, scenario_results: Optional[Dict]) -> List[Dict]:
         if not scenario_results:
             return []
@@ -357,13 +369,17 @@ class DashboardDataBuilder:
             scenarios.append(
                 {
                     "scenario": scenario_label,
+                    "modelFamily": STOCK_SCENARIO.model_family,
+                    "modelPurpose": STOCK_SCENARIO.model_purpose,
                     "capitalCost": float(results.get("capital_cost_total", 0)),
                     "costPerProperty": float(results.get("capital_cost_per_property", 0)),
                     "co2Reduction": float(results.get("annual_co2_reduction_kg", 0)),
                     "billSavings": float(results.get("annual_bill_savings", 0)),
-                    "paybackYears": results.get("average_payback_years")
-                    or results.get("median_payback_years")
+                    "paybackYears": results.get("aggregate_simple_payback_years")
                     or 0,
+                    "aggregateSimplePaybackYears": results.get("aggregate_simple_payback_years"),
+                    "propertySimplePaybackMeanYears": results.get("property_simple_payback_mean_years"),
+                    "propertySimplePaybackMedianYears": results.get("property_simple_payback_median_years"),
                     "ashpReady": int(results.get("ashp_ready_properties", 0)),
                     "ashpFabricAssist": int(results.get("ashp_fabric_applied_properties", 0)),
                     "ashpIneligible": int(results.get("ashp_not_ready_properties", 0)),
@@ -404,14 +420,15 @@ class DashboardDataBuilder:
         total = readiness_summary.get("total_properties", 1)
         pct_map = readiness_summary.get("tier_percentages", {})
         fabric_map = readiness_summary.get("fabric_cost_by_tier", {})
-        system_map = readiness_summary.get("system_cost_by_tier", {})
-        total_map = readiness_summary.get("total_cost_by_tier", {})
+        system_map = readiness_summary.get("system_cost_full_ashp_by_tier", {})
+        total_map = readiness_summary.get("total_cost_full_ashp_by_tier", {})
         full_ashp_map = readiness_summary.get("total_cost_full_ashp_by_tier", {})
-        technology_map = readiness_summary.get("system_technology_by_tier", {})
         for tier, count in readiness_summary.get("tier_distribution", {}).items():
             tiers.append(
                 {
                     "tier": f"Tier {int(tier)}",
+                    "readinessLabel": TIER_READINESS_LABELS[int(tier)],
+                    "readinessInterpretation": TIER_READINESS_INTERPRETATIONS[int(tier)],
                     "properties": int(count),
                     "percentage": round(float(pct_map.get(tier, 0)), 2),
                     "avgCost": float(fabric_map.get(tier, 0)),
@@ -419,7 +436,6 @@ class DashboardDataBuilder:
                     "systemCost": float(system_map.get(tier, 0)),
                     "totalCost": float(total_map.get(tier, 0)),
                     "totalCostFullAshp": float(full_ashp_map.get(tier, 0)),
-                    "systemTechnology": technology_map.get(tier),
                 }
             )
         return tiers
@@ -592,14 +608,15 @@ class DashboardDataBuilder:
         for _, row in hn_vs_hp_comparison.iterrows():
             rows.append(
                 {
-                    "pathwayId": row.get("pathway_id"),
-                    "pathwayName": row.get("pathway_name"),
-                    "homes": int(row.get("n_homes", 0)),
-                    "capexMean": round(float(row.get("capex_mean", 0)), 2),
-                    "billSavingMean": round(float(row.get("bill_saving_mean", 0)), 2),
-                    "co2SavingMean": round(float(row.get("co2_saving_mean", 0)), 4),
-                    "paybackMean": round(float(row.get("payback_mean", 0)), 2),
-                    "paybackNote": row.get("payback_note"),
+                    "pathwayId": row.get("scenario_id"),
+                    "pathwayName": row.get("scenario"),
+                    "modelFamily": row.get("model_family"),
+                    "homes": int(row.get("total_properties", 0)),
+                    "capexMean": round(float(row.get("capital_cost_per_property", 0)), 2),
+                    "billSavingTotal": round(float(row.get("annual_bill_savings", 0)), 2),
+                    "co2SavingTotalKg": round(float(row.get("annual_co2_reduction_kg", 0)), 4),
+                    "aggregateSimplePaybackYears": row.get("aggregate_simple_payback_years"),
+                    "propertySimplePaybackMeanYears": row.get("property_simple_payback_mean_years"),
                 }
             )
         return rows
@@ -702,8 +719,8 @@ class DashboardDataBuilder:
                     **({"totalProperties": int(readiness_summary.get("total_properties", 0))}
                        if "totalProperties" not in summary else {}),
                     "meanFabricCost": float(readiness_summary.get("mean_fabric_cost", 0)),
-                    "meanSystemCost": float(readiness_summary.get("mean_system_cost") or 0),
-                    "meanTotalRetrofitCost": float(readiness_summary.get("mean_total_retrofit_cost", 0)),
+                    "meanSystemCostFullAshp": float(readiness_summary.get("mean_system_cost_full_ashp") or 0),
+                    "meanTotalCostHybridAshpSensitivity": float(readiness_summary.get("mean_total_cost_hybrid_ashp_sensitivity") or 0),
                     "meanTotalCostFullAshp": float(readiness_summary.get("mean_total_cost_full_ashp") or 0),
                     "heatDemandReduction": float(readiness_summary.get("heat_demand_reduction_percent", 0)),
                     "readyOrNearReady": float(
@@ -745,14 +762,14 @@ class DashboardDataBuilder:
 
         if hn_vs_hp_comparison is not None and len(hn_vs_hp_comparison) > 0:
             by_id = {
-                str(row.get("pathway_id")): row
+                str(row.get("scenario_id")): row
                 for _, row in hn_vs_hp_comparison.iterrows()
             }
-            hp_row = by_id.get("fabric_plus_hp_only")
-            hn_row = by_id.get("fabric_plus_hn_only")
+            hp_row = by_id.get("heat_pump")
+            hn_row = by_id.get("heat_network")
             if hp_row is not None and hn_row is not None:
                 summary["costAdvantageDHvsHP"] = round(
-                    float(hp_row.get("capex_mean", 0)) - float(hn_row.get("capex_mean", 0)),
+                    float(hp_row.get("capital_cost_per_property", 0)) - float(hn_row.get("capital_cost_per_property", 0)),
                     2,
                 )
 
@@ -942,8 +959,8 @@ class DashboardDataBuilder:
         tier_distribution = readiness_summary.get("tier_distribution", {})
         tier_percentages = readiness_summary.get("tier_percentages", {})
         fabric_costs = readiness_summary.get("fabric_cost_by_tier", {})
-        system_costs = readiness_summary.get("system_cost_by_tier", {})
-        total_costs = readiness_summary.get("total_cost_by_tier", {})
+        system_costs = readiness_summary.get("system_cost_full_ashp_by_tier", {})
+        total_costs = readiness_summary.get("total_cost_full_ashp_by_tier", {})
         full_ashp_costs = readiness_summary.get("total_cost_full_ashp_by_tier", {})
         technology_by_tier = readiness_summary.get("system_technology_by_tier", {})
 

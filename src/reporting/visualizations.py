@@ -325,7 +325,7 @@ class ReportGenerator:
         metrics = {
             'Capital Cost (£M)': [scenario_results[s]['capital_cost_total']/1_000_000 for s in scenarios],
             'Annual CO2 Savings (tonnes)': [scenario_results[s]['annual_co2_reduction_kg']/1000 for s in scenarios],
-            'Payback (years)': [scenario_results[s].get('average_payback_years', 0) for s in scenarios]
+            'Aggregate simple payback (years)': [scenario_results[s].get('aggregate_simple_payback_years') or 0 for s in scenarios]
         }
 
         fig, axes = plt.subplots(1, 3, figsize=(16, 5))
@@ -379,7 +379,7 @@ class ReportGenerator:
         for level, data in subsidy_results.items():
             subsidy_levels.append(data['subsidy_percentage'])
             uptake_rates.append(data['estimated_uptake_rate'] * 100)
-            payback_years.append(data['payback_years'])
+            payback_years.append(data['aggregate_simple_payback_years'])
             carbon_costs.append(data['carbon_abatement_cost_per_tonne'])
 
         fig, axes = plt.subplots(2, 2, figsize=(14, 10))
@@ -977,8 +977,8 @@ class ReportGenerator:
             f.write(f"  Cost per property: £{results['capital_cost_per_property']:,.0f}\n")
             f.write(f"  Annual CO2 reduction: {results['annual_co2_reduction_kg']/1000:,.0f} tonnes\n")
             f.write(f"  Annual bill savings: £{results['annual_bill_savings']:,.0f}\n")
-            if 'average_payback_years' in results:
-                f.write(f"  Average payback: {results['average_payback_years']:.1f} years\n")
+            if results.get('aggregate_simple_payback_years') is not None:
+                f.write(f"  Aggregate simple payback: {results['aggregate_simple_payback_years']:.1f} years\n")
 
             # EPC band shift summary
             band_summary = results.get('epc_band_shift_summary', {})
@@ -1093,8 +1093,8 @@ class ReportGenerator:
                 f"- **Annual CO₂ reduction:** {results['annual_co2_reduction_kg']/1000:,.0f} tonnes"
             )
             lines.append(f"- **Annual bill savings:** £{results['annual_bill_savings']:,.0f}")
-            if "average_payback_years" in results:
-                lines.append(f"- **Average payback:** {results['average_payback_years']:.1f} years")
+            if results.get("aggregate_simple_payback_years") is not None:
+                lines.append(f"- **Aggregate simple payback:** {results['aggregate_simple_payback_years']:.1f} years")
             lines.append("")
 
         # Heat Network Tiers
@@ -1194,7 +1194,8 @@ class ReportGenerator:
                     "annual_co2_reduction_tonnes": results.get("annual_co2_reduction_kg", 0) / 1000,
                     "cost_per_tco2_20yr_gbp": self._cost_per_tco2_20yr_gbp(results),
                     "annual_bill_savings": results.get("annual_bill_savings"),
-                    "average_payback_years": results.get("average_payback_years"),
+                    "aggregate_simple_payback_years": results.get("aggregate_simple_payback_years"),
+                    "property_simple_payback_mean_years": results.get("property_simple_payback_mean_years"),
                 })
 
                 band_summary = results.get("epc_band_shift_summary", {})
@@ -1386,8 +1387,8 @@ class ReportGenerator:
             if cost_per_tco2_20yr is not None:
                 summary_data.append(['Cost per tCO2 (20yr, £)', f"£{cost_per_tco2_20yr:,.0f}"])
             summary_data.append(['Annual Bill Savings', f"£{results['annual_bill_savings']:,.0f}"])
-            if 'average_payback_years' in results:
-                summary_data.append(['Average Payback (years)', f"{results['average_payback_years']:.1f}"])
+            if results.get('aggregate_simple_payback_years') is not None:
+                summary_data.append(['Aggregate Simple Payback (years)', f"{results['aggregate_simple_payback_years']:.1f}"])
             summary_data.append([''])
 
         df_summary = pd.DataFrame(summary_data)
@@ -1429,8 +1430,9 @@ class ReportGenerator:
                 'Post-Measure Bill (£)': results.get('post_measure_bill_total', 0),
                 'Baseline CO2 (kg)': results.get('baseline_co2_total_kg', 0),
                 'Post-Measure CO2 (kg)': results.get('post_measure_co2_total_kg', 0),
-                'Average Payback (years)': results.get('average_payback_years', 0),
-                'Median Payback (years)': results.get('median_payback_years', 0),
+                'Aggregate Simple Payback (years)': results.get('aggregate_simple_payback_years'),
+                'Property Mean Simple Payback (years)': results.get('property_simple_payback_mean_years'),
+                'Property Median Simple Payback (years)': results.get('property_simple_payback_median_years'),
                 # Cost-effectiveness metrics
                 'Cost-effective Count': ce_summary.get('cost_effective_count', 0),
                 'Cost-effective (%)': ce_summary.get('cost_effective_pct', 0),
@@ -1579,14 +1581,14 @@ class ReportGenerator:
         # 3. Cost Distribution by Tier (bottom left)
         tiers = list(range(1, 6))
         fabric_costs = [summary['fabric_cost_by_tier'].get(i, 0)/1000 for i in tiers]  # Convert to £k
-        total_costs = [summary['total_cost_by_tier'].get(i, 0)/1000 for i in tiers]
+        total_costs = [summary['total_cost_full_ashp_by_tier'].get(i, 0)/1000 for i in tiers]
 
         x = np.arange(len(tiers))
         width = 0.35
 
         bars3a = ax3.bar(x - width/2, fabric_costs, width, label='Fabric Pre-requisites',
                         color='#3498db', edgecolor='black', linewidth=1.5)
-        bars3b = ax3.bar(x + width/2, total_costs, width, label='Total Retrofit Cost',
+        bars3b = ax3.bar(x + width/2, total_costs, width, label='Total Full-ASHP Cost',
                         color='#e67e22', edgecolor='black', linewidth=1.5)
 
         ax3.set_xlabel('Readiness Tier', fontsize=13)

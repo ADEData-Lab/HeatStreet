@@ -257,7 +257,7 @@ class ExecutiveSummaryGenerator:
             capital_total = row.get("capital_cost_total", 0)
             capital_per_prop = row.get("capital_cost_per_property", 0)
             bill_savings = row.get("annual_bill_savings_total", row.get("annual_bill_savings", 0))
-            payback = row.get("average_payback_years", row.get("median_payback_years", "-"))
+            payback = row.get("aggregate_simple_payback_years", "-")
             co2_reduction = row.get("annual_co2_reduction_total_kg", row.get("annual_co2_reduction_kg", 0))
 
             # Format numbers
@@ -479,7 +479,7 @@ class ExecutiveSummaryGenerator:
                     capital_total = row.get("capital_cost_total", 0)
                     capital_per_prop = row.get("capital_cost_per_property", 0)
                     bill_savings = row.get("annual_bill_savings_total", row.get("annual_bill_savings", 0))
-                    payback = row.get("average_payback_years", row.get("median_payback_years", None))
+                    payback = row.get("aggregate_simple_payback_years", None)
                     co2_reduction = row.get("annual_co2_reduction_total_kg", row.get("annual_co2_reduction_kg", 0))
 
                     scenario_rows.append({
