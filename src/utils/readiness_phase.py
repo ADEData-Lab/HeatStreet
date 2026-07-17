@@ -31,10 +31,10 @@ REQUIRED_COLUMNS = {
     "hp_readiness_tier",
     "hp_readiness_label",
     "fabric_prerequisite_cost",
-    "system_technology",
-    "system_cost",
-    "total_cost",
-    "total_retrofit_cost",
+    "system_cost_full_ashp",
+    "total_cost_full_ashp",
+    "system_cost_hybrid_ashp_sensitivity",
+    "total_cost_hybrid_ashp_sensitivity",
 }
 
 
@@ -249,7 +249,7 @@ def run_readiness_phase(
             gc.collect()
             if attempt == 1:
                 try:
-                    attempt_df = pd.read_parquet(Path(processed_dir) / "epc_london_adjusted.parquet")
+                    attempt_df = pd.read_parquet(Path(processed_dir) / "epc_london_adjusted_spatial.parquet")
                 except Exception as reload_exc:
                     retry_candidate = Path(outputs_dir) / ".readiness-candidate-attempt-2"
                     retry_candidate.mkdir(parents=True, exist_ok=True)

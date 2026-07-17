@@ -31,6 +31,7 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.panel import Panel
 from rich import print as rprint
 import time
+import pandas as pd
 
 # Add src to path
 sys.path.append(str(Path(__file__).parent))
@@ -46,7 +47,8 @@ from src.cleaning.data_validator import EPCDataValidator
 from src.analysis.archetype_analysis import ArchetypeAnalyzer
 from src.modeling.scenario_model import ScenarioModeler
 from src.modeling.pathway_model import PathwayModeler
-from src.reporting.comparisons import ComparisonReporter
+from src.modeling.contracts import HN_READY_TIERS, join_spatial_enrichment
+from src.reporting.comparisons import ComparisonReporter, build_stock_scenario_comparison
 from src.utils.analysis_logger import AnalysisLogger
 from src.utils.staged_dataset import DatasetReference, parquet_row_count
 from src.utils.staged_processing import (
@@ -169,9 +171,9 @@ def _write_current_run_metadata(
     metadata_path = Path(DATA_OUTPUTS_DIR) / "run_metadata.json"
     payload = {
         **context.to_dict(),
-        "start_time": analysis_logger.metadata.get("analysis_start") or context.analysis_start,
-        "end_time": analysis_logger.metadata.get("analysis_end") or context.analysis_end,
-        "runtime_seconds": analysis_logger.metadata.get("total_duration_seconds") or context.runtime_seconds,
+        "start_time": context.analysis_start,
+        "end_time": context.analysis_end,
+        "runtime_seconds": context.runtime_seconds,
         "authoritative_cohort_size": int(cohort_size),
     }
     metadata_path.parent.mkdir(parents=True, exist_ok=True)
@@ -189,11 +191,15 @@ def _register_current_artifacts(context: RunContext) -> ArtifactManifest:
         "published_validation_report": (Path(DATA_OUTPUTS_DIR) / "validation_report.json", "client_outputs", True, "client"),
         "adjustment_summary": (Path(DATA_PROCESSED_DIR) / "methodological_adjustments_summary.json", "adjustments", True, "client"),
         "adjusted_dataset": (Path(DATA_PROCESSED_DIR) / "epc_london_adjusted.parquet", "adjustments", True, "internal"),
+        "spatially_enriched_properties": (Path(DATA_PROCESSED_DIR) / "epc_london_adjusted_spatial.parquet", "spatial_analysis", True, "internal"),
+        "spatial_enrichment_summary": (Path(DATA_OUTPUTS_DIR) / "spatial_enrichment_summary.json", "spatial_analysis", True, "internal"),
         "archetype_analysis": (Path(DATA_OUTPUTS_DIR) / "archetype_analysis_results.json", "analysis", True, "client"),
         "readiness": (Path(DATA_OUTPUTS_DIR) / "retrofit_readiness_analysis.csv", "analysis", True, "client"),
         "spatial_suitability": (Path(DATA_OUTPUTS_DIR) / "pathway_suitability_by_tier.csv", "analysis", True, "client"),
         "internal_scenarios": (Path(DATA_OUTPUTS_DIR) / "internal_scenario_results.csv", "modelling", True, "internal"),
         "client_scenarios": (Path(DATA_OUTPUTS_DIR) / "scenario_results_summary.csv", "modelling", True, "client"),
+        "stock_scenario_comparison": (Path(DATA_OUTPUTS_DIR) / "stock_scenario_comparison.csv", "modelling", True, "client"),
+        "scenario_property_results": (Path(DATA_OUTPUTS_DIR) / "scenario_results_by_property.parquet", "modelling", True, "internal"),
         "diagnostic_pathway_properties": (Path(DATA_OUTPUTS_DIR) / "pathway_results_by_property.parquet", "diagnostic_pathways", True, "internal"),
         "diagnostic_pathways": (Path(DATA_OUTPUTS_DIR) / "pathway_results_summary.csv", "diagnostic_pathways", True, "internal"),
         "diagnostic_hp_hn_comparison": (Path(DATA_OUTPUTS_DIR) / "comparisons" / "hn_vs_hp_comparison.csv", "diagnostic_pathways", True, "internal"),
@@ -205,7 +211,8 @@ def _register_current_artifacts(context: RunContext) -> ArtifactManifest:
         "case_street_extract": (Path(DATA_OUTPUTS_DIR) / "shakespeare_crescent_extract.csv", "reporting", True, "client"),
         "case_street_summary": (Path(DATA_OUTPUTS_DIR) / "shakespeare_crescent_summary.txt", "reporting", True, "client"),
         "subsidy_detailed": (Path(DATA_OUTPUTS_DIR) / "subsidy_sensitivity_analysis.csv", "modelling", True, "client"),
-        "subsidy_simplified": (Path(DATA_OUTPUTS_DIR) / "subsidy_sensitivity_analysis_simple_gbp.csv", "reporting", True, "client"),
+        "window_economics": (Path(DATA_OUTPUTS_DIR) / "window_economics.csv", "reporting", True, "client"),
+        "qa_checks": (Path(DATA_OUTPUTS_DIR) / "qa_checks.json", "semantic_qa", True, "internal"),
         "one_stop_json": (Path(DATA_OUTPUTS_DIR) / "one_stop_output.json", "client_outputs", True, "client"),
         "dashboard_data": (Path(DATA_OUTPUTS_DIR) / "dashboard" / "dashboard-data.json", "client_outputs", True, "client"),
         "dashboard_html": (Path(DATA_OUTPUTS_DIR) / "one_stop_dashboard.html", "client_outputs", True, "client"),
@@ -257,7 +264,8 @@ def _load_adjusted_phase_frame(phase_name: str):
     """Load the run-scoped adjusted Parquet boundary for an analytical phase."""
     import pandas as pd
 
-    path = Path(DATA_PROCESSED_DIR) / "epc_london_adjusted.parquet"
+    spatial_path = Path(DATA_PROCESSED_DIR) / "epc_london_adjusted_spatial.parquet"
+    path = spatial_path if spatial_path.is_file() else Path(DATA_PROCESSED_DIR) / "epc_london_adjusted.parquet"
     if not path.is_file():
         raise RuntimeError(f"{phase_name} requires the authoritative adjusted Parquet: {path}")
     frame = pd.read_parquet(path)
@@ -2429,6 +2437,11 @@ def model_scenarios(df, analysis_logger: AnalysisLogger = None, ui=None):
     subsidy_results = subsidy_results_by_scenario.get("heat_pump", {})
 
     save_paths = modeler.save_results()
+    property_results = pd.read_parquet(save_paths['property_path'])
+    public_comparison = build_stock_scenario_comparison(scenario_results, property_results)
+    public_comparison.to_csv(Path(DATA_OUTPUTS_DIR) / "stock_scenario_comparison.csv", index=False)
+    from src.reporting.window_economics import generate_window_economics
+    generate_window_economics(Path(DATA_OUTPUTS_DIR) / "window_economics.csv")
     console.print(f"[green]✓[/green] Results saved")
     if save_paths.get('property_path'):
         console.print(f"    • Property-level results: {save_paths['property_path']}")
@@ -2533,7 +2546,7 @@ def analyze_retrofit_readiness(df, analysis_logger: AnalysisLogger = None, one_s
         console.print()
         console.print(f"  Solid wall barrier: {summary['needs_solid_wall_insulation']:,} properties need SWI")
         console.print(f"  Mean fabric cost: £{summary['mean_fabric_cost']:,.0f}")
-        console.print(f"  Total retrofit investment: £{summary['total_retrofit_cost']/1e6:.1f}M")
+        console.print(f"  Total full-ASHP investment: £{summary['total_cost_full_ashp']/1e6:.1f}M")
         console.print()
 
         for tier in range(1, 6):
@@ -2545,7 +2558,7 @@ def analyze_retrofit_readiness(df, analysis_logger: AnalysisLogger = None, one_s
             )
         _ui_metric(ui, "solid wall barrier count", summary['needs_solid_wall_insulation'], group=PHASE_MODELLING)
         _ui_metric(ui, "mean fabric cost", summary['mean_fabric_cost'], group=PHASE_MODELLING)
-        _ui_metric(ui, "total retrofit investment", summary['total_retrofit_cost'], group=PHASE_MODELLING)
+        _ui_metric(ui, "total full-ASHP investment", summary['total_cost_full_ashp'], group=PHASE_MODELLING)
 
         if analysis_logger:
             for tier in range(1, 6):
@@ -2553,7 +2566,7 @@ def analyze_retrofit_readiness(df, analysis_logger: AnalysisLogger = None, one_s
                 pct = summary['tier_percentages'].get(tier, 0)
             analysis_logger.add_metric(f"retrofit_tier_{tier}", count, f"{pct:.1f}% of properties")
             analysis_logger.add_metric("mean_fabric_cost", summary['mean_fabric_cost'], "Average fabric improvement cost per property")
-            analysis_logger.add_metric("total_retrofit_cost", summary['total_retrofit_cost'], "Total retrofit investment needed")
+            analysis_logger.add_metric("total_cost_full_ashp", summary['total_cost_full_ashp'], "Total full-ASHP investment needed")
 
         viz = None
         try:
@@ -3185,7 +3198,7 @@ def generate_one_stop_report(df=None, analysis_logger: AnalysisLogger = None, ui
                 "internal_scenarios", "client_scenarios", "diagnostic_pathways",
                 "borough_breakdown", "borough_priority", "tenure_segmentation",
                 "network_thresholds", "case_street_extract", "case_street_summary",
-                "subsidy_detailed", "subsidy_simplified",
+                "subsidy_detailed",
             ],
         )
 
@@ -3417,20 +3430,6 @@ def generate_additional_reports(df_raw, df_validated, validation_report, archety
     except Exception as e:
         console.print(f"[yellow]⚠ Could not generate data quality report: {e}[/yellow]")
 
-    # 4. Subsidy Sensitivity Analysis
-    try:
-        console.print("[cyan]Running subsidy sensitivity analysis...[/cyan]")
-        subsidy_path = output_dir / "subsidy_sensitivity_analysis_simple_gbp.csv"
-        reporter.subsidy_sensitivity_analysis(
-            df_validated,
-            scenario_results,
-            subsidy_levels=[0, 5000, 7500, 10000, 15000],
-            output_path=subsidy_path
-        )
-        reports_created.append("✓ Subsidy sensitivity analysis")
-    except Exception as e:
-        console.print(f"[yellow]⚠ Could not generate subsidy sensitivity: {e}[/yellow]")
-
     # 5. Heat Network Connection Thresholds
     threshold_df = None
     try:
@@ -3468,7 +3467,6 @@ def generate_additional_reports(df_raw, df_validated, validation_report, archety
         analysis_logger.add_output("data/outputs/reports/tenure_segmentation.csv", "csv", "Tenure segmentation analysis")
         analysis_logger.add_output("data/outputs/reports/tenure_segmentation.txt", "report", "Tenure segmentation summary")
         analysis_logger.add_output("data/outputs/heat_network_connection_thresholds.csv", "csv", "Heat network connection threshold analysis")
-        analysis_logger.add_output("data/outputs/subsidy_sensitivity_analysis_simple_gbp.csv", "csv", "Subsidy sensitivity analysis (simple, GBP levels)")
         analysis_logger.add_output("data/outputs/data_quality_report.txt", "report", "Data quality assessment")
         analysis_logger.complete_phase(success=True, message=f"{len(reports_created)} additional specialized reports generated")
 
@@ -3573,7 +3571,7 @@ def package_dashboard_assets(
             except Exception as e:
                 logger.debug(f"Could not load retrofit packages: {e}")
 
-        comparison_file = outputs_dir / "comparisons" / "hn_vs_hp_comparison.csv"
+        comparison_file = outputs_dir / "stock_scenario_comparison.csv"
         if comparison_file.exists():
             try:
                 hn_vs_hp_comparison = pd.read_csv(comparison_file)
@@ -4430,6 +4428,37 @@ def _main_impl(args: argparse.Namespace, ui, analysis_logger: AnalysisLogger, st
         _active_authoritative_cohort_size,
     )
 
+    # Spatial classification is an input contract for every model family, not a
+    # downstream report.  Join it back to the authoritative cohort by certificate
+    # number before any diagnostic or public stock modeling starts.
+    properties_with_tiers, pathway_summary = _call_with_optional_ui(
+        run_spatial_analysis,
+        df_adjusted_frame,
+        analysis_logger,
+        one_stop_only=one_stop_only,
+        ui=ui,
+    )
+    if properties_with_tiers is None or pathway_summary is None:
+        raise RuntimeError("Spatial analysis did not produce its required classification artifact")
+    df_adjusted_frame, spatial_enrichment_summary = join_spatial_enrichment(
+        df_adjusted_frame,
+        properties_with_tiers,
+        production=args.production,
+    )
+    spatial_enriched_path = Path(DATA_PROCESSED_DIR) / "epc_london_adjusted_spatial.parquet"
+    df_adjusted_frame.to_parquet(spatial_enriched_path, index=False)
+    spatial_summary_path = Path(DATA_OUTPUTS_DIR) / "spatial_enrichment_summary.json"
+    spatial_summary_path.write_text(json.dumps(spatial_enrichment_summary, indent=2), encoding="utf-8")
+    _register_required_artifacts(
+        _active_run_context,
+        phase="spatial_analysis",
+        artifacts=[
+            ("spatial_suitability", Path(DATA_OUTPUTS_DIR) / "pathway_suitability_by_tier.csv", "client"),
+            ("spatially_enriched_properties", spatial_enriched_path, "internal"),
+            ("spatial_enrichment_summary", spatial_summary_path, "internal"),
+        ],
+    )
+
     # Phase 3: Analyze (use adjusted data)
     archetype_results = _call_with_optional_ui(analyze_archetype, df_adjusted_frame, analysis_logger, ui=ui)
     gc.collect()  # Cleanup analysis intermediate results
@@ -4484,25 +4513,8 @@ def _main_impl(args: argparse.Namespace, ui, analysis_logger: AnalysisLogger, st
     _require_contract(ArtifactManifest.load(_active_run_context), ["readiness", "readiness_summary"])
     gc.collect()  # Cleanup readiness calculation intermediates
 
-    # Phase 4.5: Required spatial classification (maps remain optional).
-    spatial_frame = _load_adjusted_phase_frame("Spatial Analysis")
-    properties_with_tiers, pathway_summary = _call_with_optional_ui(
-        run_spatial_analysis,
-        spatial_frame,
-        analysis_logger,
-        one_stop_only=one_stop_only,
-        ui=ui,
-    )
-    del spatial_frame
-    if properties_with_tiers is None or pathway_summary is None:
-        raise RuntimeError("Spatial analysis did not produce its required classification artifact")
-    spatial_path = Path(DATA_OUTPUTS_DIR) / "pathway_suitability_by_tier.csv"
-    spatial_manifest = _register_required_artifacts(
-        _active_run_context,
-        phase="spatial_analysis",
-        artifacts=[("spatial_suitability", spatial_path, "client")],
-    )
-    gc.collect()  # Cleanup GIS objects and geocoding cache
+    # Spatial classification already ran before both model families.
+    gc.collect()
 
     # Phase 5.5: Additional reports and supporting tables
     try:
@@ -4534,9 +4546,7 @@ def _main_impl(args: argparse.Namespace, ui, analysis_logger: AnalysisLogger, st
     )
 
     # Freeze the reporting provenance before any client artifact is built.
-    _active_run_context = _active_run_context.with_timing(
-        runtime_seconds=time.time() - start_time,
-    )
+    _active_run_context = _active_run_context.with_timing()
     analysis_logger.set_metadata("analysis_end", _active_run_context.analysis_end)
     analysis_logger.set_metadata("total_duration_seconds", _active_run_context.runtime_seconds)
     analysis_logger.set_metadata("source_identifier", _active_run_context.source_identifier)
@@ -4642,9 +4652,32 @@ def _main_impl(args: argparse.Namespace, ui, analysis_logger: AnalysisLogger, st
             [Path(DATA_OUTPUTS_DIR), Path(DATA_PROCESSED_DIR)],
             _active_run_context,
         )
-        _register_current_artifacts(_active_run_context)
+        final_manifest = _register_current_artifacts(_active_run_context)
+        from src.utils.semantic_qa import run_semantic_qa, require_passing_qa
+        qa_path = Path(DATA_OUTPUTS_DIR) / "qa_checks.json"
+        qa_result = run_semantic_qa(_active_run_context, final_manifest, qa_path)
+        stamp_artifact(qa_path, _active_run_context)
+        final_manifest.register(
+            "qa_checks",
+            qa_path,
+            phase="semantic_qa",
+            required=True,
+            publication_scope="internal",
+            validation_status="valid" if qa_result["status"] == "pass" else "invalid",
+        )
+        require_passing_qa(
+            qa_path,
+            run_id=_active_run_context.run_id,
+            dataset_fingerprint=_active_run_context.dataset_fingerprint,
+        )
 
     if _active_run_context is not None and args.production and not args.no_publish:
+        from src.utils.semantic_qa import require_passing_qa
+        require_passing_qa(
+            Path(DATA_OUTPUTS_DIR) / "qa_checks.json",
+            run_id=_active_run_context.run_id,
+            dataset_fingerprint=_active_run_context.dataset_fingerprint,
+        )
         stamp_artifact_tree([Path(DATA_OUTPUTS_DIR)], _active_run_context)
         publish_run_outputs(
             Path(DATA_OUTPUTS_DIR),

@@ -479,6 +479,29 @@ measure_savings:
 # Subsidy Levels for Sensitivity Analysis (%)
 subsidy_levels: [0, 25, 50, 75, 100]
 
+subsidy_uptake_sensitivity:
+  ceiling: 0.85
+  floor: 0.02
+  midpoint_years: 12.0
+  steepness: 0.20
+  clamp: true
+  interpretation: "modelled sensitivity, not forecast"
+  source_notes: "Behavioural logistic response used only to test sensitivity to simple payback; it is not an adoption forecast."
+
+window_economics:
+  assumed_floor_area_m2: 100
+  assumed_annual_energy_kwh: 15000
+  measures:
+    - measure: "double_glazing"
+      capital_cost_key: "double_glazing_upgrade"
+      saving_fraction: 0.10
+      source: "config.costs.double_glazing_upgrade and retrofit_savings.double_glazing"
+    - measure: "triple_glazing"
+      capital_cost_key: "triple_glazing_upgrade"
+      saving_fraction: 0.15
+      source: "config.costs.triple_glazing_upgrade and retrofit_savings.triple_glazing"
+  interpretation: "Illustrative simple-payback sensitivity using configured assumptions; not a forecast."
+
 # Energy Prices (£/kWh)
 # See authoritative_sources.sections.energy_prices_and_tariffs
 # UPDATED 2025-12-04: Aligned with Ofgem Energy Price Cap Q4 2024

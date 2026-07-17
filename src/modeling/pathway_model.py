@@ -57,6 +57,13 @@ from src.utils.modeling_utils import (
     calculate_carbon_abatement_cost,
     summarize_series,
 )
+from src.modeling.contracts import (
+    DIAGNOSTIC_FULL_FABRIC_PATHWAY,
+    PROPERTY_ID_COLUMN,
+    require_property_identifier,
+    validate_hn_readiness,
+    validate_hybrid_assignments,
+)
 
 
 # Legacy wrapper functions delegating to shared utils
@@ -493,9 +500,13 @@ class PathwayModeler:
         )
 
         return {
-            'property_id': property_data.get('LMK_KEY', 'unknown'),
+            'property_id': str(property_data[PROPERTY_ID_COLUMN]),
             'pathway_id': pathway.pathway_id,
+            'fabric_package': pathway.fabric_package,
+            **DIAGNOSTIC_FULL_FABRIC_PATHWAY.metadata(),
             'has_hn_access': has_hn_access,
+            'assigned_heat_network': bool(pathway.heat_source == 'hp+hn' and has_hn_access),
+            'assigned_ashp': bool(pathway.heat_source == 'hp+hn' and not has_hn_access),
 
             'heat_pump_flow_temp_c': flow_temp_after_measures,
             'heat_pump_cop_central': hp_cop_central,
@@ -564,10 +575,9 @@ class PathwayModeler:
                 f"({hn_access.mean()*100:.1f}% ready)"
             )
         else:
-            logger.warning(
-                "Heat network access column not found; defaulting all properties to no access."
+            raise ValueError(
+                f"Spatially enriched cohort is required; missing heat-network access column {column!r}"
             )
-            hn_access = pd.Series(False, index=df.index)
 
         return hn_access
 
@@ -627,10 +637,7 @@ class PathwayModeler:
         flow_temps = (
             df_with_flow['estimated_flow_temp'].fillna(self.min_flow_temp).values.astype(float)
         )
-        property_ids = (
-            df['LMK_KEY'].values if 'LMK_KEY' in df.columns
-            else np.full(len(df), 'unknown', dtype=object)
-        )
+        property_ids = require_property_identifier(df).to_numpy()
 
         return {
             'df_index': df.index,
@@ -771,7 +778,11 @@ class PathwayModeler:
         return pd.DataFrame({
             'property_id': property_ids,
             'pathway_id': pathway.pathway_id,
+            'fabric_package': pathway.fabric_package,
+            **{key: np.full(n, value) for key, value in DIAGNOSTIC_FULL_FABRIC_PATHWAY.metadata().items()},
             'has_hn_access': hn_mask,
+            'assigned_heat_network': (hn_mask if pathway.heat_source == 'hp+hn' else np.zeros(n, dtype=bool)),
+            'assigned_ashp': (~hn_mask if pathway.heat_source == 'hp+hn' else np.zeros(n, dtype=bool)),
 
             'heat_pump_flow_temp_c': flow_temp_after,
             'heat_pump_cop_central': hp_cop_central,
@@ -828,6 +839,8 @@ class PathwayModeler:
         logger.info(f"Analyzing pathways for {len(df):,} properties (vectorized)...")
 
         df_ready = self._ensure_adjusted_baseline(df)
+        require_property_identifier(df_ready)
+        validate_hn_readiness(df_ready)
         hn_access = self._get_hn_access(df_ready, hn_access_column=hn_access_column)
         total = len(df_ready)
         n_pathways = len(self.pathways)
@@ -839,6 +852,9 @@ class PathwayModeler:
         for i, (pathway_id, pathway) in enumerate(self.pathways.items()):
             logger.info(f"  Pathway {i + 1}/{n_pathways}: {pathway_id}...")
             pathway_df = self._compute_pathway_vectorized(pathway, hn_access, precomputed)
+            if pathway.heat_source == 'hp+hn':
+                hybrid_validation = pathway_df.assign(hn_ready=pathway_df['has_hn_access'])
+                validate_hybrid_assignments(hybrid_validation)
             pathway_dfs.append(pathway_df)
 
             if progress_callback is not None:
@@ -925,15 +941,12 @@ class PathwayModeler:
                 'pathway_id': pathway_id,
                 'pathway_name': pathway_name,
                 'heat_source': pathway.heat_source if pathway else '',
-                'model_family': 'full_fabric_pathway',
-                'model_purpose': 'diagnostic and distributional pathway assessment',
-                'fabric_package': pathway_id,
+                **DIAGNOSTIC_FULL_FABRIC_PATHWAY.metadata(),
+                'fabric_package': pathway.fabric_package if pathway else '',
                 'heating_technology': pathway.heat_source if pathway else '',
                 'cost_boundary': 'property pathway measures; differs from stock scenario boundary',
                 'network_backbone_included': False,
                 'grid_reinforcement_included': False,
-                'intended_reporting_use': 'diagnostic_distributional_only',
-                'headline_reporting_eligible': False,
                 'n_properties': len(pathway_results),
 
                 # Costs
@@ -1152,7 +1165,7 @@ def test_hybrid_cost_bug():
 
     # Create synthetic test property
     test_property = pd.Series({
-        'LMK_KEY': 'TEST001',
+        'CERTIFICATE_NUMBER': 'TEST001',
         'TOTAL_FLOOR_AREA': 100,
         'ENERGY_CONSUMPTION_CURRENT': 200,  # kWh/m²/year
         'wall_type': 'solid_brick',
