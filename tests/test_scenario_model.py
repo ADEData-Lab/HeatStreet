@@ -61,7 +61,7 @@ def test_hybrid_routing_and_costs(monkeypatch, scenario_modeler_factory):
 
     base_measures = ['modest_fabric_improvements', 'heat_network_where_available', 'ashp_elsewhere']
     ready_property = {
-        'LMK_KEY': 'HN_READY',
+        'CERTIFICATE_NUMBER': 'HN_READY',
         'POSTCODE': 'HN1',
         'TOTAL_FLOOR_AREA': 80,
         'ENERGY_CONSUMPTION_CURRENT': 150,
@@ -69,10 +69,11 @@ def test_hybrid_routing_and_costs(monkeypatch, scenario_modeler_factory):
         'glazing_type': 'unknown',
         'ashp_ready': True,
         'ashp_projected_ready': True,
-        'hn_ready': True
+        'hn_ready': True,
+        'tier_number': 2,
     }
     not_ready_property = {
-        'LMK_KEY': 'NO_HN',
+        'CERTIFICATE_NUMBER': 'NO_HN',
         'POSTCODE': 'ZZZ',
         'TOTAL_FLOOR_AREA': 80,
         'ENERGY_CONSUMPTION_CURRENT': 150,
@@ -80,7 +81,8 @@ def test_hybrid_routing_and_costs(monkeypatch, scenario_modeler_factory):
         'glazing_type': 'unknown',
         'ashp_ready': True,
         'ashp_projected_ready': True,
-        'hn_ready': False
+        'hn_ready': False,
+        'tier_number': 5,
     }
 
     ready_plan, _, _, ready_pathway, _ = modeler._build_property_measures(base_measures, ready_property)
@@ -132,11 +134,11 @@ def test_unrecognised_measure_raises(monkeypatch):
         scenario_model.ScenarioModeler()
 
 
-def test_hn_ready_generation_drives_pathway(monkeypatch, scenario_modeler_factory):
+def test_spatially_enriched_hn_readiness_drives_pathway(monkeypatch, scenario_modeler_factory):
     modeler = scenario_modeler_factory(ready_postcodes={'AB1'})
 
     df = pd.DataFrame([
-        {'LMK_KEY': 'AB_PROP', 'POSTCODE': 'AB1', 'TOTAL_FLOOR_AREA': 70, 'ENERGY_CONSUMPTION_CURRENT': 140, 'glazing_type': 'unknown'},
+        {'CERTIFICATE_NUMBER': 'AB_PROP', 'POSTCODE': 'AB1', 'TOTAL_FLOOR_AREA': 70, 'ENERGY_CONSUMPTION_CURRENT': 140, 'glazing_type': 'unknown', 'tier_number': 2, 'hn_ready': True},
     ])
 
     processed = modeler._preprocess_ashp_readiness(df)
@@ -155,43 +157,11 @@ def test_hn_ready_generation_drives_pathway(monkeypatch, scenario_modeler_factor
     assert 'ashp_installation' not in plan
 
 
-def test_hybrid_routing_uses_tier_number_over_hn_ready(scenario_modeler_factory):
-    modeler = scenario_modeler_factory()
-
-    measures = ['fabric_improvements', 'heat_network_where_available', 'ashp_elsewhere']
-
-    tier_4_property = {
-        'LMK_KEY': 'TIER4',
-        'TOTAL_FLOOR_AREA': 80,
-        'ENERGY_CONSUMPTION_CURRENT': 150,
-        'ashp_ready': True,
-        'ashp_projected_ready': True,
-        # Deliberately conflicting flags: Tier 4 should route to ASHP even if hn_ready is True.
-        'tier_number': 4,
-        'hn_ready': True,
-    }
-
-    tier_3_property = {
-        'LMK_KEY': 'TIER3',
-        'TOTAL_FLOOR_AREA': 80,
-        'ENERGY_CONSUMPTION_CURRENT': 150,
-        'ashp_ready': True,
-        'ashp_projected_ready': True,
-        # Deliberately conflicting flags: Tier 3 should route to HN even if hn_ready is False.
-        'tier_number': 3,
-        'hn_ready': False,
-    }
-
-    tier_4_plan, _, _, tier_4_pathway, _ = modeler._build_property_measures(measures, tier_4_property)
-    tier_3_plan, _, _, tier_3_pathway, _ = modeler._build_property_measures(measures, tier_3_property)
-
-    assert tier_4_pathway == 'ashp'
-    assert 'ashp_installation' in tier_4_plan
-    assert 'district_heating_connection' not in tier_4_plan
-
-    assert tier_3_pathway == 'heat_network'
-    assert 'district_heating_connection' in tier_3_plan
-    assert 'ashp_installation' not in tier_3_plan
+def test_conflicting_tier_and_hn_ready_is_rejected():
+    from src.modeling.contracts import validate_hn_readiness
+    frame = pd.DataFrame({"tier_number": [4, 3], "hn_ready": [True, False]})
+    with pytest.raises(ValueError, match="conflicts with canonical tiers"):
+        validate_hn_readiness(frame)
 
 
 def test_negative_energy_intensity_rejected(scenario_modeler_factory):
@@ -199,7 +169,7 @@ def test_negative_energy_intensity_rejected(scenario_modeler_factory):
 
     df = pd.DataFrame([
         {
-            'LMK_KEY': 'NEG_EN',
+            'CERTIFICATE_NUMBER': 'NEG_EN',
             'TOTAL_FLOOR_AREA': 75,
             'ENERGY_CONSUMPTION_CURRENT': -15,
             'CURRENT_ENERGY_RATING': 'D',
@@ -258,6 +228,10 @@ def test_aggregate_cost_per_tco2_and_diagnostic_abatement_aliases(scenario_model
     assert results["carbon_abatement_cost_property_p90"] == pytest.approx(1900)
     assert results["carbon_abatement_cost_mean"] == results["carbon_abatement_cost_property_mean"]
     assert results["carbon_abatement_cost_median"] == results["carbon_abatement_cost_property_median"]
+    assert results["aggregate_simple_payback_years"] == 20
+    assert results["property_simple_payback_mean_years"] == 20
+    assert results["truncation_threshold_years"] is None
+    assert results["excluded_by_truncation_count"] == 0
 
 
 def test_subsidy_sensitivity_includes_configured_50_percent_narrative(scenario_modeler_factory):
@@ -269,6 +243,7 @@ def test_subsidy_sensitivity_includes_configured_50_percent_narrative(scenario_m
             "annual_bill_savings": 100_000,
             "annual_co2_reduction_kg": 50_000,
             "total_properties": 100,
+            "aggregate_simple_payback_years": 10,
         }
     }
 

@@ -71,25 +71,17 @@ def test_readiness_cost_decomposition_and_tier_technology():
     summary = analyzer.generate_readiness_summary(readiness)
 
     pd.testing.assert_series_equal(
-        readiness["fabric_prerequisite_cost"] + readiness["system_cost"],
-        readiness["total_cost"],
+        readiness["fabric_prerequisite_cost"] + readiness["system_cost_full_ashp"],
+        readiness["total_cost_full_ashp"],
         check_names=False,
     )
     pd.testing.assert_series_equal(
-        readiness["total_retrofit_cost"],
-        readiness["total_cost"],
+        readiness["fabric_prerequisite_cost"] + readiness["system_cost_hybrid_ashp_sensitivity"],
+        readiness["total_cost_hybrid_ashp_sensitivity"],
         check_names=False,
     )
 
-    tier_technology = dict(
-        zip(readiness["hp_readiness_tier"], readiness["system_technology"])
-    )
-    assert tier_technology[4] == "hybrid_ashp"
-    assert all(
-        technology == "ashp"
-        for tier, technology in tier_technology.items()
-        if tier != 4
-    )
+    assert not {"system_cost", "total_cost", "total_retrofit_cost"}.intersection(readiness.columns)
 
     full_ashp_by_tier = summary["total_cost_full_ashp_by_tier"]
     ordered = [full_ashp_by_tier[tier] for tier in sorted(full_ashp_by_tier)]
@@ -127,6 +119,16 @@ def test_readiness_accepts_nullable_and_legacy_boolean_values_identically():
     assert str(nullable_result["floor_insulation_present"].dtype) == "boolean"
     pd.testing.assert_frame_equal(nullable_result, legacy_result)
     assert nullable_result.loc[1, "deficiency_score"] == nullable_result.loc[2, "deficiency_score"]
+
+
+def test_readiness_accepts_standard_serialized_null_tokens():
+    frame = _readiness_boolean_fixture(
+        pd.Series(["None", "null", "NaN", "<NA>", ""], dtype="object")
+    )
+
+    result = RetrofitReadinessAnalyzer().assess_heat_pump_readiness(frame)
+
+    assert result["floor_insulation_present"].isna().all()
 
 
 def test_readiness_rejects_invalid_canonical_boolean_token():

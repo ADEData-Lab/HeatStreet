@@ -589,3 +589,10 @@ The analysis is implemented across these high‑level modules. This appendix is 
 - HP vs HN comparison artefacts: `src/reporting/comparisons.py` (CSV + markdown snippet + optional plot)
 - Dashboard packaging: `src/reporting/dashboard_data_builder.py` (dashboard-friendly exports)
 - Executive summary helpers: `src/reporting/executive_summary.py`, `src/reporting/report_headline_data.py`
+# Analytical pipeline contracts (2026-07)
+
+Spatial heat-network classification is a required model input. The authoritative adjusted EPC cohort is joined to the classification one-to-one using `CERTIFICATE_NUMBER`, with null/duplicate rejection, order preservation, row-count reconciliation, and the canonical HN-ready rule of tiers 1–3. Both the public `stock_scenario` model family and the internal `diagnostic_full_fabric_pathway` family consume this same enriched cohort.
+
+Simple payback is upfront capital cost divided by annual bill savings. The public scenario schema distinguishes aggregate simple payback from the mean and median of valid property paybacks. Every finite property payback with strictly positive savings is included; there is no 100-year truncation. Non-positive aggregate savings serialize as null with an explicit status and denominator counts.
+
+Readiness is a technology-neutral fabric and heat-demand classification. Full-ASHP cost is the canonical readiness cost; the hybrid-ASHP calculation is explicitly labelled as a sensitivity. Generic mixed `system_cost`, `total_cost`, and `total_retrofit_cost` fields are not published.

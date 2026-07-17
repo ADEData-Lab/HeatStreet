@@ -36,7 +36,7 @@ def test_hybrid_cost_bug_fix():
 
     # Create test property
     test_property = pd.Series({
-        'LMK_KEY': 'TEST_HYBRID_001',
+        'CERTIFICATE_NUMBER': 'TEST_HYBRID_001',
         'TOTAL_FLOOR_AREA': 100,
         'ENERGY_CONSUMPTION_CURRENT': 200,  # kWh/m²/year
         'wall_type': 'solid_brick',
@@ -271,7 +271,7 @@ def test_pathway_modeler_rejects_negative_intensity():
     modeler = PathwayModeler()
 
     negative_property = pd.Series({
-        'LMK_KEY': 'NEG_PATH',
+        'CERTIFICATE_NUMBER': 'NEG_PATH',
         'TOTAL_FLOOR_AREA': 90,
         'ENERGY_CONSUMPTION_CURRENT': -25,
     })
@@ -289,7 +289,7 @@ def test_baseline_pathway_handles_no_fabric_package():
 
     modeler = PathwayModeler()
     baseline_property = pd.Series({
-        'LMK_KEY': 'BASELINE_001',
+        'CERTIFICATE_NUMBER': 'BASELINE_001',
         'TOTAL_FLOOR_AREA': 100,
         'ENERGY_CONSUMPTION_CURRENT': 180,
         'energy_consumption_adjusted': 180,
@@ -320,12 +320,13 @@ def test_model_all_pathways_includes_baseline_pathway():
     modeler = PathwayModeler()
     df = pd.DataFrame([
         {
-            'LMK_KEY': 'PATHWAYS_001',
+            'CERTIFICATE_NUMBER': 'PATHWAYS_001',
             'TOTAL_FLOOR_AREA': 100,
             'ENERGY_CONSUMPTION_CURRENT': 180,
             'energy_consumption_adjusted': 180,
             'estimated_flow_temp': 55,
             'hn_ready': False,
+            'tier_number': 5,
             'wall_type': 'solid_brick',
             'wall_insulated': False,
             'roof_insulation_thickness_mm': 50,

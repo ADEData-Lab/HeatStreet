@@ -12,10 +12,17 @@ def _fake_results(pathways):
     for pathway in pathways:
         for i in range(5):
             baseline_bill = 1200 + i * 10
-            annual_bill = 800 + i * 5
+            pathway_offset = {
+                'fabric_plus_hp_only': 0,
+                'fabric_plus_hn_only': 80,
+                'fabric_plus_hp_plus_hn': 40,
+            }.get(pathway, 0)
+            annual_bill = 800 + i * 5 + pathway_offset
             baseline_co2 = 3.0 + 0.1 * i
             annual_co2 = 1.5 + 0.05 * i
-            capex = 10000 + 100 * i
+            capex = 10000 + 100 * i + pathway_offset * 10
+            is_hybrid = pathway == 'fabric_plus_hp_plus_hn'
+            has_hn_access = is_hybrid and i < 2
             records.append(
                 {
                     'pathway_id': pathway,
@@ -24,9 +31,13 @@ def _fake_results(pathways):
                     'baseline_bill': baseline_bill,
                     'annual_bill_saving': baseline_bill - annual_bill,
                     'annual_co2_tonnes': annual_co2,
+                    'annual_demand_kwh': 5000 + pathway_offset,
                     'baseline_co2_tonnes': baseline_co2,
                     'co2_saving_tonnes': baseline_co2 - annual_co2,
                     'simple_payback_years': capex / (baseline_bill - annual_bill),
+                    'has_hn_access': has_hn_access,
+                    'assigned_heat_network': has_hn_access,
+                    'assigned_ashp': is_hybrid and not has_hn_access,
                 }
             )
     return pd.DataFrame(records)

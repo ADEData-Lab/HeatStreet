@@ -33,7 +33,10 @@ def test_model_scenarios_leaves_comparison_generation_to_pipeline_phase(monkeypa
             return {"heat_pump": {"base": {"capital_cost_per_property": 10000}}}
 
         def save_results(self):
-            return {}
+            property_path = analysis_outputs_dir / "scenario_results_by_property.parquet"
+            property_path.parent.mkdir(parents=True, exist_ok=True)
+            pd.DataFrame({"scenario": ["heat_pump"]}).to_parquet(property_path, index=False)
+            return {"property_path": property_path}
 
     class FakePathwayModeler:
         def __init__(self, output_dir=None):
@@ -87,6 +90,11 @@ def test_model_scenarios_leaves_comparison_generation_to_pipeline_phase(monkeypa
     monkeypatch.setattr(run_analysis, "DATA_OUTPUTS_DIR", analysis_outputs_dir)
     monkeypatch.setattr(run_analysis, "_hp_hn_comparison_outputs_cache", None)
     monkeypatch.setattr(run_analysis, "is_one_stop_only", lambda config=None: True)
+    monkeypatch.setattr(
+        run_analysis,
+        "build_stock_scenario_comparison",
+        lambda *_args: pd.DataFrame({"scenario_id": ["heat_pump"], "model_family": ["stock_scenario"]}),
+    )
 
     import src.reporting.visualizations as visualizations
 
@@ -146,21 +154,21 @@ def test_generate_one_stop_report_does_not_rerun_diagnostic_phase(monkeypatch, t
     assert rebuild_calls == []
 
 
-def test_package_dashboard_assets_consumes_existing_diagnostic_comparison(monkeypatch, tmp_path):
+def test_package_dashboard_assets_consumes_existing_stock_comparison(monkeypatch, tmp_path):
     def fake_ensure(df=None, analysis_logger=None):
-        comparison_dir = tmp_path / "data" / "outputs" / "comparisons"
+        comparison_dir = tmp_path / "data" / "outputs"
         comparison_dir.mkdir(parents=True, exist_ok=True)
-        comparison_path = comparison_dir / "hn_vs_hp_comparison.csv"
+        comparison_path = comparison_dir / "stock_scenario_comparison.csv"
         pd.DataFrame(
             [
                 {
-                    "pathway_id": "fabric_plus_hp_only",
-                    "pathway_name": "Heat Pump",
-                    "n_homes": 10,
-                    "capex_mean": 10000,
-                    "bill_saving_mean": 250,
-                    "co2_saving_mean": 1.2,
-                    "payback_mean": 18,
+                    "scenario_id": "heat_pump",
+                    "scenario": "Heat Pump",
+                    "total_properties": 10,
+                    "capital_cost_per_property": 10000,
+                    "annual_bill_savings": 250,
+                    "annual_co2_reduction_kg": 1200,
+                    "aggregate_simple_payback_years": 18,
                 }
             ]
         ).to_csv(comparison_path, index=False)
@@ -224,8 +232,8 @@ def test_dashboard_data_builder_includes_integrated_one_stop_outputs(tmp_path):
         ),
         hn_vs_hp_comparison=pd.DataFrame(
             [
-                {"pathway_id": "fabric_plus_hp_only", "pathway_name": "Heat Pump", "n_homes": 10, "capex_mean": 10000, "bill_saving_mean": 250, "co2_saving_mean": 1.2, "payback_mean": 18},
-                {"pathway_id": "fabric_plus_hn_only", "pathway_name": "Heat Network", "n_homes": 8, "capex_mean": 9000, "bill_saving_mean": 180, "co2_saving_mean": 0.9, "payback_mean": 22},
+                {"scenario_id": "heat_pump", "scenario": "Heat Pump", "total_properties": 10, "capital_cost_per_property": 10000, "annual_bill_savings": 250, "annual_co2_reduction_kg": 1200, "aggregate_simple_payback_years": 18},
+                {"scenario_id": "heat_network", "scenario": "Heat Network", "total_properties": 8, "capital_cost_per_property": 9000, "annual_bill_savings": 180, "annual_co2_reduction_kg": 900, "aggregate_simple_payback_years": 22},
             ]
         ),
         subsidy_results={},
@@ -243,7 +251,7 @@ def test_dashboard_data_builder_includes_integrated_one_stop_outputs(tmp_path):
 def test_one_stop_report_embeds_integrated_tables(tmp_path):
     output_dir = tmp_path / "outputs"
     processed_dir = tmp_path / "processed"
-    (output_dir / "comparisons").mkdir(parents=True, exist_ok=True)
+    output_dir.mkdir(parents=True, exist_ok=True)
     (output_dir / "reports").mkdir(parents=True, exist_ok=True)
     processed_dir.mkdir(parents=True, exist_ok=True)
 
@@ -254,46 +262,25 @@ def test_one_stop_report_embeds_integrated_tables(tmp_path):
     pd.DataFrame(
         [
             {
-                "pathway_id": "fabric_plus_hp_only",
-                "pathway_name": "Heat Pump",
-                "n_homes": 10,
-                "capex_mean": 10000,
-                "capex_p10": 8000,
-                "capex_p90": 12000,
-                "capex_median": 10000,
-                "bill_saving_mean": 250,
-                "co2_saving_mean": 1.2,
-                "payback_mean": 18,
-                "payback_note": "HP comparison note",
+                "scenario_id": "heat_pump", "scenario": "Heat Pump", "model_family": "stock_scenario",
+                "total_properties": 10, "capital_cost_per_property": 10000,
+                "annual_bill_savings": 250, "annual_co2_reduction_kg": 1200,
+                "aggregate_simple_payback_years": 18,
             },
             {
-                "pathway_id": "fabric_plus_hn_only",
-                "pathway_name": "Heat Network",
-                "n_homes": 8,
-                "capex_mean": 9000,
-                "capex_p10": 7000,
-                "capex_p90": 11000,
-                "capex_median": 9000,
-                "bill_saving_mean": 180,
-                "co2_saving_mean": 0.9,
-                "payback_mean": 22,
-                "payback_note": "HN has lower capex but longer payback when tariff exceeds gas.",
+                "scenario_id": "heat_network", "scenario": "Heat Network", "model_family": "stock_scenario",
+                "total_properties": 8, "capital_cost_per_property": 9000,
+                "annual_bill_savings": 180, "annual_co2_reduction_kg": 900,
+                "aggregate_simple_payback_years": 22,
             },
             {
-                "pathway_id": "fabric_plus_hp_plus_hn",
-                "pathway_name": "Hybrid",
-                "n_homes": 12,
-                "capex_mean": 9500,
-                "capex_p10": 7500,
-                "capex_p90": 11500,
-                "capex_median": 9500,
-                "bill_saving_mean": 220,
-                "co2_saving_mean": 1.0,
-                "payback_mean": 20,
-                "payback_note": "Hybrid note",
+                "scenario_id": "hybrid", "scenario": "Hybrid", "model_family": "stock_scenario",
+                "total_properties": 12, "capital_cost_per_property": 9500,
+                "annual_bill_savings": 220, "annual_co2_reduction_kg": 1000,
+                "aggregate_simple_payback_years": 20,
             },
         ]
-    ).to_csv(output_dir / "comparisons" / "hn_vs_hp_comparison.csv", index=False)
+    ).to_csv(output_dir / "stock_scenario_comparison.csv", index=False)
     pd.DataFrame(
         [{"LOCAL_AUTHORITY": "E09000025", "LOCAL_AUTHORITY_NAME": "Newham", "property_count": 12, "mean_epc_rating": 61.2, "mean_energy_kwh_m2_year": 240.5}]
     ).to_csv(output_dir / "borough_breakdown.csv", index=False)
@@ -318,13 +305,8 @@ def test_one_stop_report_embeds_integrated_tables(tmp_path):
     section_11 = payload["sections"]["section_11"]
 
     assert section_7["tables"][0]["caption"] == "Heat Network vs Heat Pump Comparison"
-    envelope_tables = [table for table in section_7["tables"] if table["caption"] == "Retrofit Cost Envelopes"]
-    assert envelope_tables
-    envelope_rows = envelope_tables[0]["data"]
-    envelope_ids = {row["pathway_id"] for row in envelope_rows}
-    assert {"fabric_plus_hp_only", "fabric_plus_hn_only", "fabric_plus_hp_plus_hn"}.issubset(envelope_ids)
-    assert all({"capex_p10", "capex_p90", "capex_median"}.issubset(row) for row in envelope_rows)
-    assert any(dp["key"].endswith("_payback_note") for dp in section_7["datapoints"])
+    assert {row["model_family"] for row in section_7["tables"][0]["data"]} == {"stock_scenario"}
+    assert any(dp["key"].endswith("_aggregate_simple_payback_years") for dp in section_7["datapoints"])
     assert any(table["caption"] == "Borough Priority Ranking" for table in section_10["tables"])
     assert any(table["caption"] == "Tenure Segmentation" for table in section_10["tables"])
     assert any(table["caption"] == "Heat Network Connection Thresholds" for table in section_10["tables"])

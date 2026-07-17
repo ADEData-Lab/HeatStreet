@@ -345,3 +345,12 @@ The academic adjustment factors (prebound effect, measurement error) are well-ci
 ---
 
 **END OF VERIFICATION SUMMARY**
+# Analytical contract repair verification (2026-07)
+
+The valid pre-change environment baseline was 258 passed and 258 warnings in 30.81 seconds; the earlier 48 setup errors were pytest temporary-directory permission failures. The repaired suite adds semantic contract coverage for a four-property cohort (two HN-ready and two non-ready), spatial join order/count/key preservation, hybrid assignment exclusivity, long finite paybacks, stock-versus-diagnostic publication scope, UTC timing, traceable window economics, and preservation of the previous public snapshot when QA fails.
+
+Known before-state analytical anchors are HP aggregate payback 43.10 years, old truncated property mean 46.66 years, diagnostic hybrid/pure-HP median payback 65.36 years, and readiness mixed/full-ASHP totals £3.762bn/£4.274bn. After-state values must be taken from a successful current-run `qa_checks.json` and run-scoped artifacts; they are not manually inserted into generated outputs.
+
+Validation commands use a workspace-local pytest base temp directory. A development-fixture `--no-publish` run is required before publication; a 168,051-property analytical rerun is attempted when the adjusted cohort and spatial inputs are available. Acquisition is not claimed when raw source data or credentials are unavailable.
+
+Final validation completed on run `20260717T181346828315Z-7cf3a516fdff`: all 8 phases completed, semantic QA passed with 0 critical failures, and the public snapshot was not replaced. The repaired suite result was 267 passed and 256 warnings in 29.23 seconds. On the analytical cohort, HP aggregate/mean/median simple paybacks are 43.10/47.81/41.54 years. The hybrid assigns 48,546 homes to HN and 119,505 to ASHP, with aggregate/mean/median paybacks of 72.85/80.10/73.80 years, so it is no longer identical to pure HP. Canonical full-ASHP readiness investment remains GBP 4.274bn; the separately labelled hybrid-ASHP sensitivity remains the lower-cost sensitivity. Raw acquisition was not rerun because this validation used the available adjusted cohort with a pinned SHA-256 fingerprint.

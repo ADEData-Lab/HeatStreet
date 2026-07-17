@@ -51,3 +51,10 @@ One row per property per scenario capturing diagnostics and cost/savings breakdo
 | `payback_years` | Simple payback (infinite when not cost-effective) |
 
 > Tip: because `measures_applied` and `measures_removed` are stored as lists, use pandas with `explode` if you want to count per-measure uptake.
+# Model-family and publication contract
+
+Public scenario, comparison, subsidy, dashboard, and one-stop outputs come only from the `stock_scenario` family. `pathway_results_by_property.parquet`, `pathway_results_summary.csv`, and the diagnostic HP/HN comparison remain internal and carry `diagnostic_full_fabric_pathway` metadata with `headline_reporting_eligible=false`.
+
+Public payback fields are `aggregate_simple_payback_years`, `property_simple_payback_mean_years`, and `property_simple_payback_median_years`, accompanied by status, denominator, non-positive-savings, infinite, and truncation-count fields. The zero-subsidy aggregate must reconcile exactly to the corresponding canonical scenario aggregate. Subsidy uptake is labelled “modelled sensitivity, not forecast.”
+
+`window_economics.csv` is generated from configured glazing costs, saving fractions, gas price, the explicit simple-payback definition, and source notes. `subsidy_sensitivity_analysis_simple_gbp.csv` is retired.
