@@ -3,7 +3,7 @@ name: Analytical contracts and semantic QA
 on:
   pull_request:
   push:
-    branches: [main, fix/analysis-pipeline-contracts]
+    branches: [main]
   workflow_dispatch:
 
 jobs:
