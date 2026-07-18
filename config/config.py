@@ -39,7 +39,10 @@ def load_config(config_file: str = "config.yaml") -> Dict[str, Any]:
     if not config_path.exists():
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
 
-    with open(config_path, 'r') as f:
+    # Repository configuration and run snapshots are UTF-8. Never inherit the
+    # Windows ANSI code page (for example CP1252), which cannot decode all
+    # Unicode characters emitted by yaml.safe_dump(..., allow_unicode=True).
+    with open(config_path, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
 
     return config

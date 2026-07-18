@@ -1,10 +1,14 @@
 from copy import deepcopy
 from pathlib import Path
+import os
+import subprocess
+import sys
 
 import pytest
 
 import run_analysis
 from config.config import (
+    RUN_CONFIG_ENV,
     build_run_config,
     get_energy_price_profiles,
     get_scenario_definitions,
@@ -17,6 +21,40 @@ from src.utils.run_integrity import RunContext
 
 
 JANUARY_ID = "january_client_report_provisional"
+
+
+def test_utf8_run_snapshot_loads_when_windows_utf8_mode_is_disabled(tmp_path):
+    snapshot = tmp_path / "config_snapshot.yaml"
+    snapshot.write_text(
+        "energy_price_profiles:\n"
+        "  default_profile: unicode_profile\n"
+        "  profiles:\n"
+        "    unicode_profile:\n"
+        "      label: 'Period → verified'\n"
+        "      effective_period: 'Test period'\n"
+        "      gas_gbp_per_kwh: 0.1\n"
+        "      electricity_gbp_per_kwh: 0.2\n"
+        "      standing_charges_included: false\n"
+        "      source_note: 'UTF-8 regression'\n",
+        encoding="utf-8",
+    )
+    env = os.environ.copy()
+    env[RUN_CONFIG_ENV] = str(snapshot)
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-X",
+            "utf8=0",
+            "-c",
+            "from config.config import load_config; assert load_config()['energy_price_profiles']['default_profile'] == 'unicode_profile'",
+        ],
+        cwd=Path(__file__).resolve().parents[1],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
 
 
 def test_january_provisional_profile_is_exact_configured_default():
