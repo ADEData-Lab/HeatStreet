@@ -146,6 +146,42 @@ class OutputEntry:
     modified_time: Optional[float] = None
 
 
+@dataclass
+class StudioSessionState:
+    """Explicit lifecycle state for one Studio process and successive runs."""
+
+    status: str = "setup"
+    run_id: Optional[str] = None
+    energy_price_profile_id: Optional[str] = None
+    completion: Dict[str, object] = field(default_factory=dict)
+
+    def begin(self, profile_id: Optional[str] = None) -> None:
+        if self.status not in {"setup", "resetting"}:
+            raise RuntimeError(f"Cannot begin a Studio run from {self.status}")
+        self.status = "running"
+        self.run_id = None
+        self.energy_price_profile_id = profile_id
+        self.completion.clear()
+
+    def complete(self, payload: Dict[str, object]) -> None:
+        self.status = "completed"
+        self.completion = dict(payload)
+        self.run_id = payload.get("run_id") or self.run_id
+        self.energy_price_profile_id = (
+            payload.get("energy_price_profile_id") or self.energy_price_profile_id
+        )
+
+    def fail(self, message: str = "", *, cancelled: bool = False) -> None:
+        self.status = "cancelled" if cancelled else "failed"
+        self.completion = {"error": message}
+
+    def reset(self) -> None:
+        self.status = "resetting"
+        self.run_id = None
+        self.completion.clear()
+        self.status = "setup"
+
+
 # ------------------------------------------------------------------
 # Top-level dashboard state
 # ------------------------------------------------------------------

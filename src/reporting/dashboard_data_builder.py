@@ -61,7 +61,7 @@ BOROUGH_NAME_BY_CODE = {
 import numpy as np
 from loguru import logger
 
-from config.config import DATA_OUTPUTS_DIR, get_cost_reduction_levers, get_scenario_label_map
+from config.config import DATA_OUTPUTS_DIR, get_cost_reduction_levers, get_scenario_label_map, get_resolved_energy_prices
 from src.utils.analysis_logger import convert_to_json_serializable
 from src.utils.run_metadata import get_total_properties_from_metadata
 
@@ -90,6 +90,7 @@ class DashboardDataBuilder:
         self.output_dir = Path(output_dir) / "dashboard"
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.scenario_labels = get_scenario_label_map()
+        self.energy_prices = get_resolved_energy_prices()
 
     def _scenario_label(self, scenario_id: str, results: Optional[Dict] = None) -> str:
         if isinstance(results, dict):
@@ -735,10 +736,8 @@ class DashboardDataBuilder:
                        if "totalProperties" not in summary else {}),
                     "meanFabricCost": float(readiness_summary.get("mean_fabric_cost", 0)),
                     "meanSystemCostFullAshp": float(readiness_summary.get("mean_system_cost_full_ashp") or 0),
-                    "meanTotalCostHybridAshpSensitivity": float(readiness_summary.get("mean_total_cost_hybrid_ashp_sensitivity") or 0),
                     "meanTotalCostFullAshp": float(readiness_summary.get("mean_total_cost_full_ashp") or 0),
                     "totalCostFullAshp": float(readiness_summary.get("total_cost_full_ashp") or 0),
-                    "totalCostHybridAshpSensitivity": float(readiness_summary.get("total_cost_hybrid_ashp_sensitivity") or 0),
                     "heatDemandReduction": float(readiness_summary.get("heat_demand_reduction_percent", 0)),
                     "readyOrNearReady": float(
                         readiness_summary.get("tier_percentages", {}).get(1, 0)
@@ -915,7 +914,7 @@ class DashboardDataBuilder:
                 cost_data.append({
                     "measure": measure_name,
                     "cost": round(float(row.get("cumulative_capex", 0)), 0),
-                    "savings": round(float(row.get("cumulative_kwh_saved", 0)) * 0.0624, 0),  # Convert kWh to £
+                    "savings": round(float(row.get("cumulative_kwh_saved", 0)) * self.energy_prices["gas"], 0),
                 })
             return cost_data
 

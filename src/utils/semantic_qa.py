@@ -76,6 +76,8 @@ def run_semantic_qa(context: RunContext, manifest: ArtifactManifest, output_path
     windows = pd.read_csv(outputs / "window_economics.csv")
     archetype = json.loads((outputs / "archetype_analysis_results.json").read_text(encoding="utf-8"))
     one_stop = json.loads((outputs / "one_stop_output.json").read_text(encoding="utf-8"))
+    run_metadata = json.loads((outputs / "run_metadata.json").read_text(encoding="utf-8"))
+    dashboard = json.loads((outputs / "dashboard" / "dashboard-data.json").read_text(encoding="utf-8"))
     cohort = int(context.authoritative_cohort or len(enriched))
 
     _check(checks, "authoritative_unique_key", lambda: require_property_identifier(enriched).size)
@@ -99,6 +101,11 @@ def run_semantic_qa(context: RunContext, manifest: ArtifactManifest, output_path
     _check(checks, "zero_subsidy_payback_reconciliation", lambda: _validate_zero_subsidy_payback(scenarios, subsidy))
     _check(checks, "payback_exclusion_reconciliation", lambda: _validate_payback_exclusions(scenarios))
     _check(checks, "one_stop_json_integrity", lambda: _validate_one_stop_json(one_stop, context, root))
+    _check(
+        checks,
+        "energy_price_profile_consistency",
+        lambda: _validate_energy_price_metadata(context, run_metadata, one_stop, dashboard),
+    )
     _check(checks, "window_source_traceability", lambda: _validate_windows(windows))
     _check(checks, "removed_step_subsidy_artifact", lambda: _require_absent(outputs / "subsidy_sensitivity_analysis_simple_gbp.csv"))
     _check(checks, "diagnostic_excluded_from_public_comparison", lambda: _validate_public_comparison(public_comparison))
@@ -331,6 +338,23 @@ def _validate_readiness_costs(readiness: pd.DataFrame) -> dict[str, float]:
     missing = required.difference(readiness.columns)
     if missing:
         raise ValueError(f"missing explicit readiness costs: {sorted(missing)}")
+    label_column = "ashp_plus_boiler_sensitivity_label"
+    qualification_column = "ashp_plus_boiler_sensitivity_qualifications"
+    if label_column not in readiness or not readiness[label_column].eq(
+        "Tier 4 ASHP-plus-boiler capital-cost sensitivity"
+    ).all():
+        raise ValueError("supporting ASHP-plus-boiler sensitivity label is missing or ambiguous")
+    required_caveats = (
+        "not the spatial heat-network/ASHP hybrid scenario",
+        "not part of the readiness classification",
+        "not a recommended pathway",
+        "retains boiler backup",
+        "not the modelled net-zero endpoint",
+        "operating-cost and carbon implications are not established",
+    )
+    caveats = readiness.get(qualification_column, pd.Series(dtype=str)).fillna("").str.casefold()
+    if caveats.empty or any(not caveats.str.contains(text.casefold(), regex=False).all() for text in required_caveats):
+        raise ValueError("supporting ASHP-plus-boiler sensitivity qualifications are incomplete")
     forbidden = {"system_cost", "total_cost", "total_retrofit_cost"}.intersection(readiness.columns)
     if forbidden:
         raise ValueError(f"ambiguous readiness costs remain: {sorted(forbidden)}")
@@ -350,7 +374,7 @@ def _validate_readiness_costs(readiness: pd.DataFrame) -> dict[str, float]:
         rtol=COST_RECONCILIATION_REL_TOLERANCE,
         atol=COST_RECONCILIATION_ABS_TOLERANCE_GBP,
     ):
-        raise ValueError("hybrid-ASHP sensitivity costs do not reconcile property-by-property")
+        raise ValueError("ASHP-plus-boiler capital-cost sensitivity does not reconcile property-by-property")
     return {
         "canonical_full_ashp_total_gbp": float(numeric["total_cost_full_ashp"].sum()),
         "hybrid_ashp_sensitivity_total_gbp": float(numeric["total_cost_hybrid_ashp_sensitivity"].sum()),
@@ -480,7 +504,7 @@ def _validate_one_stop_json(payload: dict[str, Any], context: RunContext, root: 
 
     readiness_datapoints = {item["key"]: item.get("value") for item in sections.get("section_4", {}).get("datapoints", [])}
     readiness = pd.read_csv(root / "outputs" / "retrofit_readiness_analysis.csv", low_memory=False)
-    for field in ("total_cost_full_ashp", "total_cost_hybrid_ashp_sensitivity"):
+    for field in ("total_cost_full_ashp",):
         key = f"{field}_gbp"
         expected = float(pd.to_numeric(readiness[field], errors="raise").sum())
         if key not in readiness_datapoints or not np.isclose(
@@ -489,7 +513,30 @@ def _validate_one_stop_json(payload: dict[str, Any], context: RunContext, root: 
             atol=COST_RECONCILIATION_ABS_TOLERANCE_GBP,
         ):
             raise ValueError(f"one-stop readiness total does not reconcile for {field}")
+    serialized = json.dumps(payload).casefold()
+    if "hybrid_ashp_sensitivity" in serialized or "hybrid-ashp sensitivity" in serialized:
+        raise ValueError("ASHP-plus-boiler sensitivity appears in primary one-stop output")
     return {"sections": len(sections), "datapoints": datapoint_count}
+
+
+def _validate_energy_price_metadata(
+    context: RunContext,
+    run_metadata: dict[str, Any],
+    one_stop: dict[str, Any],
+    dashboard: dict[str, Any],
+) -> str:
+    expected = (context.energy_price_profile or {}).get("profile_id")
+    if not expected:
+        raise ValueError("active run lacks an energy price profile ID")
+    observed = {
+        "run metadata": (run_metadata.get("energy_price_profile") or {}).get("profile_id"),
+        "one-stop metadata": (one_stop.get("metadata", {}).get("energy_price_profile") or {}).get("profile_id"),
+        "dashboard metadata": (dashboard.get("runMetadata", {}).get("energy_price_profile") or {}).get("profile_id"),
+    }
+    mismatched = {name: value for name, value in observed.items() if value != expected}
+    if mismatched:
+        raise ValueError(f"client-facing energy price profile metadata mismatch: {mismatched}; expected {expected}")
+    return expected
 
 
 def _resolve_public_source(root: Path, source: str) -> Path:

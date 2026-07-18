@@ -82,6 +82,13 @@ def test_readiness_cost_decomposition_and_tier_technology():
     )
 
     assert not {"system_cost", "total_cost", "total_retrofit_cost"}.intersection(readiness.columns)
+    assert readiness["ashp_plus_boiler_sensitivity_label"].eq(
+        "Tier 4 ASHP-plus-boiler capital-cost sensitivity"
+    ).all()
+    caveats = readiness["ashp_plus_boiler_sensitivity_qualifications"].iloc[0].casefold()
+    assert "not the spatial heat-network/ashp hybrid scenario" in caveats
+    assert "not a recommended pathway" in caveats
+    assert "retains boiler backup" in caveats
 
     full_ashp_by_tier = summary["total_cost_full_ashp_by_tier"]
     ordered = [full_ashp_by_tier[tier] for tier in sorted(full_ashp_by_tier)]

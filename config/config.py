@@ -2,6 +2,7 @@
 Configuration loader for Heat Street EPC Analysis project.
 """
 
+import copy
 import os
 import yaml
 from pathlib import Path
@@ -19,6 +20,9 @@ DATA_SUPPLEMENTARY_DIR = DATA_DIR / "supplementary"
 DATA_OUTPUTS_DIR = DATA_DIR / "outputs"
 
 
+RUN_CONFIG_ENV = "HEATSTREET_RUN_CONFIG"
+
+
 def load_config(config_file: str = "config.yaml") -> Dict[str, Any]:
     """
     Load configuration from YAML file.
@@ -29,7 +33,8 @@ def load_config(config_file: str = "config.yaml") -> Dict[str, Any]:
     Returns:
         Dictionary containing configuration parameters
     """
-    config_path = CONFIG_DIR / config_file
+    run_config = os.environ.get(RUN_CONFIG_ENV)
+    config_path = Path(run_config) if run_config and config_file == "config.yaml" else CONFIG_DIR / config_file
 
     if not config_path.exists():
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
@@ -38,6 +43,80 @@ def load_config(config_file: str = "config.yaml") -> Dict[str, Any]:
         config = yaml.safe_load(f)
 
     return config
+
+
+def get_energy_price_profiles(config: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    """Return and validate the data-driven domestic unit-rate profiles."""
+    config = config or load_config()
+    section = config.get("energy_price_profiles", {})
+    profiles = section.get("profiles", {})
+    default_id = section.get("default_profile")
+    if not isinstance(profiles, dict) or not profiles:
+        raise ValueError("No domestic energy price profiles are configured")
+    if default_id not in profiles:
+        raise ValueError(f"Configured default energy price profile is unknown: {default_id!r}")
+    required = {
+        "label", "effective_period", "gas_gbp_per_kwh",
+        "electricity_gbp_per_kwh", "standing_charges_included", "source_note",
+    }
+    for profile_id, profile in profiles.items():
+        missing = required.difference(profile or {})
+        if missing:
+            raise ValueError(f"Energy price profile {profile_id!r} is missing: {sorted(missing)}")
+        if profile.get("standing_charges_included") is not False:
+            raise ValueError(f"Energy price profile {profile_id!r} must explicitly exclude standing charges")
+    return section
+
+
+def resolve_energy_price_profile(
+    config: Dict[str, Any], profile_id: str | None = None, *, explicit_selection: bool = False,
+) -> Dict[str, Any]:
+    """Resolve one named domestic unit-rate profile with reproducibility metadata."""
+    section = get_energy_price_profiles(config)
+    selected_id = profile_id or section["default_profile"]
+    if selected_id not in section["profiles"]:
+        available = ", ".join(sorted(section["profiles"]))
+        raise ValueError(f"Unknown energy price profile {selected_id!r}. Available profiles: {available}")
+    resolved = copy.deepcopy(section["profiles"][selected_id])
+    resolved.update({
+        "profile_id": selected_id,
+        "is_configured_default": selected_id == section["default_profile"],
+        "selection_source": "explicit_user_selection" if explicit_selection else "configured_default",
+    })
+    return resolved
+
+
+def build_run_config(
+    config: Dict[str, Any], profile_id: str | None = None, *, explicit_selection: bool = False,
+) -> Dict[str, Any]:
+    """Create an isolated configuration whose current prices are the resolved profile."""
+    run_config = copy.deepcopy(config)
+    profile = resolve_energy_price_profile(run_config, profile_id, explicit_selection=explicit_selection)
+    run_config["resolved_energy_price_profile"] = profile
+    run_config.setdefault("energy_prices", {})["current"] = {
+        "gas": float(profile["gas_gbp_per_kwh"]),
+        "electricity": float(profile["electricity_gbp_per_kwh"]),
+        "profile_id": profile["profile_id"],
+    }
+    baseline = run_config.setdefault("financial", {}).setdefault("price_scenarios", {}).setdefault("baseline", {})
+    baseline.update({
+        "name": profile["label"],
+        "gas": float(profile["gas_gbp_per_kwh"]),
+        "electricity": float(profile["electricity_gbp_per_kwh"]),
+        "energy_price_profile_id": profile["profile_id"],
+    })
+    return run_config
+
+
+def get_resolved_energy_prices(config: Dict[str, Any] | None = None) -> Dict[str, float]:
+    """Return the single run-resolved gas/electricity unit-rate pair."""
+    config = config or load_config()
+    profile = config.get("resolved_energy_price_profile") or resolve_energy_price_profile(config)
+    return {
+        "gas": float(profile["gas_gbp_per_kwh"]),
+        "electricity": float(profile["electricity_gbp_per_kwh"]),
+        "profile_id": profile["profile_id"],
+    }
 
 
 def get_london_boroughs() -> list:
@@ -248,7 +327,10 @@ def get_energy_prices(scenario: str = 'current') -> Dict[str, float]:
     """
     config = load_config()
 
-    # Try legacy energy_prices first
+    if scenario == "current":
+        return get_resolved_energy_prices(config)
+
+    # Projected prices remain separate from domestic price-cap profiles.
     if scenario in config.get('energy_prices', {}):
         return config['energy_prices'][scenario]
 
@@ -257,11 +339,7 @@ def get_energy_prices(scenario: str = 'current') -> Dict[str, float]:
     if scenario in price_scenarios:
         return price_scenarios[scenario]
 
-    # Default to current prices
-    return config.get('energy_prices', {}).get('current', {
-        'gas': 0.0624,
-        'electricity': 0.245
-    })
+    raise ValueError(f"Unknown energy price scenario or profile: {scenario!r}")
 
 
 def get_heat_pump_cop_curve() -> Dict[str, Any]:

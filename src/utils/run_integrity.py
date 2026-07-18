@@ -29,6 +29,8 @@ class RunContext:
     analysis_start: Optional[str] = None
     git_commit: Optional[str] = None
     configuration_sha256: Optional[str] = None
+    configuration_snapshot: Optional[str] = None
+    energy_price_profile: Optional[dict[str, Any]] = None
     sample_start_date: Optional[str] = None
     sample_end_date: Optional[str] = None
     run_root: Optional[Path] = None
@@ -179,6 +181,7 @@ class ArtifactRecord:
     sha256: str
     schema_version: str
     validation_status: str
+    energy_price_profile_id: Optional[str] = None
 
 
 @dataclass
@@ -231,6 +234,7 @@ class ArtifactManifest:
             sha256=_file_sha256(path),
             schema_version=schema_version,
             validation_status=validation_status,
+            energy_price_profile_id=(self.context.energy_price_profile or {}).get("profile_id"),
         )
         self.artifacts[logical_name] = record
         self.save()

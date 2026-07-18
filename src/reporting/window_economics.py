@@ -14,7 +14,8 @@ def generate_window_economics(output_path: Path | None = None) -> pd.DataFrame:
     config = load_config()
     assumptions = config.get("window_economics", {})
     costs = config.get("costs", {})
-    gas_price = float(config.get("energy_prices", {}).get("current", {}).get("gas", 0))
+    from config.config import get_resolved_energy_prices
+    gas_price = float(get_resolved_energy_prices(config)["gas"])
     annual_energy = float(assumptions.get("assumed_annual_energy_kwh", 0))
     rows = []
     for measure in assumptions.get("measures", []):

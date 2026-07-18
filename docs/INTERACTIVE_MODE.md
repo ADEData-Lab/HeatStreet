@@ -360,6 +360,14 @@ Use **Manual** for:
 
 ## Next Steps
 
+## Energy price period and repeat sessions
+
+Before a Studio analysis begins, the **Energy price period** control shows every domestic unit-rate profile configured in `config/config.yaml`, including gas and electricity p/kWh, standing-charge treatment and its source or status note. **January client report provisional prices** is selected by default on a fresh launch; choose it to reproduce the original provisional client-report basis. Standing charges are excluded. Heat-network tariffs and projected 2030/2040 assumptions are separate and do not appear as domestic price-cap periods.
+
+For unattended runs, use `--energy-price-profile january_client_report_provisional`. Omitting the option uses the configured default; an unknown ID fails rather than being substituted. Every run stores `config_snapshot.yaml` beside its outputs so it remains reproducible if repository configuration changes later.
+
+After success, Studio remains open and shows the run ID, output location, QA state, selected profile, publication state and key files. Choose **Start new analysis** to clear run-specific progress, logs, errors and object references and return to setup, or **Exit Studio** to close deliberately. Failed and cancelled runs additionally offer **Retry with current settings**. New sessions and retries create a new run context and do not remove earlier run directories.
+
 After running the interactive analysis:
 
 1. **Review outputs** in `data/outputs/`

@@ -32,11 +32,21 @@ from rich.panel import Panel
 from rich import print as rprint
 import time
 import pandas as pd
+import yaml
 
 # Add src to path
 sys.path.append(str(Path(__file__).parent))
 
-from config.config import load_config, ensure_directories, DATA_RAW_DIR, DATA_PROCESSED_DIR, DATA_OUTPUTS_DIR
+from config.config import (
+    RUN_CONFIG_ENV,
+    build_run_config,
+    get_energy_price_profiles,
+    load_config,
+    ensure_directories,
+    DATA_RAW_DIR,
+    DATA_PROCESSED_DIR,
+    DATA_OUTPUTS_DIR,
+)
 from src.acquisition.epc_api_downloader import (
     EPCAPIDownloader,
     EPCDownloadError,
@@ -79,6 +89,7 @@ _active_run_context: Optional[RunContext] = None
 _active_authoritative_cohort_size: Optional[int] = None
 _public_outputs_dir: Optional[Path] = None
 _run_path_redirections: list[tuple[object, str, object]] = []
+_previous_run_config_env: Optional[str] = None
 
 PHASE_ACQUISITION = "Acquisition"
 PHASE_VALIDATION = "Validation"
@@ -154,13 +165,18 @@ def _configure_run_directories(
 
 def _restore_run_directories() -> None:
     """Undo process-local compatibility redirects after a run completes."""
-    global DATA_OUTPUTS_DIR, DATA_PROCESSED_DIR, _run_path_redirections
+    global DATA_OUTPUTS_DIR, DATA_PROCESSED_DIR, _run_path_redirections, _previous_run_config_env
     for module, attribute, original_value in reversed(_run_path_redirections):
         try:
             setattr(module, attribute, original_value)
         except Exception:
             continue
     _run_path_redirections = []
+    if _previous_run_config_env is None:
+        os.environ.pop(RUN_CONFIG_ENV, None)
+    else:
+        os.environ[RUN_CONFIG_ENV] = _previous_run_config_env
+    _previous_run_config_env = None
 
 
 def _write_current_run_metadata(
@@ -218,6 +234,10 @@ def _register_current_artifacts(context: RunContext) -> ArtifactManifest:
         "dashboard_html": (Path(DATA_OUTPUTS_DIR) / "one_stop_dashboard.html", "client_outputs", True, "client"),
         "analysis_compendium": (Path(DATA_OUTPUTS_DIR) / "analysis_outputs_compendium.xlsx", "client_outputs", True, "client"),
     }
+    if context.configuration_snapshot:
+        artifact_map["configuration_snapshot"] = (
+            Path(context.configuration_snapshot), "provenance", True, "internal"
+        )
     for logical_name, (path, phase, required, scope) in artifact_map.items():
         if path.is_file():
             manifest.register(
@@ -1179,6 +1199,10 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--source-fixture-sha256", help="Expected SHA-256 for a development fixture.")
     parser.add_argument("--refresh-hnpd", action="store_true", help="Refresh HNPD inputs for a production run.")
     parser.add_argument("--no-publish", action="store_true", help="Keep outputs run-scoped and do not update the latest publication.")
+    parser.add_argument(
+        "--energy-price-profile",
+        help="Named domestic energy unit-rate profile from config/config.yaml.",
+    )
 
     args = parser.parse_args(argv)
     if args.sample_start and args.sample_end and args.sample_start > args.sample_end:
@@ -1189,6 +1213,14 @@ def parse_args(argv=None) -> argparse.Namespace:
         parser.error("--production and --development-fixture are mutually exclusive")
     if args.development_fixture and not (args.source_run_id and args.source_fixture_sha256):
         parser.error("--development-fixture requires --source-run-id and --source-fixture-sha256")
+    if args.energy_price_profile:
+        profiles = get_energy_price_profiles(load_config()).get("profiles", {})
+        if args.energy_price_profile not in profiles:
+            parser.error(
+                f"unknown energy price profile {args.energy_price_profile!r}; "
+                f"available profiles: {', '.join(sorted(profiles))}"
+            )
+    args.energy_price_profile_cli_explicit = args.energy_price_profile is not None
 
     # Backwards-compatibility shim: expose args.tui as a bool for legacy code
     # that predates tui_mode/no_tui. create_dashboard() reads tui_mode/no_tui.
@@ -3966,7 +3998,6 @@ def main(argv=None):
     start_time = time.time()
     try:
         with _configure_tui_logging(ui), _route_console_output_for_tui(ui):
-            _ui_call(ui, "run_started", "HeatStreet analysis started")
             print_header()
             exit_code = _main_impl(args, ui, analysis_logger, start_time)
             if exit_code == EXIT_ANALYSIS_FAILED:
@@ -3988,23 +4019,27 @@ def main(argv=None):
 
 
 def _run_with_textual_main(args: argparse.Namespace, ui) -> int:
-    """Run the pipeline in a background thread while Textual app is in main."""
+    """Keep one Textual process open across clean, isolated analysis sessions."""
     import threading
     from src.ui.textual_app import HeatStreetStudioApp
 
     result: Dict[str, Any] = {"exit_code": EXIT_SUCCESS}
+    pipeline_threads: list[threading.Thread] = []
+    start_lock = threading.Lock()
+    app = None
 
-    def _pipeline_thread_fn() -> None:
+    def _pipeline_thread_fn(*, retry: bool = False) -> None:
         analysis_logger = AnalysisLogger()
         start_time = time.time()
         try:
             with _configure_tui_logging(ui), _route_console_output_for_tui(ui):
-                _ui_call(ui, "run_started", "HeatStreet analysis started")
                 print_header()
-                code = _main_impl(args, ui, analysis_logger, start_time)
+                code = _main_impl(args, ui, analysis_logger, start_time, retry=retry)
                 result["exit_code"] = code or EXIT_SUCCESS
                 if code == EXIT_ANALYSIS_FAILED:
                     _mark_active_run_failed()
+                    if getattr(ui.state, "completed_at", None) is None:
+                        _ui_call(ui, "run_failed", "Analysis terminated before required phases completed")
                     if hasattr(analysis_logger, "record_failure"):
                         analysis_logger.record_failure(
                             RuntimeError("Analysis terminated before required phases completed")
@@ -4013,6 +4048,7 @@ def _run_with_textual_main(args: argparse.Namespace, ui) -> int:
             result["exit_code"] = e.code or EXIT_SUCCESS
         except KeyboardInterrupt:
             result["exit_code"] = EXIT_CANCELLED
+            _ui_call(ui, "run_failed", "Analysis cancelled by user")
         except Exception as exc:
             _mark_active_run_failed()
             if hasattr(analysis_logger, "record_failure"):
@@ -4020,13 +4056,24 @@ def _run_with_textual_main(args: argparse.Namespace, ui) -> int:
             _ui_call(ui, "run_failed", str(exc))
             result["exit_code"] = EXIT_ANALYSIS_FAILED
         finally:
-            _ui_call(ui, "stop")
             _restore_run_directories()
 
-    pipeline_thread = threading.Thread(
-        target=_pipeline_thread_fn, daemon=True, name="hs-pipeline"
-    )
-    pipeline_thread.start()
+    def _start_session(retry: bool = False) -> None:
+        nonlocal app
+        with start_lock:
+            if pipeline_threads and pipeline_threads[-1].is_alive():
+                return
+            new_state = ui.reset_session()
+            if app is not None:
+                app.reset_for_new_session(new_state)
+            thread = threading.Thread(
+                target=_pipeline_thread_fn,
+                kwargs={"retry": retry},
+                daemon=True,
+                name=f"hs-pipeline-{len(pipeline_threads) + 1}",
+            )
+            pipeline_threads.append(thread)
+            thread.start()
 
     app = HeatStreetStudioApp(
         state=ui.state,
@@ -4034,8 +4081,17 @@ def _run_with_textual_main(args: argparse.Namespace, ui) -> int:
         cancel_event=ui._cancel_event,
         prompt_request_queue=ui._prompt_request_queue,
         prompt_response_queue=ui._prompt_response_queue,
+        start_session=_start_session,
     )
     ui._app = app
+    initial_thread = threading.Thread(
+        target=_pipeline_thread_fn,
+        kwargs={"retry": False},
+        daemon=True,
+        name="hs-pipeline-1",
+    )
+    pipeline_threads.append(initial_thread)
+    initial_thread.start()
     try:
         app.run()
     except Exception:
@@ -4044,41 +4100,115 @@ def _run_with_textual_main(args: argparse.Namespace, ui) -> int:
         ui._cancel_event.set()
         ui._prompt_response_queue.put_nowait(None)
 
-    pipeline_thread.join(timeout=60)
+    for pipeline_thread in pipeline_threads:
+        pipeline_thread.join(timeout=60)
+    ui._app = None
     return result.get("exit_code", EXIT_SUCCESS)
 
 
-def _main_impl(args: argparse.Namespace, ui, analysis_logger: AnalysisLogger, start_time: float):
+def _select_energy_price_profile(
+    args: argparse.Namespace, ui, config: Dict[str, Any], *, retry: bool = False,
+) -> tuple[str, bool]:
+    """Resolve the CLI/default selection or ask Studio before creating a run."""
+    section = get_energy_price_profiles(config)
+    profiles = section["profiles"]
+    configured_default = section["default_profile"]
+    cli_explicit = bool(getattr(args, "energy_price_profile_cli_explicit", False))
+    if cli_explicit or retry or not getattr(ui, "is_full_tui", False):
+        return args.energy_price_profile or configured_default, cli_explicit or retry
+
+    ordered_ids = list(profiles)
+    preferred = getattr(args, "energy_price_profile", None) or configured_default
+    if preferred in ordered_ids:
+        ordered_ids.remove(preferred)
+        ordered_ids.insert(0, preferred)
+    labels = []
+    for profile_id in ordered_ids:
+        profile = profiles[profile_id]
+        standing = "standing charges excluded" if not profile["standing_charges_included"] else "standing charges included"
+        note = profile.get("status") or profile.get("source_note", "")
+        labels.append(
+            f"{profile['label']} | gas {float(profile['gas_gbp_per_kwh']) * 100:.2f} p/kWh | "
+            f"electricity {float(profile['electricity_gbp_per_kwh']) * 100:.2f} p/kWh | {standing} | {note}"
+        )
+    selected = _tui_prompt(
+        ui,
+        "select",
+        title="Energy price period",
+        message=(
+            "Energy prices affect modelled bills, bill savings, payback periods and cost-effectiveness results. "
+            "Select the January provisional profile to reproduce the basis used for the original client report."
+        ),
+        choices=ordered_ids,
+        labels=labels,
+    )
+    if selected is None:
+        raise AnalysisCancelled("Energy price period selection cancelled")
+    args.energy_price_profile = selected
+    return selected, True
+
+
+def _main_impl(
+    args: argparse.Namespace, ui, analysis_logger: AnalysisLogger, start_time: float, *, retry: bool = False,
+):
     """Run the pipeline after argparse/UI setup."""
     global _active_run_context, _active_authoritative_cohort_size, _hp_hn_comparison_outputs_cache
 
+    global _previous_run_config_env
     _active_run_context = None
     _active_authoritative_cohort_size = None
     _hp_hn_comparison_outputs_cache = None
-    config_path = REPO_ROOT / "config" / "config.yaml"
-    config_sha256 = hashlib.sha256(config_path.read_bytes()).hexdigest()
+    repository_config = load_config()
+    selected_profile_id, explicit_selection = _select_energy_price_profile(
+        args, ui, repository_config, retry=retry
+    )
+    run_config = build_run_config(
+        repository_config, selected_profile_id, explicit_selection=explicit_selection
+    )
+    selected_profile = run_config["resolved_energy_price_profile"]
     git_commit = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, capture_output=True, text=True, check=False
     ).stdout.strip() or None
     pending_run_context = RunContext.create(
         mode="production" if args.production else "development",
         git_commit=git_commit,
-        configuration_sha256=config_sha256,
+        energy_price_profile=selected_profile,
         source_identifier=args.source_run_id if args.development_fixture else None,
         source_fingerprint=args.source_fixture_sha256 if args.development_fixture else None,
     )
     run_root = Path(DATA_OUTPUTS_DIR).parent / "runs" / pending_run_context.run_id
     pending_run_context = pending_run_context.with_run_root(run_root)
+    run_root.mkdir(parents=True, exist_ok=True)
+    config_snapshot = run_root / "config_snapshot.yaml"
+    config_snapshot.write_text(
+        yaml.safe_dump(run_config, sort_keys=False, allow_unicode=True), encoding="utf-8"
+    )
+    pending_run_context = replace(
+        pending_run_context,
+        configuration_sha256=hashlib.sha256(config_snapshot.read_bytes()).hexdigest(),
+        configuration_snapshot=str(config_snapshot),
+    )
+    _previous_run_config_env = os.environ.get(RUN_CONFIG_ENV)
+    os.environ[RUN_CONFIG_ENV] = str(config_snapshot)
     analysis_logger.set_metadata("run_id", pending_run_context.run_id)
     analysis_logger.set_metadata("git_commit", pending_run_context.git_commit)
     analysis_logger.set_metadata("configuration_sha256", pending_run_context.configuration_sha256)
     analysis_logger.set_metadata("source_identifier", pending_run_context.source_identifier)
     analysis_logger.set_metadata("source_fingerprint", pending_run_context.source_fingerprint)
+    analysis_logger.set_metadata("energy_price_profile", selected_profile)
+    logger.info(
+        "Energy price profile: {} ({}) gas={:.4f} GBP/kWh electricity={:.4f} GBP/kWh",
+        selected_profile_id,
+        selected_profile["label"],
+        selected_profile["gas_gbp_per_kwh"],
+        selected_profile["electricity_gbp_per_kwh"],
+    )
     _configure_run_directories(
         pending_run_context,
         analysis_logger,
         isolate_processed=True,
     )
+    _ui_call(ui, "run_started", "HeatStreet analysis started")
     _checkpoint(analysis_logger, status="running")
 
     runtime_identity, preflight = emit_startup_diagnostics(analysis_logger)
@@ -4712,6 +4842,14 @@ def _main_impl(args: argparse.Namespace, ui, analysis_logger: AnalysisLogger, st
 
     console.print()
     outputs_label = "one_stop_output.json (one-stop report)" if one_stop_only else "reports and charts"
+    if _active_run_context:
+        profile = _active_run_context.energy_price_profile or {}
+        console.print(f"  Run ID: {_active_run_context.run_id}")
+        console.print(
+            f"  Energy price profile: {profile.get('label', profile.get('profile_id', 'unknown'))}"
+        )
+        console.print(f"  QA status: pass")
+        console.print(f"  Public outputs published: {bool(args.production and not args.no_publish)}")
 
     console.print(Panel.fit(
         f"[bold green]✓ Analysis Complete![/bold green]\n\n"
@@ -4731,6 +4869,18 @@ def _main_impl(args: argparse.Namespace, ui, analysis_logger: AnalysisLogger, st
         "run_completed",
         elapsed=elapsed,
         properties=len(df_adjusted_frame),
+        run_id=_active_run_context.run_id if _active_run_context else None,
+        output_location=DATA_OUTPUTS_DIR,
+        qa_status="pass",
+        energy_price_profile=(
+            (_active_run_context.energy_price_profile or {}).get("label")
+            if _active_run_context else None
+        ),
+        energy_price_profile_id=(
+            (_active_run_context.energy_price_profile or {}).get("profile_id")
+            if _active_run_context else None
+        ),
+        public_outputs_published=bool(args.production and not args.no_publish),
         one_stop_json=DATA_OUTPUTS_DIR / "one_stop_output.json",
         html_dashboard=DATA_OUTPUTS_DIR / "one_stop_dashboard.html",
         workbook=combined_workbook or DATA_OUTPUTS_DIR / "analysis_outputs_compendium.xlsx",

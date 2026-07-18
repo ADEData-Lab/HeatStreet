@@ -475,7 +475,7 @@ class OneStopReportGenerator:
             if "hn_assigned_properties" not in row or "ashp_assigned_properties" not in row:
                 raise RuntimeError("Hybrid scenario lacks explicit pathway allocation fields")
             allocated = _explicit_int(row["hn_assigned_properties"], "hybrid HN allocation") + _explicit_int(
-                row["ashp_assigned_properties"], "hybrid ASHP allocation"
+                row["ashp_assigned_properties"], "spatial hybrid ASHP allocation"
             )
             checks.append(("hybrid pathway allocations", allocated))
 
@@ -630,11 +630,20 @@ class OneStopReportGenerator:
             AnnotatedDatapoint(
                 name="Key configuration snapshot - Energy prices",
                 key="config_energy_prices",
-                value=self.config.get("energy_prices", {}).get("current", {}),
+                value=self.config.get("resolved_energy_price_profile", {}),
                 definition="Energy prices used in analysis (£/kWh for gas and electricity).",
                 denominator="N/A",
-                source="config/config.yaml -> energy_prices.current",
+                source="Configuration / run definition",
                 usage="Financial calculations",
+            ),
+            AnnotatedDatapoint(
+                name="Energy price profile ID",
+                key="energy_price_profile_id",
+                value=(run_metadata.get("energy_price_profile") or {}).get("profile_id", "Not available"),
+                definition="Stable ID of the run-resolved domestic unit-rate profile; standing charges are excluded.",
+                denominator="N/A",
+                source="data/outputs/run_metadata.json -> energy_price_profile.profile_id",
+                usage="Reproducibility and semantic QA",
             ),
             AnnotatedDatapoint(
                 name="Key configuration snapshot - Heat pump COP",
@@ -994,26 +1003,11 @@ class OneStopReportGenerator:
             "fabric_prerequisite_cost": ("Fabric prerequisite cost", "Average fabric prerequisite cost by readiness tier (GBP per property)."),
             "system_cost_full_ashp": ("Full-ASHP system cost", "Average full-ASHP system cost by readiness tier (GBP per property)."),
             "total_cost_full_ashp": ("Total full-ASHP cost", "Average fabric plus full-ASHP system cost by readiness tier (GBP per property)."),
-            "system_cost_hybrid_ashp_sensitivity": ("Hybrid-ASHP sensitivity system cost", "Average system cost under the hybrid-ASHP sensitivity (GBP per property)."),
-            "total_cost_hybrid_ashp_sensitivity": ("Hybrid-ASHP sensitivity total cost", "Average fabric plus system cost under the hybrid-ASHP sensitivity (GBP per property)."),
         }
         for tier in range(1, 6):
             tier_df = readiness_df[readiness_df["hp_readiness_tier"] == tier] if "hp_readiness_tier" in readiness_df.columns else pd.DataFrame()
             if tier_df.empty:
                 continue
-
-            if "system_technology" in tier_df.columns:
-                technologies = tier_df["system_technology"].dropna().astype(str)
-                if not technologies.empty:
-                    datapoints.append(AnnotatedDatapoint(
-                        name=f"Readiness Tier {tier} assumed system technology",
-                        key=f"tier_{tier}_system_technology",
-                        value=technologies.mode().iloc[0],
-                        definition="Dominant assumed heating system technology for this readiness tier.",
-                        denominator=f"Readiness Tier {tier} properties",
-                        source="data/outputs/retrofit_readiness_analysis.csv -> system_technology",
-                        usage="Readiness tier cost interpretation",
-                    ))
 
             for field, (label, definition) in tier_cost_fields.items():
                 if field in tier_df.columns:
@@ -1026,17 +1020,6 @@ class OneStopReportGenerator:
                         source=f"data/outputs/retrofit_readiness_analysis.csv -> mean({field}) where hp_readiness_tier == {tier}",
                         usage="Readiness tier cost interpretation",
                     ))
-
-        if "system_technology" in readiness_df.columns and (readiness_df["system_technology"] == "hybrid_ashp").any():
-            datapoints.append(AnnotatedDatapoint(
-                name="Tier 4 hybrid ASHP cost note",
-                key="tier_4_hybrid_ashp_cost_note",
-                value="Tier 4 uses a hybrid ASHP in the mixed-technology total, so mixed totals can be lower than Tier 3; total_cost_full_ashp shows the like-for-like full-ASHP envelope.",
-                definition="Interpretation note for Tier 4 mixed-technology retrofit costs.",
-                denominator="N/A",
-                source="data/outputs/retrofit_readiness_analysis.csv -> system_technology and total_cost_full_ashp",
-                usage="Readiness tier cost interpretation",
-            ))
 
         # Costs
         if "fabric_prerequisite_cost" in readiness_df.columns:
@@ -1071,8 +1054,7 @@ class OneStopReportGenerator:
             ])
 
         for field, label, usage in (
-            ("total_cost_full_ashp", "Canonical full-ASHP readiness total", "Main readiness capital requirement"),
-            ("total_cost_hybrid_ashp_sensitivity", "Hybrid-ASHP readiness sensitivity total", "Readiness sensitivity only"),
+            ("total_cost_full_ashp", "Canonical full-ASHP readiness total", "Sole headline readiness capital requirement"),
         ):
             if field in readiness_df.columns:
                 datapoints.append(AnnotatedDatapoint(
@@ -2004,10 +1986,10 @@ class OneStopReportGenerator:
             AnnotatedDatapoint(
                 name="Energy price sensitivity - Current",
                 key="energy_price_current",
-                value=self.config.get("energy_prices", {}).get("current", {}),
+                value=self.config.get("resolved_energy_price_profile", {}),
                 definition="Current energy prices (£/kWh, dict: {fuel: price}).",
                 denominator="N/A",
-                source="config/config.yaml -> energy_prices.current",
+                source="Configuration / run definition",
                 usage="Bill calculations baseline",
             ),
             AnnotatedDatapoint(

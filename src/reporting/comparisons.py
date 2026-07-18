@@ -149,7 +149,8 @@ class ComparisonReporter:
         return pathway.name if pathway else pathway_id
 
     def _payback_note(self, pathway_id: str) -> str:
-        energy_prices = self.config.get('energy_prices', {}).get('current', {})
+        from config.config import get_resolved_energy_prices
+        energy_prices = get_resolved_energy_prices(self.config)
         carbon_factors = self.config.get('carbon_factors', {}).get('current', {})
         hn_tariff = float(self.hn_params.get('tariff_per_kwh', energy_prices.get('heat_network', 0.08)) or 0)
         gas_price = float(energy_prices.get('gas', 0.0) or 0)
@@ -217,7 +218,8 @@ class ComparisonReporter:
     def _write_markdown(self, comparisons: List[ComparisonResult]):
         snippet_path = self.comparisons_dir / "hn_vs_hp_report_snippet.md"
 
-        tariff_info = self.config.get('energy_prices', {}).get('current', {})
+        from config.config import get_resolved_energy_prices
+        tariff_info = get_resolved_energy_prices(self.config)
         hp_cop = self.config.get('heat_pump', {}).get('scop', 3.0)
         connection_cost = self.costs.get('district_heating_connection', 5000)
         hn_efficiency = self.hn_params.get('distribution_efficiency', 1.0)
@@ -231,8 +233,8 @@ class ComparisonReporter:
             "",
             "**Sign convention:** savings columns are positive when costs/emissions fall;",
             " change columns (bill_change/co2_change) are negative when costs/emissions drop.",
-            "", "**Tariffs & performance assumptions:**", f"- Electricity: £{tariff_info.get('electricity', 0.245):.3f}/kWh",
-            f"- Gas: £{tariff_info.get('gas', 0.0624):.4f}/kWh",
+            "", "**Tariffs & performance assumptions:**", f"- Electricity: £{tariff_info['electricity']:.3f}/kWh",
+            f"- Gas: £{tariff_info['gas']:.4f}/kWh",
             f"- Heat network tariff: £{self.hn_params.get('tariff_per_kwh', 0.08):.3f}/kWh",
             f"- Heat network delivery efficiency: {hn_efficiency*100:.0f}% (tariff applied to input energy)",
             f"- Heat network carbon intensity: {hn_carbon:.3f} kgCO₂/kWh supplied" if hn_carbon is not None else "- Heat network carbon intensity: not specified",

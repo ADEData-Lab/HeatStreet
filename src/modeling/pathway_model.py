@@ -227,9 +227,10 @@ class PathwayModeler:
         self.comparisons_dir.mkdir(parents=True, exist_ok=True)
 
         # Energy prices
-        self.prices = self.config.get('energy_prices', {}).get('current', {})
-        self.gas_price = self.prices.get('gas', 0.0624)
-        self.elec_price = self.prices.get('electricity', 0.245)
+        from config.config import get_resolved_energy_prices
+        self.prices = get_resolved_energy_prices(self.config)
+        self.gas_price = self.prices['gas']
+        self.elec_price = self.prices['electricity']
         self.hn_tariff = self.hn_params.get('tariff_per_kwh', 0.08)
 
         # Carbon factors

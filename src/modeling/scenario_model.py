@@ -30,6 +30,7 @@ from config.config import (
     get_cost_effectiveness_params,
     get_eligibility_params,
     get_measure_savings,
+    get_resolved_energy_prices,
     DATA_PROCESSED_DIR,
     DATA_OUTPUTS_DIR
 )
@@ -235,7 +236,7 @@ def _calculate_property_upgrade_core(
     removed_measures: List[str],
 ) -> PropertyUpgrade:
     """Calculate upgrade metrics for a single property using configured COP curves."""
-    energy_prices = config.get('energy_prices', {}).get('current', {})
+    energy_prices = get_resolved_energy_prices(config)
     heat_network_cfg = config.get('heat_network', {})
     gas_price = energy_prices.get('gas', 0.0)
     elec_price = energy_prices.get('electricity', 0.0)

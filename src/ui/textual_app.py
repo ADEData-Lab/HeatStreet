@@ -26,6 +26,7 @@ from .formatters import (
 )
 from .icons import get_icons, IconSet, phase_icon
 from src.modeling.contracts import TIER_READINESS_LABELS
+from .state import StudioSessionState
 
 try:
     from textual.app import App, ComposeResult
@@ -396,7 +397,10 @@ if _TEXTUAL_AVAILABLE:
                     yield Button("Select", variant="primary", id="ok")
 
         def on_mount(self) -> None:
-            self.query_one("#choice-list", ListView).focus()
+            choice_list = self.query_one("#choice-list", ListView)
+            if self._choices:
+                choice_list.index = 0
+            choice_list.focus()
 
         def on_list_view_selected(self, event: ListView.Selected) -> None:
             idx = event.list_view.index
@@ -452,6 +456,7 @@ if _TEXTUAL_AVAILABLE:
             cancel_event: threading.Event,
             prompt_request_queue: Optional["queue.Queue"] = None,
             prompt_response_queue: Optional["queue.Queue"] = None,
+            start_session: Optional[Callable[[bool], None]] = None,
             **kwargs,
         ) -> None:
             super().__init__(**kwargs)
@@ -460,6 +465,7 @@ if _TEXTUAL_AVAILABLE:
             self._cancel_event = cancel_event
             self._prompt_request_queue = prompt_request_queue or queue.Queue()
             self._prompt_response_queue = prompt_response_queue or queue.Queue()
+            self._start_session = start_session
             self._icons = get_icons(unicode_ok=True)
             self._paused = False
             self._log_entries: List[str] = []
@@ -467,6 +473,7 @@ if _TEXTUAL_AVAILABLE:
             self._outputs: List[Dict[str, Any]] = []
             self._run_done = False
             self._prompt_active = False
+            self.session = StudioSessionState()
 
         def compose(self) -> ComposeResult:
             yield Header()
@@ -528,6 +535,11 @@ if _TEXTUAL_AVAILABLE:
 
         def _compose_outputs(self) -> ComposeResult:
             with ScrollableContainer():
+                yield Static("", id="completion-summary", classes="current-phase-card")
+                with Horizontal(id="completion-actions"):
+                    yield Button("Retry with current settings", variant="primary", id="retry-run")
+                    yield Button("Start new analysis", variant="success", id="start-new-analysis")
+                    yield Button("Exit Studio", variant="error", id="exit-studio")
                 yield Static("", id="output-launcher", classes="tab-content")
 
         def _compose_logs(self) -> ComposeResult:
@@ -538,6 +550,8 @@ if _TEXTUAL_AVAILABLE:
         def on_mount(self) -> None:
             self._setup_scenario_table()
             self.set_interval(0.25, self._poll_events)
+            self.query_one("#completion-actions").styles.display = "none"
+            self.query_one("#completion-summary").styles.display = "none"
 
         def _setup_scenario_table(self) -> None:
             table = self.query_one("#scenario-table", DataTable)
@@ -606,6 +620,8 @@ if _TEXTUAL_AVAILABLE:
             state = self._state
 
             if t == "run_started":
+                if self.session.status == "setup":
+                    self.session.begin()
                 self._log(f"[cyan]Run started[/cyan]: {safe_text(event.message, max_length=80)}")
 
             elif t in ("phase_started", "phase_progress"):
@@ -642,12 +658,17 @@ if _TEXTUAL_AVAILABLE:
 
             elif t == "run_completed":
                 self._run_done = True
+                self.session.complete(event.payload or {})
                 self._log("[bold green]Run complete[/bold green]")
+                self._show_completion(event.payload or {}, success=True)
                 self.action_switch_tab("outputs")
 
             elif t == "run_failed":
                 self._run_done = True
+                self.session.fail(event.message, cancelled="cancel" in (event.message or "").casefold())
                 self._log(f"[bold red]Run failed:[/bold red] {safe_text(event.message, max_length=80)}")
+                self._show_completion({"error": event.message}, success=False)
+                self.action_switch_tab("outputs")
 
             elif t == "scenario_started":
                 name = safe_text(event.message or (event.phase or ""), max_length=30)
@@ -692,6 +713,51 @@ if _TEXTUAL_AVAILABLE:
                 log_panel.write(message)
             except Exception:
                 pass
+
+        def _show_completion(self, payload: Dict[str, Any], *, success: bool) -> None:
+            rows = [
+                f"[bold {'green' if success else 'red'}]{'Analysis complete' if success else 'Analysis did not complete'}[/bold {'green' if success else 'red'}]",
+                f"Run ID: {payload.get('run_id', self.session.run_id or 'Not available')}",
+                f"Output location: {payload.get('output_location', 'Not available')}",
+                f"QA status: {payload.get('qa_status', 'not published')}",
+                f"Energy price profile: {payload.get('energy_price_profile', self.session.energy_price_profile_id or 'Not available')}",
+                f"Public outputs published: {payload.get('public_outputs_published', False)}",
+            ]
+            for key in ("one_stop_json", "html_dashboard", "workbook", "audit_log", "dashboard_data"):
+                if payload.get(key):
+                    rows.append(f"{COMPLETION_LABELS.get(key, key)}: {payload[key]}")
+            if payload.get("error"):
+                rows.append(f"Error: {payload['error']}")
+            summary = self.query_one("#completion-summary", Static)
+            summary.update("\n".join(rows))
+            summary.styles.display = "block"
+            actions = self.query_one("#completion-actions")
+            actions.styles.display = "block"
+            self.query_one("#retry-run", Button).styles.display = "none" if success else "block"
+
+        def reset_for_new_session(self, state: DashboardState) -> None:
+            self.session.reset()
+            self._state = state
+            self._run_done = False
+            self._paused = False
+            self._prompt_active = False
+            self._log_entries.clear()
+            self._warnings.clear()
+            self._outputs.clear()
+            self.query_one("#completion-actions").styles.display = "none"
+            self.query_one("#completion-summary").styles.display = "none"
+            self.query_one("#log-panel", RichLog).clear()
+            table = self.query_one("#scenario-table", DataTable)
+            table.clear()
+            self._refresh_all_widgets()
+
+        def on_button_pressed(self, event: Button.Pressed) -> None:
+            if event.button.id == "exit-studio":
+                self._cancel_event.set()
+                self.exit()
+            elif event.button.id in {"start-new-analysis", "retry-run"} and self._start_session:
+                retry = event.button.id == "retry-run"
+                self._start_session(retry)
 
         # --- Widget refresh ---
 
@@ -1131,7 +1197,27 @@ class TextualUIAdapter:
         self._state.start_time = self._state.start_time or self._time()
 
     def stop(self) -> None:
-        self._stop_app()
+        # Pipeline completion must not close Studio; Exit Studio is deliberate.
+        return None
+
+    def reset_session(self) -> DashboardState:
+        """Discard all run-scoped UI state while retaining the Studio process."""
+        from .live_dashboard import DashboardState as _DS, DashboardBase as _DB
+
+        self._cancel_event.clear()
+        for event_queue in (
+            self._event_queue,
+            self._prompt_request_queue,
+            self._prompt_response_queue,
+        ):
+            while True:
+                try:
+                    event_queue.get_nowait()
+                except queue.Empty:
+                    break
+        self._state = _DS()
+        self._base = _DB(state=self._state, time_fn=self._time)
+        return self._state
 
     def run_started(self, message: str = "") -> None:
         self._update_state("run_started", message)

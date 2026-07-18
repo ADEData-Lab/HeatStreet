@@ -237,6 +237,15 @@ class RetrofitReadinessAnalyzer:
             df_readiness['fabric_prerequisite_cost'].astype(float)
             + df_readiness['system_cost_hybrid_ashp_sensitivity'].astype(float)
         )
+        df_readiness['ashp_plus_boiler_sensitivity_label'] = (
+            'Tier 4 ASHP-plus-boiler capital-cost sensitivity'
+        )
+        df_readiness['ashp_plus_boiler_sensitivity_qualifications'] = (
+            'Not the spatial heat-network/ASHP hybrid scenario; not part of the readiness classification; '
+            'capital-cost sensitivity, not a recommended pathway; retains boiler backup; not the modelled '
+            'net-zero endpoint; operating-cost and carbon implications are not established by the '
+            'readiness-cost calculation alone.'
+        )
         df_readiness['system_cost_full_ashp'] = self._calculate_system_costs(df_readiness, force_full_ashp=True)
         df_readiness['total_cost_full_ashp'] = (
             df_readiness['fabric_prerequisite_cost'].astype(float)
@@ -549,27 +558,25 @@ class RetrofitReadinessAnalyzer:
         The audit noted that Tier 4 sometimes has lower total cost than Tier 3.
         This is intentional and occurs because:
 
-        1. Tier 4 properties use hybrid heat pumps (£8k) instead of
-           pure ASHPs (£12k), saving £4k on the heat pump itself.
+        1. Tier 4 applies the lower ASHP-plus-boiler capital assumption
+           instead of the full-ASHP capital assumption.
 
-        2. The hybrid HP strategy is more pragmatic for Tier 4 properties
-           with very poor fabric - it allows the gas backup to handle
-           peak demand, reducing the need for maximum fabric intervention.
+        2. The sensitivity retains gas-boiler backup for peak demand.
 
-        3. While Tier 4 has higher fabric costs than Tier 3, the £4k
-           HP cost difference can offset this for some properties.
+        3. This affects capital-cost comparisons between readiness tiers.
 
-        This cost structure reflects real-world decision-making where
-        a hybrid approach may be more cost-effective than pursuing
-        maximum fabric efficiency for a pure ASHP in challenging homes.
+        This calculation is a capital-cost sensitivity only. It is not the
+        readiness classification, a recommended pathway, the spatial hybrid
+        scenario, or the modelled net-zero endpoint; it does not establish
+        operating-cost or carbon implications.
         """
         system_cost = pd.Series(0.0, index=df.index, dtype=float)
 
         system_cost += self._cost_series(df, 'emitter_upgrades', df['needs_radiator_upsizing'])
         system_cost += self._cost_series(df, 'hot_water_cylinder')
 
-        # Tier 4 properties get hybrid heat pumps in the mixed-technology view.
-        # The full-ASHP view is calculated separately for direct tier comparison.
+        # Tier 4 uses the ASHP-plus-boiler capital-cost sensitivity here.
+        # The canonical full-ASHP view is calculated separately.
         heating_cost = df.apply(
             lambda row: self.cost_calculator.measure_cost(
                 (
@@ -813,9 +820,17 @@ class RetrofitReadinessAnalyzer:
                 f.write(f"Mean total cost (full ASHP): GBP {summary['mean_total_cost_full_ashp']:,.0f}\n")
                 f.write(f"Median total cost (full ASHP): GBP {summary['median_total_cost_full_ashp']:,.0f}\n")
                 f.write(f"Total investment (full ASHP): GBP {summary['total_cost_full_ashp']/1e6:.1f}M\n\n")
-            f.write(f"Mean total cost (hybrid-ASHP sensitivity): GBP {summary['mean_total_cost_hybrid_ashp_sensitivity']:,.0f}\n")
-            f.write(f"Median total cost (hybrid-ASHP sensitivity): GBP {summary['median_total_cost_hybrid_ashp_sensitivity']:,.0f}\n")
-            f.write(f"Total investment (hybrid-ASHP sensitivity): GBP {summary['total_cost_hybrid_ashp_sensitivity']/1e6:.1f}M\n\n")
+            f.write("SUPPORTING SENSITIVITY (NOT A HEADLINE RESULT):\n")
+            f.write("Tier 4 ASHP-plus-boiler capital-cost sensitivity\n")
+            f.write(
+                "This is not the spatial heat-network/ASHP hybrid scenario; it is not part of the readiness "
+                "classification; it is a capital-cost sensitivity, not a recommended pathway; it retains "
+                "boiler backup; it is not the modelled net-zero endpoint; and its operating-cost and carbon "
+                "implications are not established by the readiness-cost calculation alone.\n"
+            )
+            f.write(f"Mean sensitivity total cost: GBP {summary['mean_total_cost_hybrid_ashp_sensitivity']:,.0f}\n")
+            f.write(f"Median sensitivity total cost: GBP {summary['median_total_cost_hybrid_ashp_sensitivity']:,.0f}\n")
+            f.write(f"Aggregate sensitivity total: GBP {summary['total_cost_hybrid_ashp_sensitivity']/1e6:.1f}M\n\n")
 
             f.write("HEAT DEMAND ANALYSIS:\n")
             f.write("-" * 80 + "\n")
@@ -839,7 +854,7 @@ class RetrofitReadinessAnalyzer:
                     f"Tier {tier}: fabric GBP {fabric_cost:,.0f} | "
                     f"full ASHP system GBP {system_cost:,.0f} | "
                     f"full ASHP total GBP {total_cost:,.0f} | "
-                    f"hybrid-ASHP sensitivity total GBP {hybrid_sensitivity_cost:,.0f}\n"
+                    f"ASHP-plus-boiler capital-cost sensitivity total GBP {hybrid_sensitivity_cost:,.0f}\n"
                 )
             f.write("\n")
 

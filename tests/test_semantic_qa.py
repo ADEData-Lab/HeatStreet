@@ -19,6 +19,7 @@ from src.utils.semantic_qa import (
     _validate_scenario_costs,
     _validate_spatial_distribution,
     _validate_zero_subsidy_payback,
+    _validate_energy_price_metadata,
 )
 
 
@@ -80,6 +81,40 @@ def test_canonical_readiness_labels_match_csv_one_stop_and_dashboard(tmp_path):
     assert frame["hp_readiness_label"].tolist() == list(TIER_READINESS_LABELS.values())
     assert [glossary[f"tier_{tier}"]["label"] for tier in range(1, 6)] == list(TIER_READINESS_LABELS.values())
     assert [row["readinessLabel"] for row in dashboard] == list(TIER_READINESS_LABELS.values())
+    section_text = str(report._sections["section_4"])
+    assert "total_cost_full_ashp_gbp" in section_text
+    assert "hybrid_ashp_sensitivity" not in section_text
+
+
+def test_primary_dashboard_exposes_only_canonical_full_ashp_total(tmp_path):
+    summary = DashboardDataBuilder(tmp_path)._format_summary_stats(
+        None,
+        {
+            "total_properties": 2,
+            "total_cost_full_ashp": 100,
+            "total_cost_hybrid_ashp_sensitivity": 80,
+            "mean_total_cost_hybrid_ashp_sensitivity": 40,
+        },
+        None,
+        None,
+        None,
+        None,
+    )
+    assert summary["totalCostFullAshp"] == 100
+    assert all("HybridAshpSensitivity" not in key for key in summary)
+
+
+def test_energy_price_profile_metadata_mismatch_fails(tmp_path):
+    profile = {"profile_id": "january_client_report_provisional"}
+    context = RunContext(
+        "run-1", dataset_fingerprint="fingerprint", run_root=tmp_path,
+        authoritative_cohort=4, energy_price_profile=profile,
+    )
+    run_metadata = {"energy_price_profile": profile}
+    one_stop = {"metadata": {"energy_price_profile": profile}}
+    dashboard = {"runMetadata": {"energy_price_profile": {"profile_id": "wrong"}}}
+    with pytest.raises(ValueError, match="profile metadata mismatch"):
+        _validate_energy_price_metadata(context, run_metadata, one_stop, dashboard)
 
 
 @pytest.mark.parametrize("validator,bad", [
