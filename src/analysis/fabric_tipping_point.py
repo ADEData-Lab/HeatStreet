@@ -56,7 +56,8 @@ class FabricTippingPointAnalyzer:
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         # Energy price for cost-effectiveness
-        self.gas_price = self.config.get('energy_prices', {}).get('current', {}).get('gas', 0.0624)
+        from config.config import get_resolved_energy_prices
+        self.gas_price = get_resolved_energy_prices(self.config)['gas']
 
         logger.info("Initialized FabricTippingPointAnalyzer")
 

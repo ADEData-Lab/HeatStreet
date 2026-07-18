@@ -379,9 +379,10 @@ class RetrofitPackageAnalyzer:
         self.analysis_horizon_years = get_analysis_horizon_years()
 
         # Load energy prices
-        self.energy_prices = self.config.get('energy_prices', {}).get('current', {})
-        self.gas_price = self.energy_prices.get('gas', 0.0624)
-        self.elec_price = self.energy_prices.get('electricity', 0.245)
+        from config.config import get_resolved_energy_prices
+        self.energy_prices = get_resolved_energy_prices(self.config)
+        self.gas_price = self.energy_prices['gas']
+        self.elec_price = self.energy_prices['electricity']
 
         # Load carbon factors
         self.carbon_factors = self.config.get('carbon_factors', {}).get('current', {})

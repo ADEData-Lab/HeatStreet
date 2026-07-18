@@ -30,6 +30,7 @@ from config.config import (
     get_cost_effectiveness_params,
     get_eligibility_params,
     get_measure_savings,
+    get_resolved_energy_prices,
     DATA_PROCESSED_DIR,
     DATA_OUTPUTS_DIR
 )
@@ -62,6 +63,14 @@ from src.utils.modeling_utils import (
     calculate_carbon_abatement_cost,
     calculate_cost_effectiveness_summary,
     summarize_series,
+)
+from src.modeling.contracts import (
+    PROPERTY_ID_COLUMN,
+    STOCK_SCENARIO,
+    payback_summary,
+    require_property_identifier,
+    validate_hn_readiness,
+    validate_hybrid_assignments,
 )
 from src.utils.profiling import (
     profile_enabled, log_memory, log_dataframe_info,
@@ -169,6 +178,11 @@ class PropertyUpgrade:
     upgrade_recommended: bool = False
     carbon_abatement_cost: float = np.inf
     discounted_payback_years: float = np.inf
+    model_family: str = STOCK_SCENARIO.model_family
+    model_purpose: str = STOCK_SCENARIO.model_purpose
+    intended_reporting_use: str = STOCK_SCENARIO.intended_reporting_use
+    publication_scope: str = STOCK_SCENARIO.publication_scope
+    headline_reporting_eligible: bool = True
 
 
 # Global state for worker processes (set by initializer)
@@ -222,7 +236,7 @@ def _calculate_property_upgrade_core(
     removed_measures: List[str],
 ) -> PropertyUpgrade:
     """Calculate upgrade metrics for a single property using configured COP curves."""
-    energy_prices = config.get('energy_prices', {}).get('current', {})
+    energy_prices = get_resolved_energy_prices(config)
     heat_network_cfg = config.get('heat_network', {})
     gas_price = energy_prices.get('gas', 0.0)
     elec_price = energy_prices.get('electricity', 0.0)
@@ -531,7 +545,7 @@ def _calculate_property_upgrade_core(
     )
 
     return PropertyUpgrade(
-        property_id=str(property_dict.get('LMK_KEY', 'unknown')),
+        property_id=str(property_dict[PROPERTY_ID_COLUMN]),
         uprn=str(property_dict.get('UPRN', '')),
         postcode=str(property_dict.get('POSTCODE', '')),
         scenario=scenario_name,
@@ -709,29 +723,10 @@ class ScenarioModeler:
         return _assert_non_negative_intensities(adjusted)
 
     def _apply_heat_network_readiness(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Add deterministic heat network readiness columns to the EPC dataset."""
-
-        required_cols = {'hn_ready', 'tier_number', 'distance_to_network_m', 'in_heat_zone'}
-
-        if required_cols.issubset(df.columns):
-            return df
-
-        try:
-            if self.hn_analyzer:
-                logger.info("Enriching EPC data with heat network readiness flags...")
-                annotated = self.hn_analyzer.annotate_heat_network_readiness(df)
-                if annotated is not None:
-                    return annotated
-        except Exception as exc:
-            logger.warning(f"Heat network readiness annotation failed: {exc}")
-
-        fallback = df.copy()
-        fallback['hn_ready'] = False
-        fallback['tier_number'] = fallback.get('tier_number', 5)
-        fallback['distance_to_network_m'] = np.nan
-        fallback['in_heat_zone'] = False
-        fallback['tier_number'] = pd.to_numeric(fallback['tier_number'], errors='coerce').fillna(5).astype(int)
-        return fallback
+        """Require and validate run-scoped spatial enrichment."""
+        require_property_identifier(df)
+        validate_hn_readiness(df)
+        return df
 
     def model_all_scenarios(
         self,
@@ -933,7 +928,17 @@ class ScenarioModeler:
             'current_annual_energy_kwh': float(total_energy),
             'current_annual_co2_kg': float(total_co2_kg),
             'epc_band_shifts': {},
-            'average_payback_years': 0,
+            'aggregate_simple_payback_years': None,
+            'aggregate_simple_payback_status': 'non_positive_aggregate_savings',
+            'property_simple_payback_mean_years': None,
+            'property_simple_payback_median_years': None,
+            'payback_valid_denominator_count': 0,
+            'payback_non_positive_savings_count': len(df),
+            'payback_missing_input_count': 0,
+            'payback_non_finite_input_count': 0,
+            'payback_infinite_count': 0,
+            'truncation_threshold_years': None,
+            'excluded_by_truncation_count': 0,
             'cost_per_tco2_20yr_gbp': None,
             'cost_per_tco2_20yr_definition': (
                 "capital_cost_total / ((annual_co2_reduction_kg / 1000) * "
@@ -1095,20 +1100,7 @@ class ScenarioModeler:
                 m for m in measure_plan if m not in ['heat_network_where_available', 'ashp_elsewhere']
             ]
 
-            hn_tier_max = int(
-                self.config.get('heat_network', {}).get('readiness', {}).get('ready_tier_max', 3)
-            )
-            tier_number = property_dict.get('tier_number')
-
-            hn_ready: Optional[bool] = None
-            if tier_number is not None:
-                try:
-                    hn_ready = int(tier_number) <= hn_tier_max
-                except (TypeError, ValueError):
-                    hn_ready = None
-
-            if hn_ready is None:
-                hn_ready = bool(property_dict.get('hn_ready', False))
+            hn_ready = bool(property_dict['hn_ready'])
 
             if hn_ready:
                 updated_plan.append('district_heating_connection')
@@ -1130,7 +1122,7 @@ class ScenarioModeler:
             if not ready and projected_ready:
                 measure_plan = self.fabric_minimum_measures + measure_plan
                 applied_fabric = True
-            elif not ready and not projected_ready:
+            elif not ready and not projected_ready and hybrid_pathway is None:
                 removed.extend([m for m in measure_plan if m in ['ashp_installation', 'emitter_upgrades']])
                 measure_plan = [m for m in measure_plan if m not in ['ashp_installation', 'emitter_upgrades']]
                 removed_hp = True
@@ -1340,23 +1332,10 @@ class ScenarioModeler:
             return {}
 
         numeric_df = property_df.replace({np.inf: np.nan, -np.inf: np.nan})
-
-        # Calculate payback statistics (filter out infinite values)
-        # Properties with inf payback are not cost-effective at current prices
+        payback = payback_summary(property_df['capital_cost'], property_df['annual_bill_savings'])
         finite_paybacks = numeric_df['payback_years'].dropna()
-        reasonable_paybacks = [p for p in finite_paybacks if p < 100]
-
-        if len(reasonable_paybacks) > 0:
-            avg_payback = np.mean(reasonable_paybacks)
-            median_payback = np.median(reasonable_paybacks)
-        else:
-            # No cost-effective properties
-            avg_payback = np.inf
-            median_payback = np.inf
-
-        # Count properties by cost-effectiveness
-        n_cost_effective = len(reasonable_paybacks)
-        n_not_cost_effective = total_properties - len(finite_paybacks)
+        n_cost_effective = payback['payback_valid_denominator_count']
+        n_not_cost_effective = payback['payback_non_positive_savings_count']
         pct_not_cost_effective = (n_not_cost_effective / total_properties * 100) if total_properties > 0 else 0
 
         # AUDIT FIX: Document and track "not cost-effective" edge cases
@@ -1366,7 +1345,7 @@ class ScenarioModeler:
         # - Data anomalies (negative baseline bills, implausible values)
         # - Properties where measures don't reduce bills (e.g., tariff changes offset savings)
         if n_not_cost_effective > 0:
-            not_ce_mask = ~property_df['payback_years'].apply(lambda x: x < 100 if pd.notna(x) else False)
+            not_ce_mask = pd.to_numeric(property_df['annual_bill_savings'], errors='coerce').le(0)
             not_ce_df = property_df[not_ce_mask]
 
             # Log details about these properties for investigation
@@ -1393,8 +1372,7 @@ class ScenarioModeler:
             'post_measure_bill_total': float(numeric_df['post_measure_bill'].sum()),
             'baseline_co2_total_kg': float(numeric_df['baseline_co2_kg'].sum()),
             'post_measure_co2_total_kg': float(numeric_df['post_measure_co2_kg'].sum()),
-            'average_payback_years': avg_payback if np.isfinite(avg_payback) else None,
-            'median_payback_years': median_payback if np.isfinite(median_payback) else None,
+            **payback,
             'properties_cost_effective': n_cost_effective,
             'properties_not_cost_effective': n_not_cost_effective,
             'pct_not_cost_effective': pct_not_cost_effective,
@@ -1485,6 +1463,11 @@ class ScenarioModeler:
         # AUDIT FIX: Populate hn_assigned_properties and ashp_assigned_properties for ALL scenarios
         # Previously these were only set for hybrid scenarios
         if 'hybrid_pathway' in property_df.columns:
+            property_df = property_df.copy()
+            property_df['assigned_heat_network'] = property_df['hybrid_pathway'].eq('heat_network')
+            property_df['assigned_ashp'] = property_df['hybrid_pathway'].eq('ashp')
+            if property_df['hybrid_pathway'].notna().any():
+                validate_hybrid_assignments(property_df)
             # Hybrid scenario - use hybrid_pathway column
             results['hn_assigned_properties'] = int((property_df['hybrid_pathway'] == 'heat_network').sum())
             results['ashp_assigned_properties'] = int((property_df['hybrid_pathway'] == 'ashp').sum())
@@ -1539,9 +1522,9 @@ class ScenarioModeler:
             logger.info(f"  Costing bases used: {', '.join(results['costing_bases_used'])}.")
 
         # Log payback summary
-        if np.isfinite(avg_payback):
-            logger.info(f"  Mean payback (where cost-effective): {avg_payback:.1f} years")
-            logger.info(f"  Median payback: {median_payback:.1f} years")
+        if results['property_simple_payback_mean_years'] is not None:
+            logger.info(f"  Property mean simple payback: {results['property_simple_payback_mean_years']:.1f} years")
+            logger.info(f"  Property median simple payback: {results['property_simple_payback_median_years']:.1f} years")
         if pct_not_cost_effective > 0:
             logger.info(f"  Properties not cost-effective at current prices: {pct_not_cost_effective:.1f}%")
 
@@ -1682,14 +1665,11 @@ class ScenarioModeler:
         Returns:
             Uptake rate between 0.02 and 0.85
         """
-        # Logistic function parameters
-        # L = maximum uptake (ceiling)
-        # k = steepness of curve
-        # x0 = midpoint (payback at which uptake is 50% of max)
-        L = 0.85      # Maximum uptake rate (85%)
-        k = 0.20      # Steepness (higher = sharper transition)
-        x0 = 12.0     # Midpoint payback (50% max uptake at 12 years)
-        floor = 0.02  # Minimum uptake (early adopters/innovators)
+        uptake_cfg = self.config.get('subsidy_uptake_sensitivity', {})
+        L = float(uptake_cfg.get('ceiling', 0.85))
+        k = float(uptake_cfg.get('steepness', 0.20))
+        x0 = float(uptake_cfg.get('midpoint_years', 12.0))
+        floor = float(uptake_cfg.get('floor', 0.02))
 
         # Logistic function: L / (1 + exp(k * (x - x0)))
         # Returns high uptake for low payback, low uptake for high payback
@@ -1702,7 +1682,7 @@ class ScenarioModeler:
             uptake = floor if payback_years > x0 else L
 
         # Apply floor for minimum uptake (even at very long paybacks)
-        return max(floor, uptake)
+        return min(L, max(floor, uptake)) if uptake_cfg.get('clamp', True) else uptake
 
     def model_subsidy_sensitivity(
         self,
@@ -1732,6 +1712,7 @@ class ScenarioModeler:
         logger.info("  Using smooth logistic uptake model (AUDIT FIX)")
 
         subsidy_levels = self.config.get('subsidy_levels', [0, 25, 50, 75, 100])
+        uptake_cfg = self.config.get('subsidy_uptake_sensitivity', {})
         scenario_config = self.scenarios[scenario_name]
         uplift_pct = float(self.config.get('financial', {}).get('subsidy_sensitivity_cost_uplift_pct', 0))
         uplift_multiplier = 1 + (uplift_pct / 100)
@@ -1764,8 +1745,15 @@ class ScenarioModeler:
             logger.info(f"  Analyzing {subsidy_pct}% subsidy level...")
 
             # Apply subsidy
-            capital_cost_subsidized = capital_cost_total_uplifted * (1 - subsidy_pct/100)
-            capital_cost_per_property = capital_cost_per_property_uplifted * (1 - subsidy_pct/100)
+            if subsidy_pct == 0:
+                # Zero subsidy is the canonical scenario, not a separate uplifted case.
+                capital_cost_subsidized = capital_cost_total_base
+                capital_cost_per_property = capital_cost_per_property_base
+                payback_scale = 1.0
+            else:
+                capital_cost_subsidized = capital_cost_total_uplifted * (1 - subsidy_pct/100)
+                capital_cost_per_property = capital_cost_per_property_uplifted * (1 - subsidy_pct/100)
+                payback_scale = uplift_multiplier * (1 - subsidy_pct / 100)
 
             # Recalculate payback with subsidy
             annual_savings = base_results['annual_bill_savings']
@@ -1796,9 +1784,35 @@ class ScenarioModeler:
                 'capital_cost_per_property_uplifted': capital_cost_per_property_uplifted,
                 'capital_cost_total_after_subsidy': capital_cost_subsidized,
                 'capital_cost_per_property_after_subsidy': capital_cost_per_property,
-                'payback_years': payback_years,
+                'aggregate_simple_payback_years': payback_years if annual_savings > 0 else None,
+                'aggregate_simple_payback_status': 'valid' if annual_savings > 0 else 'non_positive_aggregate_savings',
+                'property_simple_payback_mean_years': (
+                    base_results.get('property_simple_payback_mean_years') * payback_scale
+                    if base_results.get('property_simple_payback_mean_years') is not None else None
+                ),
+                'property_simple_payback_median_years': (
+                    base_results.get('property_simple_payback_median_years') * payback_scale
+                    if base_results.get('property_simple_payback_median_years') is not None else None
+                ),
+                'payback_valid_denominator_count': base_results.get('payback_valid_denominator_count', 0),
+                'payback_non_positive_savings_count': base_results.get('payback_non_positive_savings_count', 0),
+                'payback_missing_input_count': base_results.get('payback_missing_input_count', 0),
+                'payback_non_finite_input_count': base_results.get('payback_non_finite_input_count', 0),
+                'payback_infinite_count': base_results.get('payback_infinite_count', 0),
+                'excluded_by_truncation_count': 0,
+                'truncation_threshold_years': None,
+                'payback_definition': base_results.get('payback_definition'),
+                'payback_denominator': base_results.get('payback_denominator'),
+                'payback_serialization_policy': base_results.get('payback_serialization_policy'),
                 'estimated_uptake_rate': uptake_rate,
-                'uptake_model': 'logistic_smooth',  # Document model type
+                'uptake_model': 'logistic_smooth',
+                'uptake_ceiling': float(uptake_cfg.get('ceiling', 0.85)),
+                'uptake_floor': float(uptake_cfg.get('floor', 0.02)),
+                'uptake_midpoint_years': float(uptake_cfg.get('midpoint_years', 12.0)),
+                'uptake_steepness': float(uptake_cfg.get('steepness', 0.20)),
+                'uptake_clamp': bool(uptake_cfg.get('clamp', True)),
+                'interpretation': uptake_cfg.get('interpretation', 'modelled sensitivity, not forecast'),
+                'source_notes': uptake_cfg.get('source_notes', ''),
                 'properties_upgraded': properties_upgraded,
                 'public_expenditure_total': public_expenditure,
                 'public_expenditure_per_property': public_expenditure / properties_upgraded if properties_upgraded > 0 else 0,
@@ -1807,6 +1821,14 @@ class ScenarioModeler:
                 'cost_uplift_note': uplift_note,
                 'narrative_line': narrative_line,
             }
+
+            if subsidy_pct == 0:
+                canonical = base_results.get('aggregate_simple_payback_years')
+                actual = sensitivity_results[f'{subsidy_pct}%']['aggregate_simple_payback_years']
+                if (canonical is None) != (actual is None):
+                    raise RuntimeError('Zero-subsidy payback status does not match canonical scenario')
+                if canonical is not None and not np.isclose(float(canonical), float(actual), rtol=1e-10, atol=1e-10):
+                    raise RuntimeError('Zero-subsidy payback does not reconcile to canonical scenario')
 
             logger.info(
                 f"    Payback: {payback_years:.1f}yr → Uptake: {uptake_rate*100:.1f}% "
@@ -1963,8 +1985,7 @@ class ScenarioModeler:
             rows.append({
                 'scenario_id': scenario,
                 'scenario': scenario_label,
-                'model_family': 'stock_scenario',
-                'model_purpose': 'London stock intervention comparison',
+                **STOCK_SCENARIO.metadata(),
                 'fabric_package': scenario,
                 'heating_technology': (
                     'heat_pump' if scenario in ('heat_pump', 'minimum_fabric_hp_ready')
@@ -1974,7 +1995,6 @@ class ScenarioModeler:
                 'cost_boundary': 'property retrofit and connection costs',
                 'network_backbone_included': False,
                 'grid_reinforcement_included': False,
-                'intended_reporting_use': 'headline stock scenario comparison',
                 'headline_reporting_eligible': scenario in self.publish_scenarios,
                 'total_properties': results.get('total_properties'),
                 'capital_cost_total': results.get('capital_cost_total'),
@@ -1997,8 +2017,20 @@ class ScenarioModeler:
                 'heat_pump_electricity_total_kwh': results.get('heat_pump_electricity_total_kwh'),
                 'heat_pump_electricity_total_kwh_low': results.get('heat_pump_electricity_total_kwh_low'),
                 'heat_pump_electricity_total_kwh_high': results.get('heat_pump_electricity_total_kwh_high'),
-                'average_payback_years': results.get('average_payback_years'),
-                'median_payback_years': results.get('median_payback_years'),
+                'aggregate_simple_payback_years': results.get('aggregate_simple_payback_years'),
+                'aggregate_simple_payback_status': results.get('aggregate_simple_payback_status'),
+                'property_simple_payback_mean_years': results.get('property_simple_payback_mean_years'),
+                'property_simple_payback_median_years': results.get('property_simple_payback_median_years'),
+                'payback_valid_denominator_count': results.get('payback_valid_denominator_count'),
+                'payback_non_positive_savings_count': results.get('payback_non_positive_savings_count'),
+                'payback_missing_input_count': results.get('payback_missing_input_count'),
+                'payback_non_finite_input_count': results.get('payback_non_finite_input_count'),
+                'payback_infinite_count': results.get('payback_infinite_count'),
+                'truncation_threshold_years': results.get('truncation_threshold_years'),
+                'excluded_by_truncation_count': results.get('excluded_by_truncation_count'),
+                'payback_definition': results.get('payback_definition'),
+                'payback_denominator': results.get('payback_denominator'),
+                'payback_serialization_policy': results.get('payback_serialization_policy'),
                 # Cost-effectiveness metrics
                 'upgrade_recommended_count': results.get('upgrade_recommended_count'),
                 'upgrade_recommended_pct': results.get('upgrade_recommended_pct'),
@@ -2064,7 +2096,12 @@ class ScenarioModeler:
                 basic_keys = [
                     'total_properties', 'capital_cost_total', 'capital_cost_per_property',
                     'annual_energy_reduction_kwh', 'annual_co2_reduction_kg', 'annual_bill_savings',
-                    'average_payback_years', 'median_payback_years'
+                    'aggregate_simple_payback_years', 'aggregate_simple_payback_status',
+                    'property_simple_payback_mean_years', 'property_simple_payback_median_years',
+                    'payback_valid_denominator_count', 'payback_non_positive_savings_count',
+                    'payback_missing_input_count', 'payback_non_finite_input_count',
+                    'payback_infinite_count', 'truncation_threshold_years',
+                    'excluded_by_truncation_count'
                 ]
                 for key in basic_keys:
                     if key in results:
@@ -2115,7 +2152,7 @@ class ScenarioModeler:
                     f.write(f"  HP-ready (current fabric): {results['ashp_ready_properties']:,} "
                             f"({results.get('ashp_ready_pct', 0):.1f}%)\n")
                     f.write(f"  Require fabric upgrades: {results.get('ashp_fabric_required_properties', 0):,}\n")
-                    f.write(f"  Not suitable for HP: {results.get('ashp_not_ready_properties', 0):,}\n")
+                    f.write(f"  Currently unsuitable for a standard ASHP: {results.get('ashp_not_ready_properties', 0):,}\n")
 
                 f.write("\n")
 

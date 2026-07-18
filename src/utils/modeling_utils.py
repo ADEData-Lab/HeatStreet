@@ -611,7 +611,7 @@ def assess_hp_readiness_status(
         - ashp_ready: Currently HP-ready
         - ashp_projected_ready: Would be HP-ready after minimum fabric
         - ashp_fabric_needed: Needs fabric to become HP-ready
-        - ashp_not_ready_after_fabric: Not suitable even after fabric
+        - ashp_not_ready_after_fabric: Currently unsuitable for a standard ASHP after modelled fabric work
     """
     if measure_savings is None:
         measure_savings = get_measure_savings()

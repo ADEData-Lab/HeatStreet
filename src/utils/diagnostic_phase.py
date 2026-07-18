@@ -123,7 +123,7 @@ def validate_artifacts(
         raise RuntimeError(f"Diagnostic summary columns are missing: {sorted(missing_columns)}")
     if set(summary["pathway_id"].astype(str)) != set(PATHWAY_IDS):
         raise RuntimeError("Diagnostic summary pathway IDs do not match configured pathways")
-    if not summary["model_family"].eq("full_fabric_pathway").all():
+    if not summary["model_family"].eq("diagnostic_full_fabric_pathway").all():
         raise RuntimeError("Diagnostic summary contains an invalid model_family")
     if not summary["intended_reporting_use"].eq("diagnostic_distributional_only").all():
         raise RuntimeError("Diagnostic summary contains a non-diagnostic reporting use")
@@ -307,7 +307,7 @@ def run_diagnostic_phase(
             gc.collect()
             if attempt == 1:
                 try:
-                    attempt_df = pd.read_parquet(processed_dir / "epc_london_adjusted.parquet")
+                    attempt_df = pd.read_parquet(processed_dir / "epc_london_adjusted_spatial.parquet")
                 except Exception as reload_exc:
                     retry_candidate = outputs_dir / ".diagnostic-candidate-attempt-2"
                     retry_candidate.mkdir(parents=True, exist_ok=True)

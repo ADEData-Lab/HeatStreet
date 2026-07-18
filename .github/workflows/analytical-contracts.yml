@@ -1,0 +1,78 @@
+name: Analytical contracts and semantic QA
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  full-test-suite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt -r requirements-spatial.txt
+      - name: Run full unit and integration suite
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts
+          python -m pytest -q --junitxml=artifacts/pytest-full.xml 2>&1 | tee artifacts/pytest-full-summary.txt
+      - name: Upload pytest summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytest-full-summary
+          path: |
+            artifacts/pytest-full.xml
+            artifacts/pytest-full-summary.txt
+
+  analytical-contract-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt -r requirements-spatial.txt
+      - name: Run analytical contract and semantic QA tests
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p artifacts
+          python -m pytest tests/test_analysis_contracts.py tests/test_semantic_qa.py -q --junitxml=artifacts/pytest-contracts.xml 2>&1 | tee artifacts/pytest-contracts-summary.txt
+      - name: Collect representative run evidence when present
+        if: always()
+        shell: bash
+        run: |
+          latest_run=""
+          if [ -d data/runs ]; then
+            latest_run="$(find data/runs -mindepth 1 -maxdepth 1 -type d | sort | tail -1)"
+          fi
+          if [ -n "$latest_run" ]; then
+            for artifact in qa_checks.json spatial_enrichment_summary.json scenario_results_summary.csv stock_scenario_comparison.csv; do
+              if [ -f "$latest_run/outputs/$artifact" ]; then
+                cp "$latest_run/outputs/$artifact" "artifacts/$artifact"
+              fi
+            done
+          fi
+      - name: Upload analytical validation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: analytical-contract-validation
+          if-no-files-found: warn
+          path: |
+            artifacts/pytest-contracts.xml
+            artifacts/pytest-contracts-summary.txt
+            artifacts/qa_checks.json
+            artifacts/spatial_enrichment_summary.json
+            artifacts/scenario_results_summary.csv
+            artifacts/stock_scenario_comparison.csv

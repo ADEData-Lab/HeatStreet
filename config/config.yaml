@@ -479,15 +479,49 @@ measure_savings:
 # Subsidy Levels for Sensitivity Analysis (%)
 subsidy_levels: [0, 25, 50, 75, 100]
 
+subsidy_uptake_sensitivity:
+  ceiling: 0.85
+  floor: 0.02
+  midpoint_years: 12.0
+  steepness: 0.20
+  clamp: true
+  interpretation: "modelled sensitivity, not forecast"
+  source_notes: "Behavioural logistic response used only to test sensitivity to simple payback; it is not an adoption forecast."
+
+window_economics:
+  assumed_floor_area_m2: 100
+  assumed_annual_energy_kwh: 15000
+  measures:
+    - measure: "double_glazing"
+      capital_cost_key: "double_glazing_upgrade"
+      saving_fraction: 0.10
+      source: "config.costs.double_glazing_upgrade and retrofit_savings.double_glazing"
+    - measure: "triple_glazing"
+      capital_cost_key: "triple_glazing_upgrade"
+      saving_fraction: 0.15
+      source: "config.costs.triple_glazing_upgrade and retrofit_savings.triple_glazing"
+  interpretation: "Illustrative simple-payback sensitivity using configured assumptions; not a forecast."
+
 # Energy Prices (£/kWh)
-# See authoritative_sources.sections.energy_prices_and_tariffs
-# UPDATED 2025-12-04: Aligned with Ofgem Energy Price Cap Q4 2024
-# Source: https://www.ofgem.gov.uk/energy-price-cap
-# Note: These are unit rates only (excluding standing charges)
+# Named domestic profiles are unit rates only; heat-network tariffs remain separate.
+energy_price_profiles:
+  default_profile: january_client_report_provisional
+  profiles:
+    january_client_report_provisional:
+      label: "January client report provisional prices"
+      effective_period: "Legacy provisional report basis"
+      effective_start: null
+      effective_end: null
+      gas_gbp_per_kwh: 0.0624
+      electricity_gbp_per_kwh: 0.245
+      standing_charges_included: false
+      status: "legacy reproducibility profile"
+      purpose: "reproducing the provisional client report results"
+      source_note: "Rates used for the provisional client report issued in January"
+      validation_note: "Preserved exactly for reproducibility; not presented as a current Ofgem period"
+
+# Projected prices are analytical assumptions, not Ofgem price-cap periods.
 energy_prices:
-  current:
-    gas: 0.0624  # Updated from 0.10 - Ofgem cap Q4 2024: 6.24p/kWh
-    electricity: 0.245  # Updated from 0.34 - Ofgem cap Q4 2024: 24.5p/kWh
   projected_2030:
     gas: 0.07  # Modest increase from current (carbon pricing, reduced demand)
     electricity: 0.22  # Decrease due to renewables expansion
@@ -688,9 +722,8 @@ financial:
 
   price_scenarios:
     baseline:
-      name: "Current prices (Ofgem cap)"
-      gas: 0.0624
-      electricity: 0.245
+      name: "Resolved run energy price profile"
+      energy_price_profile: "resolved at run time"
       heat_network: 0.08
     low:
       name: "Low energy prices"
@@ -832,12 +865,13 @@ authoritative_sources:
     
     | ID | Item | Value | Status | Evidence |
     |----|------|-------|--------|----------|
-    | 1 | Gas Price (Current) | 0.0624 £/kWh | **Validated** | [Ofgem Q4 2024 Price Cap](https://www.ofgem.gov.uk/news/changes-energy-price-cap-between-1-october-31-december-2024), [Ofgem Energy Price Cap](https://www.ofgem.gov.uk/energy-price-cap) |
-    | 2 | Electricity Price (Current) | 0.245 £/kWh | **Validated** | [Ofgem Q4 2024 Price Cap](https://www.ofgem.gov.uk/news/changes-energy-price-cap-between-1-october-31-december-2024) |
+    | 1 | Gas price (January client report provisional) | 0.0624 £/kWh | Legacy reproducibility profile | Rates used for the provisional client report issued in January |
+    | 2 | Electricity price (January client report provisional) | 0.245 £/kWh | Legacy reproducibility profile | Rates used for the provisional client report issued in January |
     | 3 | Heat Network Tariff (Current) | 0.08 £/kWh | Plausible assumption | [Heat Trust Pricing](https://www.heattrust.org/consumers/heat-costs-and-pricing), [DESNZ Heat Networks](https://www.gov.uk/government/collections/heat-networks) |
     
     **Notes:**
-    - Gas and electricity prices match Ofgem Q4 2024 GB average capped unit rates for typical domestic dual-fuel direct debit customers
+    - The January provisional gas and electricity rates are preserved exactly for client-report reproducibility and are not presented as a verified current Ofgem period
+    - Standing charges are excluded from all named domestic unit-rate profiles
     - Heat network tariff within observed range (c. 0.05–0.10 £/kWh) for UK heat networks; not regulated, treated as scenario input
     
     ### 2030 Projections

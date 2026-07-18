@@ -19,6 +19,69 @@ from loguru import logger
 
 from config.config import DATA_OUTPUTS_DIR, get_cost_assumptions, get_heat_network_params, load_config
 from src.modeling.pathway_model import PATHWAYS
+from src.modeling.contracts import DIAGNOSTIC_FULL_FABRIC_PATHWAY, STOCK_SCENARIO, validate_hybrid_assignments
+
+
+def build_stock_scenario_comparison(
+    scenario_results: Dict[str, Dict],
+    property_results: pd.DataFrame,
+) -> pd.DataFrame:
+    """Build the public HP/HN/hybrid comparison from stock-scenario outputs."""
+    required_scenarios = ("heat_pump", "heat_network", "hybrid")
+    missing = [name for name in required_scenarios if name not in scenario_results]
+    if missing:
+        raise ValueError(f"Public stock comparison is missing scenarios: {missing}")
+    if not {"scenario", "capital_cost", "annual_bill_savings", "annual_energy_reduction_kwh", "annual_co2_reduction_kg"}.issubset(property_results.columns):
+        raise ValueError("Scenario property results lack public comparison metrics")
+
+    hybrid = property_results[property_results["scenario"].eq("hybrid")].copy()
+    hybrid["assigned_heat_network"] = hybrid.get("hybrid_pathway", pd.Series(index=hybrid.index)).eq("heat_network")
+    hybrid["assigned_ashp"] = hybrid.get("hybrid_pathway", pd.Series(index=hybrid.index)).eq("ashp")
+    validate_hybrid_assignments(hybrid)
+
+    rows = []
+    for scenario_id in required_scenarios:
+        result = scenario_results[scenario_id]
+        subset = property_results[property_results["scenario"].eq(scenario_id)]
+        if subset.empty:
+            raise ValueError(f"No property results for public scenario {scenario_id}")
+        rows.append({
+            "scenario_id": scenario_id,
+            "scenario": result.get("scenario_label", scenario_id),
+            **STOCK_SCENARIO.metadata(),
+            "total_properties": int(result["total_properties"]),
+            "capital_cost_total": float(result["capital_cost_total"]),
+            "capital_cost_per_property": float(result["capital_cost_per_property"]),
+            "annual_bill_savings": float(result["annual_bill_savings"]),
+            "post_measure_bill_total": result.get("post_measure_bill_total"),
+            "annual_energy_reduction_kwh": float(result["annual_energy_reduction_kwh"]),
+            "annual_co2_reduction_kg": float(result["annual_co2_reduction_kg"]),
+            "post_measure_co2_total_kg": result.get("post_measure_co2_total_kg"),
+            "aggregate_simple_payback_years": result.get("aggregate_simple_payback_years"),
+            "property_simple_payback_mean_years": result.get("property_simple_payback_mean_years"),
+            "property_simple_payback_median_years": result.get("property_simple_payback_median_years"),
+            "payback_valid_denominator_count": result.get("payback_valid_denominator_count"),
+            "payback_non_positive_savings_count": result.get("payback_non_positive_savings_count"),
+            "payback_missing_input_count": result.get("payback_missing_input_count"),
+            "payback_non_finite_input_count": result.get("payback_non_finite_input_count"),
+            "payback_infinite_count": result.get("payback_infinite_count"),
+            "excluded_by_truncation_count": result.get("excluded_by_truncation_count"),
+            "truncation_threshold_years": result.get("truncation_threshold_years"),
+            "hn_assigned_properties": int(result.get("hn_assigned_properties", 0)),
+            "ashp_assigned_properties": int(result.get("ashp_assigned_properties", 0)),
+        })
+
+    comparison = pd.DataFrame(rows)
+    hybrid_row = comparison.set_index("scenario_id").loc["hybrid"]
+    if int(hybrid_row["hn_assigned_properties"]) <= 0:
+        raise ValueError("Public hybrid comparison has no heat-network assignments")
+    metrics = ["capital_cost_total", "annual_bill_savings", "annual_energy_reduction_kwh", "annual_co2_reduction_kg"]
+    hp = comparison.set_index("scenario_id").loc["heat_pump", metrics].astype(float)
+    hn = comparison.set_index("scenario_id").loc["heat_network", metrics].astype(float)
+    mixed = hybrid_row[metrics].astype(float)
+    if np.allclose(mixed, hp) or np.allclose(mixed, hn):
+        raise ValueError("Mixed-cohort hybrid is identical to a pure public pathway")
+    return comparison
 
 
 @dataclass
@@ -86,7 +149,8 @@ class ComparisonReporter:
         return pathway.name if pathway else pathway_id
 
     def _payback_note(self, pathway_id: str) -> str:
-        energy_prices = self.config.get('energy_prices', {}).get('current', {})
+        from config.config import get_resolved_energy_prices
+        energy_prices = get_resolved_energy_prices(self.config)
         carbon_factors = self.config.get('carbon_factors', {}).get('current', {})
         hn_tariff = float(self.hn_params.get('tariff_per_kwh', energy_prices.get('heat_network', 0.08)) or 0)
         gas_price = float(energy_prices.get('gas', 0.0) or 0)
@@ -143,6 +207,7 @@ class ComparisonReporter:
                 'pathway_name': comp.pathway_name,
                 'n_homes': comp.n_homes,
                 'payback_note': self._payback_note(comp.pathway_id),
+                **DIAGNOSTIC_FULL_FABRIC_PATHWAY.metadata(),
             }
             for metric, stats in comp.stats.items():
                 for stat_name, value in stats.items():
@@ -153,7 +218,8 @@ class ComparisonReporter:
     def _write_markdown(self, comparisons: List[ComparisonResult]):
         snippet_path = self.comparisons_dir / "hn_vs_hp_report_snippet.md"
 
-        tariff_info = self.config.get('energy_prices', {}).get('current', {})
+        from config.config import get_resolved_energy_prices
+        tariff_info = get_resolved_energy_prices(self.config)
         hp_cop = self.config.get('heat_pump', {}).get('scop', 3.0)
         connection_cost = self.costs.get('district_heating_connection', 5000)
         hn_efficiency = self.hn_params.get('distribution_efficiency', 1.0)
@@ -167,8 +233,8 @@ class ComparisonReporter:
             "",
             "**Sign convention:** savings columns are positive when costs/emissions fall;",
             " change columns (bill_change/co2_change) are negative when costs/emissions drop.",
-            "", "**Tariffs & performance assumptions:**", f"- Electricity: £{tariff_info.get('electricity', 0.245):.3f}/kWh",
-            f"- Gas: £{tariff_info.get('gas', 0.0624):.4f}/kWh",
+            "", "**Tariffs & performance assumptions:**", f"- Electricity: £{tariff_info['electricity']:.3f}/kWh",
+            f"- Gas: £{tariff_info['gas']:.4f}/kWh",
             f"- Heat network tariff: £{self.hn_params.get('tariff_per_kwh', 0.08):.3f}/kWh",
             f"- Heat network delivery efficiency: {hn_efficiency*100:.0f}% (tariff applied to input energy)",
             f"- Heat network carbon intensity: {hn_carbon:.3f} kgCO₂/kWh supplied" if hn_carbon is not None else "- Heat network carbon intensity: not specified",
@@ -245,6 +311,20 @@ class ComparisonReporter:
         """Generate CSV, markdown, and optional figure comparing HP/HN scenarios."""
         self.hybrid_warning = False
         results_df = df if df is not None else self.load_results(results_path)
+
+        hybrid = results_df[results_df['pathway_id'].eq('fabric_plus_hp_plus_hn')]
+        if not hybrid.empty:
+            validate_hybrid_assignments(hybrid.assign(hn_ready=hybrid['has_hn_access']))
+            if hybrid['has_hn_access'].any() and not hybrid['assigned_heat_network'].any():
+                raise ValueError("Diagnostic hybrid has no HN assignments for HN-ready homes")
+            metric_columns = ['total_capex', 'annual_bill', 'annual_bill_saving', 'annual_demand_kwh', 'co2_saving_tonnes']
+            for pure_id in ('fabric_plus_hp_only', 'fabric_plus_hn_only'):
+                pure = results_df[results_df['pathway_id'].eq(pure_id)]
+                if len(pure) == len(hybrid) and np.allclose(
+                    hybrid[metric_columns].to_numpy(dtype=float),
+                    pure[metric_columns].to_numpy(dtype=float),
+                ):
+                    raise ValueError(f"Diagnostic mixed-cohort hybrid is identical to {pure_id}")
 
         self._warn_if_hybrid_equals_fabric(results_df)
 

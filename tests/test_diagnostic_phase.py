@@ -35,7 +35,7 @@ def _summary(cohort: int) -> pd.DataFrame:
         [
             {
                 "pathway_id": pathway_id,
-                "model_family": "full_fabric_pathway",
+                "model_family": "diagnostic_full_fabric_pathway",
                 "intended_reporting_use": "diagnostic_distributional_only",
                 "headline_reporting_eligible": False,
                 "n_properties": cohort,
@@ -94,7 +94,7 @@ def _run(tmp_path, modeler_class, *, context=None):
     context.output_dir.mkdir(parents=True, exist_ok=True)
     context.processed_dir.mkdir(parents=True, exist_ok=True)
     source = pd.DataFrame({"source": [1, 2]})
-    source.to_parquet(context.processed_dir / "epc_london_adjusted.parquet", index=False)
+    source.to_parquet(context.processed_dir / "epc_london_adjusted_spatial.parquet", index=False)
     return run_diagnostic_phase(
         source,
         context=context,

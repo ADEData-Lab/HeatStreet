@@ -31,11 +31,22 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.panel import Panel
 from rich import print as rprint
 import time
+import pandas as pd
+import yaml
 
 # Add src to path
 sys.path.append(str(Path(__file__).parent))
 
-from config.config import load_config, ensure_directories, DATA_RAW_DIR, DATA_PROCESSED_DIR, DATA_OUTPUTS_DIR
+from config.config import (
+    RUN_CONFIG_ENV,
+    build_run_config,
+    get_energy_price_profiles,
+    load_config,
+    ensure_directories,
+    DATA_RAW_DIR,
+    DATA_PROCESSED_DIR,
+    DATA_OUTPUTS_DIR,
+)
 from src.acquisition.epc_api_downloader import (
     EPCAPIDownloader,
     EPCDownloadError,
@@ -46,7 +57,8 @@ from src.cleaning.data_validator import EPCDataValidator
 from src.analysis.archetype_analysis import ArchetypeAnalyzer
 from src.modeling.scenario_model import ScenarioModeler
 from src.modeling.pathway_model import PathwayModeler
-from src.reporting.comparisons import ComparisonReporter
+from src.modeling.contracts import HN_READY_TIERS, join_spatial_enrichment
+from src.reporting.comparisons import ComparisonReporter, build_stock_scenario_comparison
 from src.utils.analysis_logger import AnalysisLogger
 from src.utils.staged_dataset import DatasetReference, parquet_row_count
 from src.utils.staged_processing import (
@@ -77,6 +89,7 @@ _active_run_context: Optional[RunContext] = None
 _active_authoritative_cohort_size: Optional[int] = None
 _public_outputs_dir: Optional[Path] = None
 _run_path_redirections: list[tuple[object, str, object]] = []
+_previous_run_config_env: Optional[str] = None
 
 PHASE_ACQUISITION = "Acquisition"
 PHASE_VALIDATION = "Validation"
@@ -152,13 +165,18 @@ def _configure_run_directories(
 
 def _restore_run_directories() -> None:
     """Undo process-local compatibility redirects after a run completes."""
-    global DATA_OUTPUTS_DIR, DATA_PROCESSED_DIR, _run_path_redirections
+    global DATA_OUTPUTS_DIR, DATA_PROCESSED_DIR, _run_path_redirections, _previous_run_config_env
     for module, attribute, original_value in reversed(_run_path_redirections):
         try:
             setattr(module, attribute, original_value)
         except Exception:
             continue
     _run_path_redirections = []
+    if _previous_run_config_env is None:
+        os.environ.pop(RUN_CONFIG_ENV, None)
+    else:
+        os.environ[RUN_CONFIG_ENV] = _previous_run_config_env
+    _previous_run_config_env = None
 
 
 def _write_current_run_metadata(
@@ -169,9 +187,9 @@ def _write_current_run_metadata(
     metadata_path = Path(DATA_OUTPUTS_DIR) / "run_metadata.json"
     payload = {
         **context.to_dict(),
-        "start_time": analysis_logger.metadata.get("analysis_start") or context.analysis_start,
-        "end_time": analysis_logger.metadata.get("analysis_end") or context.analysis_end,
-        "runtime_seconds": analysis_logger.metadata.get("total_duration_seconds") or context.runtime_seconds,
+        "start_time": context.analysis_start,
+        "end_time": context.analysis_end,
+        "runtime_seconds": context.runtime_seconds,
         "authoritative_cohort_size": int(cohort_size),
     }
     metadata_path.parent.mkdir(parents=True, exist_ok=True)
@@ -189,11 +207,15 @@ def _register_current_artifacts(context: RunContext) -> ArtifactManifest:
         "published_validation_report": (Path(DATA_OUTPUTS_DIR) / "validation_report.json", "client_outputs", True, "client"),
         "adjustment_summary": (Path(DATA_PROCESSED_DIR) / "methodological_adjustments_summary.json", "adjustments", True, "client"),
         "adjusted_dataset": (Path(DATA_PROCESSED_DIR) / "epc_london_adjusted.parquet", "adjustments", True, "internal"),
+        "spatially_enriched_properties": (Path(DATA_PROCESSED_DIR) / "epc_london_adjusted_spatial.parquet", "spatial_analysis", True, "internal"),
+        "spatial_enrichment_summary": (Path(DATA_OUTPUTS_DIR) / "spatial_enrichment_summary.json", "spatial_analysis", True, "internal"),
         "archetype_analysis": (Path(DATA_OUTPUTS_DIR) / "archetype_analysis_results.json", "analysis", True, "client"),
         "readiness": (Path(DATA_OUTPUTS_DIR) / "retrofit_readiness_analysis.csv", "analysis", True, "client"),
         "spatial_suitability": (Path(DATA_OUTPUTS_DIR) / "pathway_suitability_by_tier.csv", "analysis", True, "client"),
         "internal_scenarios": (Path(DATA_OUTPUTS_DIR) / "internal_scenario_results.csv", "modelling", True, "internal"),
         "client_scenarios": (Path(DATA_OUTPUTS_DIR) / "scenario_results_summary.csv", "modelling", True, "client"),
+        "stock_scenario_comparison": (Path(DATA_OUTPUTS_DIR) / "stock_scenario_comparison.csv", "modelling", True, "client"),
+        "scenario_property_results": (Path(DATA_OUTPUTS_DIR) / "scenario_results_by_property.parquet", "modelling", True, "internal"),
         "diagnostic_pathway_properties": (Path(DATA_OUTPUTS_DIR) / "pathway_results_by_property.parquet", "diagnostic_pathways", True, "internal"),
         "diagnostic_pathways": (Path(DATA_OUTPUTS_DIR) / "pathway_results_summary.csv", "diagnostic_pathways", True, "internal"),
         "diagnostic_hp_hn_comparison": (Path(DATA_OUTPUTS_DIR) / "comparisons" / "hn_vs_hp_comparison.csv", "diagnostic_pathways", True, "internal"),
@@ -205,12 +227,17 @@ def _register_current_artifacts(context: RunContext) -> ArtifactManifest:
         "case_street_extract": (Path(DATA_OUTPUTS_DIR) / "shakespeare_crescent_extract.csv", "reporting", True, "client"),
         "case_street_summary": (Path(DATA_OUTPUTS_DIR) / "shakespeare_crescent_summary.txt", "reporting", True, "client"),
         "subsidy_detailed": (Path(DATA_OUTPUTS_DIR) / "subsidy_sensitivity_analysis.csv", "modelling", True, "client"),
-        "subsidy_simplified": (Path(DATA_OUTPUTS_DIR) / "subsidy_sensitivity_analysis_simple_gbp.csv", "reporting", True, "client"),
+        "window_economics": (Path(DATA_OUTPUTS_DIR) / "window_economics.csv", "reporting", True, "client"),
+        "qa_checks": (Path(DATA_OUTPUTS_DIR) / "qa_checks.json", "semantic_qa", True, "internal"),
         "one_stop_json": (Path(DATA_OUTPUTS_DIR) / "one_stop_output.json", "client_outputs", True, "client"),
         "dashboard_data": (Path(DATA_OUTPUTS_DIR) / "dashboard" / "dashboard-data.json", "client_outputs", True, "client"),
         "dashboard_html": (Path(DATA_OUTPUTS_DIR) / "one_stop_dashboard.html", "client_outputs", True, "client"),
         "analysis_compendium": (Path(DATA_OUTPUTS_DIR) / "analysis_outputs_compendium.xlsx", "client_outputs", True, "client"),
     }
+    if context.configuration_snapshot:
+        artifact_map["configuration_snapshot"] = (
+            Path(context.configuration_snapshot), "provenance", True, "internal"
+        )
     for logical_name, (path, phase, required, scope) in artifact_map.items():
         if path.is_file():
             manifest.register(
@@ -257,7 +284,8 @@ def _load_adjusted_phase_frame(phase_name: str):
     """Load the run-scoped adjusted Parquet boundary for an analytical phase."""
     import pandas as pd
 
-    path = Path(DATA_PROCESSED_DIR) / "epc_london_adjusted.parquet"
+    spatial_path = Path(DATA_PROCESSED_DIR) / "epc_london_adjusted_spatial.parquet"
+    path = spatial_path if spatial_path.is_file() else Path(DATA_PROCESSED_DIR) / "epc_london_adjusted.parquet"
     if not path.is_file():
         raise RuntimeError(f"{phase_name} requires the authoritative adjusted Parquet: {path}")
     frame = pd.read_parquet(path)
@@ -1171,6 +1199,10 @@ def parse_args(argv=None) -> argparse.Namespace:
     parser.add_argument("--source-fixture-sha256", help="Expected SHA-256 for a development fixture.")
     parser.add_argument("--refresh-hnpd", action="store_true", help="Refresh HNPD inputs for a production run.")
     parser.add_argument("--no-publish", action="store_true", help="Keep outputs run-scoped and do not update the latest publication.")
+    parser.add_argument(
+        "--energy-price-profile",
+        help="Named domestic energy unit-rate profile from config/config.yaml.",
+    )
 
     args = parser.parse_args(argv)
     if args.sample_start and args.sample_end and args.sample_start > args.sample_end:
@@ -1181,6 +1213,14 @@ def parse_args(argv=None) -> argparse.Namespace:
         parser.error("--production and --development-fixture are mutually exclusive")
     if args.development_fixture and not (args.source_run_id and args.source_fixture_sha256):
         parser.error("--development-fixture requires --source-run-id and --source-fixture-sha256")
+    if args.energy_price_profile:
+        profiles = get_energy_price_profiles(load_config()).get("profiles", {})
+        if args.energy_price_profile not in profiles:
+            parser.error(
+                f"unknown energy price profile {args.energy_price_profile!r}; "
+                f"available profiles: {', '.join(sorted(profiles))}"
+            )
+    args.energy_price_profile_cli_explicit = args.energy_price_profile is not None
 
     # Backwards-compatibility shim: expose args.tui as a bool for legacy code
     # that predates tui_mode/no_tui. create_dashboard() reads tui_mode/no_tui.
@@ -2429,6 +2469,11 @@ def model_scenarios(df, analysis_logger: AnalysisLogger = None, ui=None):
     subsidy_results = subsidy_results_by_scenario.get("heat_pump", {})
 
     save_paths = modeler.save_results()
+    property_results = pd.read_parquet(save_paths['property_path'])
+    public_comparison = build_stock_scenario_comparison(scenario_results, property_results)
+    public_comparison.to_csv(Path(DATA_OUTPUTS_DIR) / "stock_scenario_comparison.csv", index=False)
+    from src.reporting.window_economics import generate_window_economics
+    generate_window_economics(Path(DATA_OUTPUTS_DIR) / "window_economics.csv")
     console.print(f"[green]✓[/green] Results saved")
     if save_paths.get('property_path'):
         console.print(f"    • Property-level results: {save_paths['property_path']}")
@@ -2525,15 +2570,17 @@ def analyze_retrofit_readiness(df, analysis_logger: AnalysisLogger = None, one_s
         console.print("[green]✓[/green] Retrofit readiness analysis complete")
         console.print()
         console.print("[cyan]Key Findings:[/cyan]")
-        console.print(f"  Tier 1 (Ready Now): {summary['tier_distribution'].get(1, 0):,} properties ({summary['tier_percentages'].get(1, 0):.1f}%)")
-        console.print(f"  Tier 2 (Minor Work): {summary['tier_distribution'].get(2, 0):,} properties ({summary['tier_percentages'].get(2, 0):.1f}%)")
-        console.print(f"  Tier 3 (Major Work): {summary['tier_distribution'].get(3, 0):,} properties ({summary['tier_percentages'].get(3, 0):.1f}%)")
-        console.print(f"  Tier 4 (Challenging): {summary['tier_distribution'].get(4, 0):,} properties ({summary['tier_percentages'].get(4, 0):.1f}%)")
-        console.print(f"  Tier 5 (Not Suitable): {summary['tier_distribution'].get(5, 0):,} properties ({summary['tier_percentages'].get(5, 0):.1f}%)")
+        from src.modeling.contracts import TIER_READINESS_LABELS
+        for tier in range(1, 6):
+            console.print(
+                f"  {TIER_READINESS_LABELS[tier]}: "
+                f"{summary['tier_distribution'].get(tier, 0):,} properties "
+                f"({summary['tier_percentages'].get(tier, 0):.1f}%)"
+            )
         console.print()
         console.print(f"  Solid wall barrier: {summary['needs_solid_wall_insulation']:,} properties need SWI")
         console.print(f"  Mean fabric cost: £{summary['mean_fabric_cost']:,.0f}")
-        console.print(f"  Total retrofit investment: £{summary['total_retrofit_cost']/1e6:.1f}M")
+        console.print(f"  Total full-ASHP investment: £{summary['total_cost_full_ashp']/1e6:.1f}M")
         console.print()
 
         for tier in range(1, 6):
@@ -2545,7 +2592,7 @@ def analyze_retrofit_readiness(df, analysis_logger: AnalysisLogger = None, one_s
             )
         _ui_metric(ui, "solid wall barrier count", summary['needs_solid_wall_insulation'], group=PHASE_MODELLING)
         _ui_metric(ui, "mean fabric cost", summary['mean_fabric_cost'], group=PHASE_MODELLING)
-        _ui_metric(ui, "total retrofit investment", summary['total_retrofit_cost'], group=PHASE_MODELLING)
+        _ui_metric(ui, "total full-ASHP investment", summary['total_cost_full_ashp'], group=PHASE_MODELLING)
 
         if analysis_logger:
             for tier in range(1, 6):
@@ -2553,7 +2600,7 @@ def analyze_retrofit_readiness(df, analysis_logger: AnalysisLogger = None, one_s
                 pct = summary['tier_percentages'].get(tier, 0)
             analysis_logger.add_metric(f"retrofit_tier_{tier}", count, f"{pct:.1f}% of properties")
             analysis_logger.add_metric("mean_fabric_cost", summary['mean_fabric_cost'], "Average fabric improvement cost per property")
-            analysis_logger.add_metric("total_retrofit_cost", summary['total_retrofit_cost'], "Total retrofit investment needed")
+            analysis_logger.add_metric("total_cost_full_ashp", summary['total_cost_full_ashp'], "Total full-ASHP investment needed")
 
         viz = None
         try:
@@ -3185,7 +3232,7 @@ def generate_one_stop_report(df=None, analysis_logger: AnalysisLogger = None, ui
                 "internal_scenarios", "client_scenarios", "diagnostic_pathways",
                 "borough_breakdown", "borough_priority", "tenure_segmentation",
                 "network_thresholds", "case_street_extract", "case_street_summary",
-                "subsidy_detailed", "subsidy_simplified",
+                "subsidy_detailed",
             ],
         )
 
@@ -3417,20 +3464,6 @@ def generate_additional_reports(df_raw, df_validated, validation_report, archety
     except Exception as e:
         console.print(f"[yellow]⚠ Could not generate data quality report: {e}[/yellow]")
 
-    # 4. Subsidy Sensitivity Analysis
-    try:
-        console.print("[cyan]Running subsidy sensitivity analysis...[/cyan]")
-        subsidy_path = output_dir / "subsidy_sensitivity_analysis_simple_gbp.csv"
-        reporter.subsidy_sensitivity_analysis(
-            df_validated,
-            scenario_results,
-            subsidy_levels=[0, 5000, 7500, 10000, 15000],
-            output_path=subsidy_path
-        )
-        reports_created.append("✓ Subsidy sensitivity analysis")
-    except Exception as e:
-        console.print(f"[yellow]⚠ Could not generate subsidy sensitivity: {e}[/yellow]")
-
     # 5. Heat Network Connection Thresholds
     threshold_df = None
     try:
@@ -3468,7 +3501,6 @@ def generate_additional_reports(df_raw, df_validated, validation_report, archety
         analysis_logger.add_output("data/outputs/reports/tenure_segmentation.csv", "csv", "Tenure segmentation analysis")
         analysis_logger.add_output("data/outputs/reports/tenure_segmentation.txt", "report", "Tenure segmentation summary")
         analysis_logger.add_output("data/outputs/heat_network_connection_thresholds.csv", "csv", "Heat network connection threshold analysis")
-        analysis_logger.add_output("data/outputs/subsidy_sensitivity_analysis_simple_gbp.csv", "csv", "Subsidy sensitivity analysis (simple, GBP levels)")
         analysis_logger.add_output("data/outputs/data_quality_report.txt", "report", "Data quality assessment")
         analysis_logger.complete_phase(success=True, message=f"{len(reports_created)} additional specialized reports generated")
 
@@ -3573,7 +3605,7 @@ def package_dashboard_assets(
             except Exception as e:
                 logger.debug(f"Could not load retrofit packages: {e}")
 
-        comparison_file = outputs_dir / "comparisons" / "hn_vs_hp_comparison.csv"
+        comparison_file = outputs_dir / "stock_scenario_comparison.csv"
         if comparison_file.exists():
             try:
                 hn_vs_hp_comparison = pd.read_csv(comparison_file)
@@ -3966,7 +3998,6 @@ def main(argv=None):
     start_time = time.time()
     try:
         with _configure_tui_logging(ui), _route_console_output_for_tui(ui):
-            _ui_call(ui, "run_started", "HeatStreet analysis started")
             print_header()
             exit_code = _main_impl(args, ui, analysis_logger, start_time)
             if exit_code == EXIT_ANALYSIS_FAILED:
@@ -3988,23 +4019,27 @@ def main(argv=None):
 
 
 def _run_with_textual_main(args: argparse.Namespace, ui) -> int:
-    """Run the pipeline in a background thread while Textual app is in main."""
+    """Keep one Textual process open across clean, isolated analysis sessions."""
     import threading
     from src.ui.textual_app import HeatStreetStudioApp
 
     result: Dict[str, Any] = {"exit_code": EXIT_SUCCESS}
+    pipeline_threads: list[threading.Thread] = []
+    start_lock = threading.Lock()
+    app = None
 
-    def _pipeline_thread_fn() -> None:
+    def _pipeline_thread_fn(*, retry: bool = False) -> None:
         analysis_logger = AnalysisLogger()
         start_time = time.time()
         try:
             with _configure_tui_logging(ui), _route_console_output_for_tui(ui):
-                _ui_call(ui, "run_started", "HeatStreet analysis started")
                 print_header()
-                code = _main_impl(args, ui, analysis_logger, start_time)
+                code = _main_impl(args, ui, analysis_logger, start_time, retry=retry)
                 result["exit_code"] = code or EXIT_SUCCESS
                 if code == EXIT_ANALYSIS_FAILED:
                     _mark_active_run_failed()
+                    if getattr(ui.state, "completed_at", None) is None:
+                        _ui_call(ui, "run_failed", "Analysis terminated before required phases completed")
                     if hasattr(analysis_logger, "record_failure"):
                         analysis_logger.record_failure(
                             RuntimeError("Analysis terminated before required phases completed")
@@ -4013,6 +4048,7 @@ def _run_with_textual_main(args: argparse.Namespace, ui) -> int:
             result["exit_code"] = e.code or EXIT_SUCCESS
         except KeyboardInterrupt:
             result["exit_code"] = EXIT_CANCELLED
+            _ui_call(ui, "run_failed", "Analysis cancelled by user")
         except Exception as exc:
             _mark_active_run_failed()
             if hasattr(analysis_logger, "record_failure"):
@@ -4020,13 +4056,24 @@ def _run_with_textual_main(args: argparse.Namespace, ui) -> int:
             _ui_call(ui, "run_failed", str(exc))
             result["exit_code"] = EXIT_ANALYSIS_FAILED
         finally:
-            _ui_call(ui, "stop")
             _restore_run_directories()
 
-    pipeline_thread = threading.Thread(
-        target=_pipeline_thread_fn, daemon=True, name="hs-pipeline"
-    )
-    pipeline_thread.start()
+    def _start_session(retry: bool = False) -> None:
+        nonlocal app
+        with start_lock:
+            if pipeline_threads and pipeline_threads[-1].is_alive():
+                return
+            new_state = ui.reset_session()
+            if app is not None:
+                app.reset_for_new_session(new_state)
+            thread = threading.Thread(
+                target=_pipeline_thread_fn,
+                kwargs={"retry": retry},
+                daemon=True,
+                name=f"hs-pipeline-{len(pipeline_threads) + 1}",
+            )
+            pipeline_threads.append(thread)
+            thread.start()
 
     app = HeatStreetStudioApp(
         state=ui.state,
@@ -4034,8 +4081,17 @@ def _run_with_textual_main(args: argparse.Namespace, ui) -> int:
         cancel_event=ui._cancel_event,
         prompt_request_queue=ui._prompt_request_queue,
         prompt_response_queue=ui._prompt_response_queue,
+        start_session=_start_session,
     )
     ui._app = app
+    initial_thread = threading.Thread(
+        target=_pipeline_thread_fn,
+        kwargs={"retry": False},
+        daemon=True,
+        name="hs-pipeline-1",
+    )
+    pipeline_threads.append(initial_thread)
+    initial_thread.start()
     try:
         app.run()
     except Exception:
@@ -4044,41 +4100,115 @@ def _run_with_textual_main(args: argparse.Namespace, ui) -> int:
         ui._cancel_event.set()
         ui._prompt_response_queue.put_nowait(None)
 
-    pipeline_thread.join(timeout=60)
+    for pipeline_thread in pipeline_threads:
+        pipeline_thread.join(timeout=60)
+    ui._app = None
     return result.get("exit_code", EXIT_SUCCESS)
 
 
-def _main_impl(args: argparse.Namespace, ui, analysis_logger: AnalysisLogger, start_time: float):
+def _select_energy_price_profile(
+    args: argparse.Namespace, ui, config: Dict[str, Any], *, retry: bool = False,
+) -> tuple[str, bool]:
+    """Resolve the CLI/default selection or ask Studio before creating a run."""
+    section = get_energy_price_profiles(config)
+    profiles = section["profiles"]
+    configured_default = section["default_profile"]
+    cli_explicit = bool(getattr(args, "energy_price_profile_cli_explicit", False))
+    if cli_explicit or retry or not getattr(ui, "is_full_tui", False):
+        return args.energy_price_profile or configured_default, cli_explicit or retry
+
+    ordered_ids = list(profiles)
+    preferred = getattr(args, "energy_price_profile", None) or configured_default
+    if preferred in ordered_ids:
+        ordered_ids.remove(preferred)
+        ordered_ids.insert(0, preferred)
+    labels = []
+    for profile_id in ordered_ids:
+        profile = profiles[profile_id]
+        standing = "standing charges excluded" if not profile["standing_charges_included"] else "standing charges included"
+        note = profile.get("status") or profile.get("source_note", "")
+        labels.append(
+            f"{profile['label']} | gas {float(profile['gas_gbp_per_kwh']) * 100:.2f} p/kWh | "
+            f"electricity {float(profile['electricity_gbp_per_kwh']) * 100:.2f} p/kWh | {standing} | {note}"
+        )
+    selected = _tui_prompt(
+        ui,
+        "select",
+        title="Energy price period",
+        message=(
+            "Energy prices affect modelled bills, bill savings, payback periods and cost-effectiveness results. "
+            "Select the January provisional profile to reproduce the basis used for the original client report."
+        ),
+        choices=ordered_ids,
+        labels=labels,
+    )
+    if selected is None:
+        raise AnalysisCancelled("Energy price period selection cancelled")
+    args.energy_price_profile = selected
+    return selected, True
+
+
+def _main_impl(
+    args: argparse.Namespace, ui, analysis_logger: AnalysisLogger, start_time: float, *, retry: bool = False,
+):
     """Run the pipeline after argparse/UI setup."""
     global _active_run_context, _active_authoritative_cohort_size, _hp_hn_comparison_outputs_cache
 
+    global _previous_run_config_env
     _active_run_context = None
     _active_authoritative_cohort_size = None
     _hp_hn_comparison_outputs_cache = None
-    config_path = REPO_ROOT / "config" / "config.yaml"
-    config_sha256 = hashlib.sha256(config_path.read_bytes()).hexdigest()
+    repository_config = load_config()
+    selected_profile_id, explicit_selection = _select_energy_price_profile(
+        args, ui, repository_config, retry=retry
+    )
+    run_config = build_run_config(
+        repository_config, selected_profile_id, explicit_selection=explicit_selection
+    )
+    selected_profile = run_config["resolved_energy_price_profile"]
     git_commit = subprocess.run(
         ["git", "rev-parse", "HEAD"], cwd=REPO_ROOT, capture_output=True, text=True, check=False
     ).stdout.strip() or None
     pending_run_context = RunContext.create(
         mode="production" if args.production else "development",
         git_commit=git_commit,
-        configuration_sha256=config_sha256,
+        energy_price_profile=selected_profile,
         source_identifier=args.source_run_id if args.development_fixture else None,
         source_fingerprint=args.source_fixture_sha256 if args.development_fixture else None,
     )
     run_root = Path(DATA_OUTPUTS_DIR).parent / "runs" / pending_run_context.run_id
     pending_run_context = pending_run_context.with_run_root(run_root)
+    run_root.mkdir(parents=True, exist_ok=True)
+    config_snapshot = run_root / "config_snapshot.yaml"
+    config_snapshot.write_text(
+        yaml.safe_dump(run_config, sort_keys=False, allow_unicode=True), encoding="utf-8"
+    )
+    pending_run_context = replace(
+        pending_run_context,
+        configuration_sha256=hashlib.sha256(config_snapshot.read_bytes()).hexdigest(),
+        configuration_snapshot=str(config_snapshot),
+    )
+    _previous_run_config_env = os.environ.get(RUN_CONFIG_ENV)
+    os.environ[RUN_CONFIG_ENV] = str(config_snapshot)
     analysis_logger.set_metadata("run_id", pending_run_context.run_id)
     analysis_logger.set_metadata("git_commit", pending_run_context.git_commit)
     analysis_logger.set_metadata("configuration_sha256", pending_run_context.configuration_sha256)
     analysis_logger.set_metadata("source_identifier", pending_run_context.source_identifier)
     analysis_logger.set_metadata("source_fingerprint", pending_run_context.source_fingerprint)
+    analysis_logger.set_metadata("energy_price_profile", selected_profile)
+    logger.info(
+        "Energy price profile: {} ({}) gas={:.4f} GBP/kWh electricity={:.4f} GBP/kWh",
+        selected_profile_id,
+        selected_profile["label"],
+        selected_profile["gas_gbp_per_kwh"],
+        selected_profile["electricity_gbp_per_kwh"],
+    )
     _configure_run_directories(
         pending_run_context,
         analysis_logger,
         isolate_processed=True,
     )
+    _ui_call(ui, "run_started", "HeatStreet analysis started")
     _checkpoint(analysis_logger, status="running")
 
     runtime_identity, preflight = emit_startup_diagnostics(analysis_logger)
@@ -4430,6 +4560,37 @@ def _main_impl(args: argparse.Namespace, ui, analysis_logger: AnalysisLogger, st
         _active_authoritative_cohort_size,
     )
 
+    # Spatial classification is an input contract for every model family, not a
+    # downstream report.  Join it back to the authoritative cohort by certificate
+    # number before any diagnostic or public stock modeling starts.
+    properties_with_tiers, pathway_summary = _call_with_optional_ui(
+        run_spatial_analysis,
+        df_adjusted_frame,
+        analysis_logger,
+        one_stop_only=one_stop_only,
+        ui=ui,
+    )
+    if properties_with_tiers is None or pathway_summary is None:
+        raise RuntimeError("Spatial analysis did not produce its required classification artifact")
+    df_adjusted_frame, spatial_enrichment_summary = join_spatial_enrichment(
+        df_adjusted_frame,
+        properties_with_tiers,
+        production=args.production,
+    )
+    spatial_enriched_path = Path(DATA_PROCESSED_DIR) / "epc_london_adjusted_spatial.parquet"
+    df_adjusted_frame.to_parquet(spatial_enriched_path, index=False)
+    spatial_summary_path = Path(DATA_OUTPUTS_DIR) / "spatial_enrichment_summary.json"
+    spatial_summary_path.write_text(json.dumps(spatial_enrichment_summary, indent=2), encoding="utf-8")
+    _register_required_artifacts(
+        _active_run_context,
+        phase="spatial_analysis",
+        artifacts=[
+            ("spatial_suitability", Path(DATA_OUTPUTS_DIR) / "pathway_suitability_by_tier.csv", "client"),
+            ("spatially_enriched_properties", spatial_enriched_path, "internal"),
+            ("spatial_enrichment_summary", spatial_summary_path, "internal"),
+        ],
+    )
+
     # Phase 3: Analyze (use adjusted data)
     archetype_results = _call_with_optional_ui(analyze_archetype, df_adjusted_frame, analysis_logger, ui=ui)
     gc.collect()  # Cleanup analysis intermediate results
@@ -4484,25 +4645,8 @@ def _main_impl(args: argparse.Namespace, ui, analysis_logger: AnalysisLogger, st
     _require_contract(ArtifactManifest.load(_active_run_context), ["readiness", "readiness_summary"])
     gc.collect()  # Cleanup readiness calculation intermediates
 
-    # Phase 4.5: Required spatial classification (maps remain optional).
-    spatial_frame = _load_adjusted_phase_frame("Spatial Analysis")
-    properties_with_tiers, pathway_summary = _call_with_optional_ui(
-        run_spatial_analysis,
-        spatial_frame,
-        analysis_logger,
-        one_stop_only=one_stop_only,
-        ui=ui,
-    )
-    del spatial_frame
-    if properties_with_tiers is None or pathway_summary is None:
-        raise RuntimeError("Spatial analysis did not produce its required classification artifact")
-    spatial_path = Path(DATA_OUTPUTS_DIR) / "pathway_suitability_by_tier.csv"
-    spatial_manifest = _register_required_artifacts(
-        _active_run_context,
-        phase="spatial_analysis",
-        artifacts=[("spatial_suitability", spatial_path, "client")],
-    )
-    gc.collect()  # Cleanup GIS objects and geocoding cache
+    # Spatial classification already ran before both model families.
+    gc.collect()
 
     # Phase 5.5: Additional reports and supporting tables
     try:
@@ -4534,9 +4678,7 @@ def _main_impl(args: argparse.Namespace, ui, analysis_logger: AnalysisLogger, st
     )
 
     # Freeze the reporting provenance before any client artifact is built.
-    _active_run_context = _active_run_context.with_timing(
-        runtime_seconds=time.time() - start_time,
-    )
+    _active_run_context = _active_run_context.with_timing()
     analysis_logger.set_metadata("analysis_end", _active_run_context.analysis_end)
     analysis_logger.set_metadata("total_duration_seconds", _active_run_context.runtime_seconds)
     analysis_logger.set_metadata("source_identifier", _active_run_context.source_identifier)
@@ -4642,9 +4784,32 @@ def _main_impl(args: argparse.Namespace, ui, analysis_logger: AnalysisLogger, st
             [Path(DATA_OUTPUTS_DIR), Path(DATA_PROCESSED_DIR)],
             _active_run_context,
         )
-        _register_current_artifacts(_active_run_context)
+        final_manifest = _register_current_artifacts(_active_run_context)
+        from src.utils.semantic_qa import run_semantic_qa, require_passing_qa
+        qa_path = Path(DATA_OUTPUTS_DIR) / "qa_checks.json"
+        qa_result = run_semantic_qa(_active_run_context, final_manifest, qa_path)
+        stamp_artifact(qa_path, _active_run_context)
+        final_manifest.register(
+            "qa_checks",
+            qa_path,
+            phase="semantic_qa",
+            required=True,
+            publication_scope="internal",
+            validation_status="valid" if qa_result["status"] == "pass" else "invalid",
+        )
+        require_passing_qa(
+            qa_path,
+            run_id=_active_run_context.run_id,
+            dataset_fingerprint=_active_run_context.dataset_fingerprint,
+        )
 
     if _active_run_context is not None and args.production and not args.no_publish:
+        from src.utils.semantic_qa import require_passing_qa
+        require_passing_qa(
+            Path(DATA_OUTPUTS_DIR) / "qa_checks.json",
+            run_id=_active_run_context.run_id,
+            dataset_fingerprint=_active_run_context.dataset_fingerprint,
+        )
         stamp_artifact_tree([Path(DATA_OUTPUTS_DIR)], _active_run_context)
         publish_run_outputs(
             Path(DATA_OUTPUTS_DIR),
@@ -4677,6 +4842,14 @@ def _main_impl(args: argparse.Namespace, ui, analysis_logger: AnalysisLogger, st
 
     console.print()
     outputs_label = "one_stop_output.json (one-stop report)" if one_stop_only else "reports and charts"
+    if _active_run_context:
+        profile = _active_run_context.energy_price_profile or {}
+        console.print(f"  Run ID: {_active_run_context.run_id}")
+        console.print(
+            f"  Energy price profile: {profile.get('label', profile.get('profile_id', 'unknown'))}"
+        )
+        console.print(f"  QA status: pass")
+        console.print(f"  Public outputs published: {bool(args.production and not args.no_publish)}")
 
     console.print(Panel.fit(
         f"[bold green]✓ Analysis Complete![/bold green]\n\n"
@@ -4696,6 +4869,18 @@ def _main_impl(args: argparse.Namespace, ui, analysis_logger: AnalysisLogger, st
         "run_completed",
         elapsed=elapsed,
         properties=len(df_adjusted_frame),
+        run_id=_active_run_context.run_id if _active_run_context else None,
+        output_location=DATA_OUTPUTS_DIR,
+        qa_status="pass",
+        energy_price_profile=(
+            (_active_run_context.energy_price_profile or {}).get("label")
+            if _active_run_context else None
+        ),
+        energy_price_profile_id=(
+            (_active_run_context.energy_price_profile or {}).get("profile_id")
+            if _active_run_context else None
+        ),
+        public_outputs_published=bool(args.production and not args.no_publish),
         one_stop_json=DATA_OUTPUTS_DIR / "one_stop_output.json",
         html_dashboard=DATA_OUTPUTS_DIR / "one_stop_dashboard.html",
         workbook=combined_workbook or DATA_OUTPUTS_DIR / "analysis_outputs_compendium.xlsx",

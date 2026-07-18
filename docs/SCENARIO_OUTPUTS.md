@@ -22,7 +22,14 @@ Each row corresponds to a modeled scenario with capital costs, savings, readines
 | `annual_bill_savings` | Total annual bill saving |
 | `baseline_bill_total` / `post_measure_bill_total` | Annual bill spend before/after measures |
 | `baseline_co2_total_kg` / `post_measure_co2_total_kg` | Annual CO₂ before/after measures |
-| `average_payback_years` / `median_payback_years` | Payback statistics (cost-effective homes only) |
+| `aggregate_simple_payback_years` | `capital_cost_total / annual_bill_savings`; null when aggregate savings are non-positive |
+| `property_simple_payback_mean_years` / `property_simple_payback_median_years` | Mean/median across all valid finite property paybacks with positive finite savings; no 100-year truncation |
+| `payback_valid_denominator_count` | Properties included in the mean and median |
+| `payback_non_positive_savings_count` | Finite inputs with zero or negative annual savings |
+| `payback_missing_input_count` | Capital cost or annual savings is missing |
+| `payback_non_finite_input_count` | A present capital-cost or savings input is non-finite |
+| `payback_infinite_count` | Division produced a mathematically infinite result; does not include other invalid categories |
+| `excluded_by_truncation_count` / `truncation_threshold_years` | Always `0` / null under the no-truncation policy |
 | `ashp_ready_properties` / `ashp_fabric_required_properties` / `ashp_not_ready_properties` | ASHP readiness diagnostics |
 | `ashp_fabric_applied_properties` | Homes where minimum fabric was injected to enable ASHP |
 | `ashp_not_eligible_properties` | Homes where ASHP was removed because fabric could not enable eligibility |
@@ -51,3 +58,16 @@ One row per property per scenario capturing diagnostics and cost/savings breakdo
 | `payback_years` | Simple payback (infinite when not cost-effective) |
 
 > Tip: because `measures_applied` and `measures_removed` are stored as lists, use pandas with `explode` if you want to count per-measure uptake.
+# Model-family and publication contract
+
+Public scenario, comparison, subsidy, dashboard, and one-stop outputs come only from the `stock_scenario` family. `pathway_results_by_property.parquet`, `pathway_results_summary.csv`, and the diagnostic HP/HN comparison remain internal and carry `diagnostic_full_fabric_pathway` metadata with `headline_reporting_eligible=false`.
+
+Public payback fields are `aggregate_simple_payback_years`, `property_simple_payback_mean_years`, and `property_simple_payback_median_years`, accompanied by status, denominator, non-positive-savings, infinite, and truncation-count fields. The zero-subsidy aggregate must reconcile exactly to the corresponding canonical scenario aggregate. Subsidy uptake is labelled “modelled sensitivity, not forecast.”
+
+`window_economics.csv` is generated from configured glazing costs, saving fractions, gas price, the explicit simple-payback definition, and source notes. `subsidy_sensitivity_analysis_simple_gbp.csv` is retired.
+
+Canonical readiness labels are **Tier 1: Ready now**, **Tier 2: Minor work**, **Tier 3: Moderate work**, **Tier 4: Significant work**, and **Tier 5: Extensive intervention / currently unsuitable for a standard ASHP**. They describe fabric and heat-demand readiness and prescribe no heating technology.
+
+Semantic QA reconciles percentage distributions within 0.1 percentage points and costs within GBP 1 absolute / 1e-9 relative tolerance. A mixed HN-ready cohort must allocate both HN and ASHP homes; publication fails if its hybrid output collapses to either pure pathway across the contracted comparison fields.
+
+The public `hybrid` stock scenario is the spatial allocation of homes to heat networks where ready and ASHPs elsewhere. It is unrelated to the supporting **Tier 4 ASHP-plus-boiler capital-cost sensitivity** in the detailed readiness CSV. That sensitivity retains boiler backup, is outside the readiness classification, is not a recommended pathway or modelled net-zero endpoint, and does not establish operating-cost or carbon results. Full-ASHP is the sole client-facing headline readiness investment.

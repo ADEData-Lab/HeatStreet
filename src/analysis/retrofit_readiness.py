@@ -15,11 +15,12 @@ import sys
 sys.path.append(str(Path(__file__).parent.parent.parent))
 from config.config import load_config, DATA_OUTPUTS_DIR
 from src.modeling.costing import CostCalculator
+from src.modeling.contracts import TIER_READINESS_INTERPRETATIONS, TIER_READINESS_LABELS
 from src.analysis.methodological_adjustments import MethodologicalAdjustments
 
 
 def _normalize_canonical_boolean(series: pd.Series, field_name: str) -> pd.Series:
-    """Return a nullable Boolean Series, accepting legacy Parquet text values."""
+    """Return a nullable Boolean Series, accepting legacy serialized values."""
     normalized = []
     invalid_values = []
 
@@ -28,8 +29,15 @@ def _normalize_canonical_boolean(series: pd.Series, field_name: str) -> pd.Serie
             normalized.append(pd.NA)
         elif isinstance(value, (bool, np.bool_)):
             normalized.append(bool(value))
-        elif isinstance(value, str) and value.strip().casefold() in {"true", "false"}:
-            normalized.append(value.strip().casefold() == "true")
+        elif isinstance(value, str):
+            token = value.strip().casefold()
+            if token in {"true", "false"}:
+                normalized.append(token == "true")
+            elif token in {"", "none", "null", "nan", "<na>"}:
+                normalized.append(pd.NA)
+            else:
+                normalized.append(pd.NA)
+                invalid_values.append(repr(value))
         else:
             normalized.append(pd.NA)
             invalid_values.append(repr(value))
@@ -38,7 +46,7 @@ def _normalize_canonical_boolean(series: pd.Series, field_name: str) -> pd.Serie
         examples = ", ".join(dict.fromkeys(invalid_values[:5]))
         raise ValueError(
             f"Retrofit readiness schema contract violation for '{field_name}': "
-            "expected Boolean values, nulls, or legacy 'True'/'False' strings; "
+            "expected Boolean values, nulls, or recognized serialized Boolean/null strings; "
             f"unexpected value(s): {examples}"
         )
 
@@ -57,7 +65,7 @@ class RetrofitReadinessAnalyzer:
     TIER DEFINITIONS:
     =================
 
-    Tier 1 - Heat Pump Ready Now (deficiency score 0-0.5)
+    Tier 1: Ready now (deficiency score 0-0.5)
     -----------------------------------------------------
     Properties meeting all these criteria:
     - Well-insulated walls (cavity filled or solid with insulation)
@@ -66,10 +74,10 @@ class RetrofitReadinessAnalyzer:
     - SAP score 65+ (EPC Band C or better)
     - Estimated flow temperature 55°C or below
     Typical fabric cost: £0-2,000
-    These properties can install a standard ASHP with minimal preparation.
+    These properties meet the modelled fabric and heat-demand readiness threshold.
     May still need emitter assessment but unlikely to need radiator upsizing.
 
-    Tier 2 - Minor Work Required (deficiency score 0.5-1.5)
+    Tier 2: Minor work (deficiency score 0.5-1.5)
     -------------------------------------------------------
     Properties with ONE of these issues:
     - Loft insulation needs topping up (100-200mm currently)
@@ -79,7 +87,7 @@ class RetrofitReadinessAnalyzer:
     Typical fabric cost: £1,200-3,500
     Quick wins: Usually loft top-up alone is sufficient.
 
-    Tier 3 - Moderate Work Required (deficiency score 1.5-2.5)
+    Tier 3: Moderate work (deficiency score 1.5-2.5)
     ----------------------------------------------------------
     Properties with TWO of these issues:
     - Loft needs significant upgrade
@@ -87,9 +95,9 @@ class RetrofitReadinessAnalyzer:
     - AND/OR glazing upgrade needed
     - SAP score 45-55 (EPC Band D, lower range)
     Typical fabric cost: £4,000-8,000
-    These properties need a coordinated fabric package before heat pump.
+    These properties need a coordinated fabric and heat-demand package.
 
-    Tier 4 - Significant Work Required (deficiency score 2.5-4.0)
+    Tier 4: Significant work (deficiency score 2.5-4.0)
     -------------------------------------------------------------
     Properties with MULTIPLE major issues:
     - Solid walls uninsulated (needs EWI or IWI)
@@ -100,15 +108,15 @@ class RetrofitReadinessAnalyzer:
     NOTE: May use hybrid heat pump (£8k) instead of pure ASHP (£12k)
     as a pragmatic solution, which can offset higher fabric costs.
 
-    Tier 5 - Major Intervention Needed (deficiency score 4.0+)
+    Tier 5: Extensive intervention / currently unsuitable for a standard ASHP (deficiency score 4.0+)
     ----------------------------------------------------------
     Properties with severe deficiencies:
     - Multiple uninsulated elements (solid walls + poor loft + single glazing)
     - Very poor SAP score (<35, EPC Band F/G)
     - High estimated flow temperature requirement (>65°C)
     Typical fabric cost: £15,000-25,000
-    These properties may need hybrid/alternative solutions or staged retrofit.
-    Standard ASHP may not be suitable without extensive fabric intervention.
+    These properties need extensive fabric or heat-demand intervention and are
+    currently unsuitable for a standard ASHP; the tier prescribes no alternative technology.
 
     IMPORTANT NOTES:
     ================
@@ -219,28 +227,30 @@ class RetrofitReadinessAnalyzer:
 
         # Classify into readiness tiers
         df_readiness['hp_readiness_tier'] = self._classify_readiness_tier(df_readiness)
-        df_readiness['hp_readiness_label'] = df_readiness['hp_readiness_tier'].map({
-            1: 'Tier 1: Ready Now',
-            2: 'Tier 2: Minor Work Required',
-            3: 'Tier 3: Major Work Required',
-            4: 'Tier 4: Very Challenging',
-            5: 'Tier 5: Not Suitable for Standard HP'
-        })
+        df_readiness['hp_readiness_label'] = df_readiness['hp_readiness_tier'].map(TIER_READINESS_LABELS)
+        df_readiness['readiness_interpretation'] = df_readiness['hp_readiness_tier'].map(TIER_READINESS_INTERPRETATIONS)
 
         # Calculate costs
         df_readiness['fabric_prerequisite_cost'] = self._calculate_fabric_costs(df_readiness)
-        df_readiness['system_technology'] = self._system_technology_for_tier(df_readiness)
-        df_readiness['system_cost'] = self._calculate_system_costs(df_readiness)
-        df_readiness['total_cost'] = (
+        df_readiness['system_cost_hybrid_ashp_sensitivity'] = self._calculate_system_costs(df_readiness)
+        df_readiness['total_cost_hybrid_ashp_sensitivity'] = (
             df_readiness['fabric_prerequisite_cost'].astype(float)
-            + df_readiness['system_cost'].astype(float)
+            + df_readiness['system_cost_hybrid_ashp_sensitivity'].astype(float)
         )
+        df_readiness['ashp_plus_boiler_sensitivity_label'] = (
+            'Tier 4 ASHP-plus-boiler capital-cost sensitivity'
+        )
+        df_readiness['ashp_plus_boiler_sensitivity_qualifications'] = (
+            'Not the spatial heat-network/ASHP hybrid scenario; not part of the readiness classification; '
+            'capital-cost sensitivity, not a recommended pathway; retains boiler backup; not the modelled '
+            'net-zero endpoint; operating-cost and carbon implications are not established by the '
+            'readiness-cost calculation alone.'
+        )
+        df_readiness['system_cost_full_ashp'] = self._calculate_system_costs(df_readiness, force_full_ashp=True)
         df_readiness['total_cost_full_ashp'] = (
             df_readiness['fabric_prerequisite_cost'].astype(float)
-            + self._calculate_system_costs(df_readiness, force_full_ashp=True).astype(float)
+            + df_readiness['system_cost_full_ashp'].astype(float)
         )
-        # Backwards-compatible alias for one release: mixed-technology total.
-        df_readiness['total_retrofit_cost'] = df_readiness['total_cost']
 
         # Estimate heat pump size needed
         df_readiness['estimated_hp_size_kw'] = self._estimate_heat_pump_size(df_readiness)
@@ -548,27 +558,25 @@ class RetrofitReadinessAnalyzer:
         The audit noted that Tier 4 sometimes has lower total cost than Tier 3.
         This is intentional and occurs because:
 
-        1. Tier 4 properties use hybrid heat pumps (£8k) instead of
-           pure ASHPs (£12k), saving £4k on the heat pump itself.
+        1. Tier 4 applies the lower ASHP-plus-boiler capital assumption
+           instead of the full-ASHP capital assumption.
 
-        2. The hybrid HP strategy is more pragmatic for Tier 4 properties
-           with very poor fabric - it allows the gas backup to handle
-           peak demand, reducing the need for maximum fabric intervention.
+        2. The sensitivity retains gas-boiler backup for peak demand.
 
-        3. While Tier 4 has higher fabric costs than Tier 3, the £4k
-           HP cost difference can offset this for some properties.
+        3. This affects capital-cost comparisons between readiness tiers.
 
-        This cost structure reflects real-world decision-making where
-        a hybrid approach may be more cost-effective than pursuing
-        maximum fabric efficiency for a pure ASHP in challenging homes.
+        This calculation is a capital-cost sensitivity only. It is not the
+        readiness classification, a recommended pathway, the spatial hybrid
+        scenario, or the modelled net-zero endpoint; it does not establish
+        operating-cost or carbon implications.
         """
         system_cost = pd.Series(0.0, index=df.index, dtype=float)
 
         system_cost += self._cost_series(df, 'emitter_upgrades', df['needs_radiator_upsizing'])
         system_cost += self._cost_series(df, 'hot_water_cylinder')
 
-        # Tier 4 properties get hybrid heat pumps in the mixed-technology view.
-        # The full-ASHP view is calculated separately for direct tier comparison.
+        # Tier 4 uses the ASHP-plus-boiler capital-cost sensitivity here.
+        # The canonical full-ASHP view is calculated separately.
         heating_cost = df.apply(
             lambda row: self.cost_calculator.measure_cost(
                 (
@@ -583,17 +591,6 @@ class RetrofitReadinessAnalyzer:
         system_cost += heating_cost
 
         return system_cost
-
-    def _calculate_total_retrofit_cost(self, df: pd.DataFrame) -> pd.Series:
-        """Calculate mixed-technology total cost including fabric and system costs."""
-        if 'system_cost' in df.columns:
-            system_cost = df['system_cost'].astype(float)
-        else:
-            system_cost = self._calculate_system_costs(df)
-
-        total_cost = df['fabric_prerequisite_cost'].astype(float) + system_cost
-
-        return total_cost
 
     def _cost_series(self, df: pd.DataFrame, measure_name: str, mask: Optional[pd.Series] = None) -> pd.Series:
         """Vectorised helper to apply costing rules with an optional mask."""
@@ -642,14 +639,6 @@ class RetrofitReadinessAnalyzer:
         logger.info("Generating heat pump readiness summary...")
 
         total_properties = len(df_readiness)
-        total_cost_col = 'total_cost' if 'total_cost' in df_readiness.columns else 'total_retrofit_cost'
-
-        def _dominant_technology(series: pd.Series) -> str:
-            cleaned = series.dropna().astype(str)
-            if cleaned.empty:
-                return ''
-            return cleaned.mode().iloc[0]
-
         summary = {
             'total_properties': total_properties,
 
@@ -669,12 +658,15 @@ class RetrofitReadinessAnalyzer:
             'mean_fabric_cost': df_readiness['fabric_prerequisite_cost'].mean(),
             'median_fabric_cost': df_readiness['fabric_prerequisite_cost'].median(),
             'total_fabric_cost': df_readiness['fabric_prerequisite_cost'].sum(),
-            'mean_system_cost': df_readiness['system_cost'].mean() if 'system_cost' in df_readiness.columns else None,
-            'median_system_cost': df_readiness['system_cost'].median() if 'system_cost' in df_readiness.columns else None,
-            'total_system_cost': df_readiness['system_cost'].sum() if 'system_cost' in df_readiness.columns else None,
-            'mean_total_retrofit_cost': df_readiness[total_cost_col].mean(),
-            'median_total_retrofit_cost': df_readiness[total_cost_col].median(),
-            'total_retrofit_cost': df_readiness[total_cost_col].sum(),
+            'mean_system_cost_full_ashp': df_readiness['system_cost_full_ashp'].mean(),
+            'median_system_cost_full_ashp': df_readiness['system_cost_full_ashp'].median(),
+            'total_system_cost_full_ashp': df_readiness['system_cost_full_ashp'].sum(),
+            'mean_system_cost_hybrid_ashp_sensitivity': df_readiness['system_cost_hybrid_ashp_sensitivity'].mean(),
+            'median_system_cost_hybrid_ashp_sensitivity': df_readiness['system_cost_hybrid_ashp_sensitivity'].median(),
+            'total_system_cost_hybrid_ashp_sensitivity': df_readiness['system_cost_hybrid_ashp_sensitivity'].sum(),
+            'mean_total_cost_hybrid_ashp_sensitivity': df_readiness['total_cost_hybrid_ashp_sensitivity'].mean(),
+            'median_total_cost_hybrid_ashp_sensitivity': df_readiness['total_cost_hybrid_ashp_sensitivity'].median(),
+            'total_cost_hybrid_ashp_sensitivity': df_readiness['total_cost_hybrid_ashp_sensitivity'].sum(),
             'mean_total_cost_full_ashp': df_readiness['total_cost_full_ashp'].mean() if 'total_cost_full_ashp' in df_readiness.columns else None,
             'median_total_cost_full_ashp': df_readiness['total_cost_full_ashp'].median() if 'total_cost_full_ashp' in df_readiness.columns else None,
             'total_cost_full_ashp': df_readiness['total_cost_full_ashp'].sum() if 'total_cost_full_ashp' in df_readiness.columns else None,
@@ -692,10 +684,10 @@ class RetrofitReadinessAnalyzer:
 
             # Cost distribution by tier
             'fabric_cost_by_tier': df_readiness.groupby('hp_readiness_tier')['fabric_prerequisite_cost'].mean().to_dict(),
-            'system_cost_by_tier': df_readiness.groupby('hp_readiness_tier')['system_cost'].mean().to_dict() if 'system_cost' in df_readiness.columns else {},
-            'total_cost_by_tier': df_readiness.groupby('hp_readiness_tier')[total_cost_col].mean().to_dict(),
+            'system_cost_full_ashp_by_tier': df_readiness.groupby('hp_readiness_tier')['system_cost_full_ashp'].mean().to_dict(),
+            'system_cost_hybrid_ashp_sensitivity_by_tier': df_readiness.groupby('hp_readiness_tier')['system_cost_hybrid_ashp_sensitivity'].mean().to_dict(),
+            'total_cost_hybrid_ashp_sensitivity_by_tier': df_readiness.groupby('hp_readiness_tier')['total_cost_hybrid_ashp_sensitivity'].mean().to_dict(),
             'total_cost_full_ashp_by_tier': df_readiness.groupby('hp_readiness_tier')['total_cost_full_ashp'].mean().to_dict() if 'total_cost_full_ashp' in df_readiness.columns else {},
-            'system_technology_by_tier': df_readiness.groupby('hp_readiness_tier')['system_technology'].agg(_dominant_technology).to_dict() if 'system_technology' in df_readiness.columns else {},
         }
 
         return summary
@@ -822,23 +814,23 @@ class RetrofitReadinessAnalyzer:
             f.write(f"Mean fabric pre-requisite cost: £{summary['mean_fabric_cost']:,.0f}\n")
             f.write(f"Median fabric pre-requisite cost: £{summary['median_fabric_cost']:,.0f}\n")
             f.write(f"Total fabric investment needed: £{summary['total_fabric_cost']/1e6:.1f}M\n\n")
-            f.write(f"Mean total retrofit cost: £{summary['mean_total_retrofit_cost']:,.0f}\n")
-            f.write(f"Median total retrofit cost: £{summary['median_total_retrofit_cost']:,.0f}\n")
-            f.write(f"Total retrofit investment needed: £{summary['total_retrofit_cost']/1e6:.1f}M\n\n")
-
-            if summary.get('mean_system_cost') is not None:
-                f.write(f"Mean system cost: GBP {summary['mean_system_cost']:,.0f}\n")
-                f.write(f"Median system cost: GBP {summary['median_system_cost']:,.0f}\n")
-                f.write(f"Total system investment needed: GBP {summary['total_system_cost']/1e6:.1f}M\n\n")
+            f.write(f"Mean system cost (full ASHP): GBP {summary['mean_system_cost_full_ashp']:,.0f}\n")
+            f.write(f"Total system investment (full ASHP): GBP {summary['total_system_cost_full_ashp']/1e6:.1f}M\n\n")
             if summary.get('mean_total_cost_full_ashp') is not None:
                 f.write(f"Mean total cost (full ASHP): GBP {summary['mean_total_cost_full_ashp']:,.0f}\n")
                 f.write(f"Median total cost (full ASHP): GBP {summary['median_total_cost_full_ashp']:,.0f}\n")
                 f.write(f"Total investment (full ASHP): GBP {summary['total_cost_full_ashp']/1e6:.1f}M\n\n")
+            f.write("SUPPORTING SENSITIVITY (NOT A HEADLINE RESULT):\n")
+            f.write("Tier 4 ASHP-plus-boiler capital-cost sensitivity\n")
             f.write(
-                "Note: Tier 4 uses a hybrid ASHP in the mixed-technology total; "
-                "this can make mixed totals lower than Tier 3, while the full-ASHP total "
-                "shows the like-for-like ASHP envelope.\n\n"
+                "This is not the spatial heat-network/ASHP hybrid scenario; it is not part of the readiness "
+                "classification; it is a capital-cost sensitivity, not a recommended pathway; it retains "
+                "boiler backup; it is not the modelled net-zero endpoint; and its operating-cost and carbon "
+                "implications are not established by the readiness-cost calculation alone.\n"
             )
+            f.write(f"Mean sensitivity total cost: GBP {summary['mean_total_cost_hybrid_ashp_sensitivity']:,.0f}\n")
+            f.write(f"Median sensitivity total cost: GBP {summary['median_total_cost_hybrid_ashp_sensitivity']:,.0f}\n")
+            f.write(f"Aggregate sensitivity total: GBP {summary['total_cost_hybrid_ashp_sensitivity']/1e6:.1f}M\n\n")
 
             f.write("HEAT DEMAND ANALYSIS:\n")
             f.write("-" * 80 + "\n")
@@ -850,20 +842,19 @@ class RetrofitReadinessAnalyzer:
             f.write("READINESS TIER COSTS:\n")
             f.write("-" * 80 + "\n")
             fabric_by_tier = summary.get('fabric_cost_by_tier', {})
-            system_by_tier = summary.get('system_cost_by_tier', {})
-            total_by_tier = summary.get('total_cost_by_tier', {})
-            full_ashp_by_tier = summary.get('total_cost_full_ashp_by_tier', {})
-            tech_by_tier = summary.get('system_technology_by_tier', {})
+            system_by_tier = summary.get('system_cost_full_ashp_by_tier', {})
+            total_by_tier = summary.get('total_cost_full_ashp_by_tier', {})
+            hybrid_sensitivity_by_tier = summary.get('total_cost_hybrid_ashp_sensitivity_by_tier', {})
             for tier in range(1, 6):
                 fabric_cost = fabric_by_tier.get(tier, 0)
                 system_cost = system_by_tier.get(tier, 0)
                 total_cost = total_by_tier.get(tier, 0)
-                full_ashp_cost = full_ashp_by_tier.get(tier, 0)
-                technology = tech_by_tier.get(tier, "n/a")
+                hybrid_sensitivity_cost = hybrid_sensitivity_by_tier.get(tier, 0)
                 f.write(
                     f"Tier {tier}: fabric GBP {fabric_cost:,.0f} | "
-                    f"system GBP {system_cost:,.0f} | total GBP {total_cost:,.0f} | "
-                    f"full ASHP total GBP {full_ashp_cost:,.0f} | technology {technology}\n"
+                    f"full ASHP system GBP {system_cost:,.0f} | "
+                    f"full ASHP total GBP {total_cost:,.0f} | "
+                    f"ASHP-plus-boiler capital-cost sensitivity total GBP {hybrid_sensitivity_cost:,.0f}\n"
                 )
             f.write("\n")
 
@@ -874,10 +865,10 @@ class RetrofitReadinessAnalyzer:
                 f.write(f"Tier {tier}: £{cost:,.0f} average fabric cost\n")
             f.write("\n")
 
-            f.write("TOTAL RETROFIT COST BY READINESS TIER:\n")
+            f.write("FULL-ASHP TOTAL COST BY READINESS TIER:\n")
             f.write("-" * 80 + "\n")
             for tier in range(1, 6):
-                cost = summary['total_cost_by_tier'].get(tier, 0)
+                cost = summary['total_cost_full_ashp_by_tier'].get(tier, 0)
                 f.write(f"Tier {tier}: £{cost:,.0f} average total cost\n")
 
         logger.info(f"✓ Saved summary report to {summary_path}")

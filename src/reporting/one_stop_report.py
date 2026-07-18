@@ -33,6 +33,7 @@ from loguru import logger
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from config.config import DATA_OUTPUTS_DIR, DATA_PROCESSED_DIR, load_config, get_scenario_policy
+from src.modeling.contracts import TIER_READINESS_INTERPRETATIONS, TIER_READINESS_LABELS
 from src.utils.run_integrity import (
     RunContext,
     require_current_artifact,
@@ -248,7 +249,7 @@ class OneStopReportGenerator:
             "readiness": self.output_dir / "retrofit_readiness_analysis.csv",
             "scenario": self.output_dir / "scenario_results_summary.csv",
             "spatial": self.output_dir / "pathway_suitability_by_tier.csv",
-            "comparison": self.output_dir / "comparisons" / "hn_vs_hp_comparison.csv",
+            "comparison": self.output_dir / "stock_scenario_comparison.csv",
             "tipping": self.output_dir / "fabric_tipping_point_curve.csv",
             "subsidy": self.output_dir / "subsidy_sensitivity_analysis.csv",
             "borough": self.output_dir / "borough_breakdown.csv",
@@ -256,6 +257,7 @@ class OneStopReportGenerator:
             "tenure": self.output_dir / "reports" / "tenure_segmentation.csv",
             "network_threshold": self.output_dir / "heat_network_connection_thresholds.csv",
             "case_street": self.output_dir / "shakespeare_crescent_extract.csv",
+            "window_economics": self.output_dir / "window_economics.csv",
         }
         if self.run_context:
             required = {
@@ -286,6 +288,7 @@ class OneStopReportGenerator:
         tenure_segmentation_df = _read_csv(paths["tenure"])
         heat_network_threshold_df = _read_csv(paths["network_threshold"])
         case_street_df = _read_csv(paths["case_street"])
+        window_economics_df = _read_csv(paths["window_economics"])
         lodgements_by_year_band_df = self._build_epc_lodgements_by_year_band()
 
         if self.run_context:
@@ -304,7 +307,7 @@ class OneStopReportGenerator:
         self._sections["section_1"] = self._build_section_1(run_metadata)
         self._sections["section_2"] = self._build_section_2(validation_report, adjustment_summary)
         self._sections["section_3"] = self._build_section_3(archetype_json, lodgements_by_year_band_df)
-        self._sections["section_4"] = self._build_section_4(readiness_df)
+        self._sections["section_4"] = self._build_section_4(readiness_df, window_economics_df)
         self._sections["section_5"] = self._build_section_5(spatial_tier_df)
         self._sections["section_6"] = self._build_section_6(scenario_df)
         self._sections["section_7"] = self._build_section_7(hn_vs_hp_df)
@@ -319,6 +322,8 @@ class OneStopReportGenerator:
         self._sections["section_11"] = self._build_section_11(case_street_df)
         self._sections["section_12"] = self._build_section_12(adjustment_summary)
         self._sections["section_13"] = self._build_section_13()
+        for section_id, section in self._sections.items():
+            section["section_id"] = section_id
 
         # Build final JSON structure
         output = {
@@ -470,7 +475,7 @@ class OneStopReportGenerator:
             if "hn_assigned_properties" not in row or "ashp_assigned_properties" not in row:
                 raise RuntimeError("Hybrid scenario lacks explicit pathway allocation fields")
             allocated = _explicit_int(row["hn_assigned_properties"], "hybrid HN allocation") + _explicit_int(
-                row["ashp_assigned_properties"], "hybrid ASHP allocation"
+                row["ashp_assigned_properties"], "spatial hybrid ASHP allocation"
             )
             checks.append(("hybrid pathway allocations", allocated))
 
@@ -625,11 +630,20 @@ class OneStopReportGenerator:
             AnnotatedDatapoint(
                 name="Key configuration snapshot - Energy prices",
                 key="config_energy_prices",
-                value=self.config.get("energy_prices", {}).get("current", {}),
+                value=self.config.get("resolved_energy_price_profile", {}),
                 definition="Energy prices used in analysis (£/kWh for gas and electricity).",
                 denominator="N/A",
-                source="config/config.yaml -> energy_prices.current",
+                source="Configuration / run definition",
                 usage="Financial calculations",
+            ),
+            AnnotatedDatapoint(
+                name="Energy price profile ID",
+                key="energy_price_profile_id",
+                value=(run_metadata.get("energy_price_profile") or {}).get("profile_id", "Not available"),
+                definition="Stable ID of the run-resolved domestic unit-rate profile; standing charges are excluded.",
+                denominator="N/A",
+                source="data/outputs/run_metadata.json -> energy_price_profile.profile_id",
+                usage="Reproducibility and semantic QA",
             ),
             AnnotatedDatapoint(
                 name="Key configuration snapshot - Heat pump COP",
@@ -935,7 +949,11 @@ class OneStopReportGenerator:
 
         return self._render_section(self.SECTION_TITLES[2], datapoints, tables=tables)
 
-    def _build_section_4(self, readiness_df: Optional[pd.DataFrame]) -> Dict[str, Any]:
+    def _build_section_4(
+        self,
+        readiness_df: Optional[pd.DataFrame],
+        window_economics_df: Optional[pd.DataFrame] = None,
+    ) -> Dict[str, Any]:
         """Section 4: Retrofit readiness (heat pump readiness and prerequisites)."""
         if readiness_df is None or readiness_df.empty:
             return self._render_section(self.SECTION_TITLES[3], [])
@@ -961,13 +979,7 @@ class OneStopReportGenerator:
         for tier in range(1, 6):
             count = tier_counts.get(tier, 0)
             pct = (count / total_properties * 100) if total_properties > 0 else 0
-            tier_names = {
-                1: "Ready now (Tier 1)",
-                2: "Minor work required (Tier 2)",
-                3: "Major work required (Tier 3)",
-                4: "Challenging (Tier 4)",
-                5: "Not suitable (Tier 5)",
-            }
+            tier_names = TIER_READINESS_LABELS
             datapoints.append(AnnotatedDatapoint(
                 name=f"Readiness tier distribution - {tier_names[tier]}",
                 key=f"tier_{tier}_count",
@@ -989,27 +1001,13 @@ class OneStopReportGenerator:
 
         tier_cost_fields = {
             "fabric_prerequisite_cost": ("Fabric prerequisite cost", "Average fabric prerequisite cost by readiness tier (GBP per property)."),
-            "system_cost": ("System cost", "Average system cost by readiness tier: emitters, hot water cylinder, and selected heating system (GBP per property)."),
-            "total_cost": ("Total mixed-technology cost", "Average fabric plus selected system cost by readiness tier (GBP per property)."),
+            "system_cost_full_ashp": ("Full-ASHP system cost", "Average full-ASHP system cost by readiness tier (GBP per property)."),
             "total_cost_full_ashp": ("Total full-ASHP cost", "Average fabric plus full-ASHP system cost by readiness tier (GBP per property)."),
         }
         for tier in range(1, 6):
             tier_df = readiness_df[readiness_df["hp_readiness_tier"] == tier] if "hp_readiness_tier" in readiness_df.columns else pd.DataFrame()
             if tier_df.empty:
                 continue
-
-            if "system_technology" in tier_df.columns:
-                technologies = tier_df["system_technology"].dropna().astype(str)
-                if not technologies.empty:
-                    datapoints.append(AnnotatedDatapoint(
-                        name=f"Readiness Tier {tier} assumed system technology",
-                        key=f"tier_{tier}_system_technology",
-                        value=technologies.mode().iloc[0],
-                        definition="Dominant assumed heating system technology for this readiness tier.",
-                        denominator=f"Readiness Tier {tier} properties",
-                        source="data/outputs/retrofit_readiness_analysis.csv -> system_technology",
-                        usage="Readiness tier cost interpretation",
-                    ))
 
             for field, (label, definition) in tier_cost_fields.items():
                 if field in tier_df.columns:
@@ -1022,17 +1020,6 @@ class OneStopReportGenerator:
                         source=f"data/outputs/retrofit_readiness_analysis.csv -> mean({field}) where hp_readiness_tier == {tier}",
                         usage="Readiness tier cost interpretation",
                     ))
-
-        if "system_technology" in readiness_df.columns and (readiness_df["system_technology"] == "hybrid_ashp").any():
-            datapoints.append(AnnotatedDatapoint(
-                name="Tier 4 hybrid ASHP cost note",
-                key="tier_4_hybrid_ashp_cost_note",
-                value="Tier 4 uses a hybrid ASHP in the mixed-technology total, so mixed totals can be lower than Tier 3; total_cost_full_ashp shows the like-for-like full-ASHP envelope.",
-                definition="Interpretation note for Tier 4 mixed-technology retrofit costs.",
-                denominator="N/A",
-                source="data/outputs/retrofit_readiness_analysis.csv -> system_technology and total_cost_full_ashp",
-                usage="Readiness tier cost interpretation",
-            ))
 
         # Costs
         if "fabric_prerequisite_cost" in readiness_df.columns:
@@ -1066,36 +1053,19 @@ class OneStopReportGenerator:
                 ),
             ])
 
-        if "total_retrofit_cost" in readiness_df.columns:
-            datapoints.extend([
-                AnnotatedDatapoint(
-                    name="Mean total retrofit cost",
-                    key="mean_total_retrofit_cost_gbp",
-                    value=readiness_df["total_retrofit_cost"].mean(),
-                    definition="Average total retrofit cost including heat pump measures (GBP per property).",
+        for field, label, usage in (
+            ("total_cost_full_ashp", "Canonical full-ASHP readiness total", "Sole headline readiness capital requirement"),
+        ):
+            if field in readiness_df.columns:
+                datapoints.append(AnnotatedDatapoint(
+                    name=label,
+                    key=f"{field}_gbp",
+                    value=readiness_df[field].sum(),
+                    definition=f"Sum of property-level {field} values (GBP).",
                     denominator="All properties assessed",
-                    source="data/outputs/retrofit_readiness_analysis.csv -> total_retrofit_cost.mean()",
-                    usage="Retrofit package economics",
-                ),
-                AnnotatedDatapoint(
-                    name="Median total retrofit cost",
-                    key="median_total_retrofit_cost_gbp",
-                    value=readiness_df["total_retrofit_cost"].median(),
-                    definition="Median total retrofit cost including heat pump measures (GBP per property).",
-                    denominator="All properties assessed",
-                    source="data/outputs/retrofit_readiness_analysis.csv -> total_retrofit_cost.median()",
-                    usage="Retrofit package economics",
-                ),
-                AnnotatedDatapoint(
-                    name="Total retrofit cost",
-                    key="total_retrofit_cost_gbp",
-                    value=readiness_df["total_retrofit_cost"].sum(),
-                    definition="Total retrofit cost across all properties (GBP).",
-                    denominator="All properties assessed",
-                    source="data/outputs/retrofit_readiness_analysis.csv -> total_retrofit_cost.sum()",
-                    usage="Capital requirement",
-                ),
-            ])
+                    source=f"data/outputs/retrofit_readiness_analysis.csv -> {field}.sum()",
+                    usage=usage,
+                ))
 
         # Intervention requirements
         measures = {
@@ -1169,7 +1139,10 @@ class OneStopReportGenerator:
                 ),
             ])
 
-        return self._render_section(self.SECTION_TITLES[3], datapoints)
+        tables = []
+        if window_economics_df is not None and not window_economics_df.empty:
+            tables.append((window_economics_df, "Configuration-backed window economics"))
+        return self._render_section(self.SECTION_TITLES[3], datapoints, tables=tables)
 
     def _build_section_5(self, spatial_tier_df: Optional[pd.DataFrame]) -> Dict[str, Any]:
         """Section 5: Spatial heat network classification."""
@@ -1325,18 +1298,30 @@ class OneStopReportGenerator:
             # Payback metrics (if not baseline)
             if not is_baseline:
                 payback_fields = {
-                    "average_payback_years": "Average payback years",
-                    "median_payback_years": "Median payback years",
+                    "aggregate_simple_payback_years": "Aggregate simple payback years",
+                    "property_simple_payback_mean_years": "Property simple payback mean years",
+                    "property_simple_payback_median_years": "Property simple payback median years",
+                    "payback_valid_denominator_count": "Valid property payback denominator",
+                    "payback_non_positive_savings_count": "Properties with non-positive savings",
+                    "payback_missing_input_count": "Properties with missing payback inputs",
+                    "payback_non_finite_input_count": "Properties with non-finite payback inputs",
+                    "payback_infinite_count": "Properties with mathematically infinite payback",
+                    "excluded_by_truncation_count": "Finite paybacks excluded by truncation",
+                    "truncation_threshold_years": "Property payback truncation threshold years",
                 }
                 for field, label in payback_fields.items():
                     value = row.get(field)
-                    if value is not None and not (isinstance(value, float) and pd.isna(value)):
+                    if field == "truncation_threshold_years" and pd.isna(value):
+                        value = None
+                    if value is not None or field == "truncation_threshold_years":
                         datapoints.append(AnnotatedDatapoint(
                             name=f"{label} ({scenario_label})",
                             key=f"{field}_{scenario_suffix}",
                             value=value,
-                            definition=f"{label} for cost-effective homes (years).",
-                            denominator="Cost-effective properties in scenario",
+                            definition=(
+                                f"{label}; property statistics include every finite payback with finite capital cost and strictly positive finite savings."
+                            ),
+                            denominator="All scenario properties, categorised explicitly by payback eligibility",
                             source=f"data/outputs/scenario_results_summary.csv -> {field}",
                             usage=f"Scenario {scenario_label} payback analysis",
                         ))
@@ -1394,7 +1379,7 @@ class OneStopReportGenerator:
                 ashp_fields = {
                     "ashp_ready_properties": "ASHP-ready properties",
                     "ashp_fabric_required_properties": "ASHP fabric required",
-                    "ashp_not_ready_properties": "ASHP not suitable",
+                    "ashp_not_ready_properties": "Currently unsuitable for a standard ASHP",
                 }
                 for field, label in ashp_fields.items():
                     value = row.get(field)
@@ -1496,10 +1481,10 @@ class OneStopReportGenerator:
             AnnotatedDatapoint(
                 name="Pathways compared",
                 key="hn_vs_hp_pathways_compared",
-                value=hn_vs_hp_df.get("pathway_name", pd.Series(dtype=str)).dropna().astype(str).tolist(),
+                value=hn_vs_hp_df.get("scenario", pd.Series(dtype=str)).dropna().astype(str).tolist(),
                 definition="Pathway names included in the HP vs HN comparison table (list of strings).",
                 denominator="N/A",
-                source="data/outputs/comparisons/hn_vs_hp_comparison.csv -> pathway_name",
+                source="data/outputs/stock_scenario_comparison.csv -> scenario",
                 usage="HN vs HP pathway comparison coverage",
             ),
             AnnotatedDatapoint(
@@ -1508,20 +1493,20 @@ class OneStopReportGenerator:
                 value=len(hn_vs_hp_df),
                 definition="Number of pathway rows included in the HP vs HN comparison table (count).",
                 denominator="Pathways in comparison table",
-                source="data/outputs/comparisons/hn_vs_hp_comparison.csv -> row count",
+                source="data/outputs/stock_scenario_comparison.csv -> row count",
                 usage="HN vs HP pathway comparison coverage",
             ),
         ]
 
         for _, row in hn_vs_hp_df.iterrows():
-            pathway_id = _snake_case(str(row.get("pathway_id", row.get("pathway_name", "pathway"))))
-            pathway_name = str(row.get("pathway_name", row.get("pathway_id", "Pathway")))
+            pathway_id = _snake_case(str(row.get("scenario_id", row.get("scenario", "scenario"))))
+            pathway_name = str(row.get("scenario", row.get("scenario_id", "Scenario")))
             field_labels = {
-                "capex_mean": "Mean capital cost",
-                "bill_saving_mean": "Mean annual bill saving",
-                "co2_saving_mean": "Mean annual CO2 saving",
-                "payback_mean": "Mean simple payback",
-                "payback_note": "Payback note",
+                "capital_cost_per_property": "Mean capital cost",
+                "annual_bill_savings": "Total annual bill saving",
+                "annual_co2_reduction_kg": "Total annual CO2 saving",
+                "aggregate_simple_payback_years": "Aggregate simple payback",
+                "property_simple_payback_mean_years": "Property mean simple payback",
             }
             for field, label in field_labels.items():
                 if field in hn_vs_hp_df.columns and not pd.isna(row.get(field)):
@@ -1532,7 +1517,7 @@ class OneStopReportGenerator:
                             value=row.get(field),
                             definition=f"{label} for {pathway_name}.",
                             denominator="Per pathway row",
-                            source=f"data/outputs/comparisons/hn_vs_hp_comparison.csv -> {field}",
+                            source=f"data/outputs/stock_scenario_comparison.csv -> {field}",
                             usage="HN vs HP pathway comparison",
                         )
                     )
@@ -2001,10 +1986,10 @@ class OneStopReportGenerator:
             AnnotatedDatapoint(
                 name="Energy price sensitivity - Current",
                 key="energy_price_current",
-                value=self.config.get("energy_prices", {}).get("current", {}),
+                value=self.config.get("resolved_energy_price_profile", {}),
                 definition="Current energy prices (£/kWh, dict: {fuel: price}).",
                 denominator="N/A",
-                source="config/config.yaml -> energy_prices.current",
+                source="Configuration / run definition",
                 usage="Bill calculations baseline",
             ),
             AnnotatedDatapoint(
@@ -2088,19 +2073,23 @@ class OneStopReportGenerator:
 
         # Collect all datapoints from all sections
         all_datapoints = []
-        for section_data in self._sections.values():
-            all_datapoints.extend(section_data.get("datapoints", []))
+        for section_id, section_data in self._sections.items():
+            for datapoint in section_data.get("datapoints", []):
+                glossary_datapoint = dict(datapoint)
+                glossary_datapoint["origin_section_id"] = section_id
+                glossary_datapoint["key"] = f"{section_id}__{datapoint['key']}"
+                all_datapoints.append(glossary_datapoint)
 
         return {
             "title": self.SECTION_TITLES[12],
             "description": "Comprehensive glossary of all metrics, tier definitions, and thresholds used in Sections 1-12",
             "definitions": {
                 "heat_pump_readiness_tiers": {
-                    "tier_1": "Ready now - Properties that can install heat pump immediately without fabric upgrades",
-                    "tier_2": "Minor work - Properties requiring minor fabric improvements (e.g., loft top-up)",
-                    "tier_3": "Major work - Properties requiring major fabric work (e.g., wall insulation)",
-                    "tier_4": "Challenging - Properties with multiple fabric issues requiring substantial investment",
-                    "tier_5": "Not suitable - Properties not suitable for heat pump without extensive retrofit"
+                    f"tier_{tier}": {
+                        "label": TIER_READINESS_LABELS[tier],
+                        "interpretation": TIER_READINESS_INTERPRETATIONS[tier],
+                    }
+                    for tier in range(1, 6)
                 },
                 "heat_network_spatial_tiers": {
                     "tier_1": "Adjacent to existing heat network (within 250m)",

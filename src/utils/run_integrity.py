@@ -29,6 +29,8 @@ class RunContext:
     analysis_start: Optional[str] = None
     git_commit: Optional[str] = None
     configuration_sha256: Optional[str] = None
+    configuration_snapshot: Optional[str] = None
+    energy_price_profile: Optional[dict[str, Any]] = None
     sample_start_date: Optional[str] = None
     sample_end_date: Optional[str] = None
     run_root: Optional[Path] = None
@@ -62,12 +64,25 @@ class RunContext:
             run_status="complete",
         )
 
-    def with_timing(self, *, analysis_end: Optional[str] = None, runtime_seconds: float) -> "RunContext":
+    def with_timing(
+        self,
+        *,
+        analysis_end: Optional[str] = None,
+        runtime_seconds: Optional[float] = None,
+    ) -> "RunContext":
         """Attach report timing while keeping the run explicitly unfinalized."""
+        end_value = analysis_end or datetime.now(timezone.utc).isoformat()
+        runtime_value = runtime_seconds
+        if runtime_value is None:
+            if self.analysis_start is None:
+                raise ValueError("Run start time is missing")
+            start = datetime.fromisoformat(self.analysis_start.replace("Z", "+00:00"))
+            end = datetime.fromisoformat(end_value.replace("Z", "+00:00"))
+            runtime_value = (end - start).total_seconds()
         return replace(
             self,
-            analysis_end=analysis_end or datetime.now(timezone.utc).isoformat(),
-            runtime_seconds=float(runtime_seconds),
+            analysis_end=end_value,
+            runtime_seconds=float(runtime_value),
             run_status="running",
         )
 
@@ -122,6 +137,25 @@ class RunContext:
             missing.append("finalized_context")
         if missing:
             raise ValueError(f"Production report context is incomplete: {sorted(set(missing))}")
+        self.validate_timing()
+
+    def validate_timing(self, *, tolerance_seconds: float = 2.0) -> None:
+        """Validate UTC chronology and reconcile runtime to wall clock."""
+        if self.analysis_start is None or self.analysis_end is None or self.runtime_seconds is None:
+            raise ValueError("Run timing is incomplete")
+        start = datetime.fromisoformat(self.analysis_start.replace("Z", "+00:00"))
+        end = datetime.fromisoformat(self.analysis_end.replace("Z", "+00:00"))
+        if start.tzinfo is None or end.tzinfo is None:
+            raise ValueError("Run timestamps must be timezone-aware UTC values")
+        if start.utcoffset() != timezone.utc.utcoffset(start) or end.utcoffset() != timezone.utc.utcoffset(end):
+            raise ValueError("Run timestamps must be expressed in UTC")
+        wall_clock = (end - start).total_seconds()
+        if wall_clock < 0 or float(self.runtime_seconds) < 0:
+            raise ValueError("Run chronology and runtime must be non-negative")
+        if abs(wall_clock - float(self.runtime_seconds)) > float(tolerance_seconds):
+            raise ValueError(
+                f"Runtime does not reconcile to UTC wall clock within {tolerance_seconds:g} seconds"
+            )
 
     def to_dict(self) -> dict[str, Any]:
         if not self.dataset_fingerprint:
@@ -147,6 +181,7 @@ class ArtifactRecord:
     sha256: str
     schema_version: str
     validation_status: str
+    energy_price_profile_id: Optional[str] = None
 
 
 @dataclass
@@ -199,6 +234,7 @@ class ArtifactManifest:
             sha256=_file_sha256(path),
             schema_version=schema_version,
             validation_status=validation_status,
+            energy_price_profile_id=(self.context.energy_price_profile or {}).get("profile_id"),
         )
         self.artifacts[logical_name] = record
         self.save()
@@ -339,6 +375,8 @@ def publish_run_outputs(
     public_output_dir = Path(public_output_dir)
     if not (run_output_dir / "one_stop_output.json").is_file():
         raise RuntimeError("Validated one-stop output is missing; refusing publication")
+    from src.utils.semantic_qa import require_passing_qa
+    require_passing_qa(run_output_dir / "qa_checks.json", run_id=run_id)
     temp_dir = public_output_dir.parent / f".{public_output_dir.name}.publish-{run_id}"
     rollback_dir = public_output_dir.parent / f".{public_output_dir.name}.rollback-{run_id}"
     if temp_dir.exists():

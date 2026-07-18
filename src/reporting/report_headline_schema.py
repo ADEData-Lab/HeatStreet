@@ -23,6 +23,7 @@ REQUIRED_BASE_METRIC_KEYS = {
     "wall_insulation_rate_pct",
     "wall_insulated_count",
     "wall_total_properties",
+    *{f"readiness_tier_{tier}_label" for tier in range(1, 6)},
 }
 
 REQUIRED_SCENARIO_METRIC_KEYS = {
@@ -31,7 +32,16 @@ REQUIRED_SCENARIO_METRIC_KEYS = {
     "scenario_capital_cost_per_property",
     "scenario_annual_co2_reduction_kg",
     "scenario_annual_bill_savings",
-    "scenario_average_payback_years",
+    "scenario_aggregate_simple_payback_years",
+    "scenario_property_simple_payback_mean_years",
+    "scenario_property_simple_payback_median_years",
+    "scenario_payback_valid_denominator_count",
+    "scenario_payback_non_positive_savings_count",
+    "scenario_payback_missing_input_count",
+    "scenario_payback_non_finite_input_count",
+    "scenario_payback_infinite_count",
+    "scenario_excluded_by_truncation_count",
+    "scenario_truncation_threshold_years",
     "scenario_cost_effective_pct",
     "scenario_cost_effective_count",
     "scenario_carbon_abatement_cost_median",

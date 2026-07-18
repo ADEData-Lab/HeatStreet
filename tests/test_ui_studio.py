@@ -37,7 +37,67 @@ from src.ui.state import (
     ScenarioState,
     SpatialState,
     ValidationFunnel,
+    StudioSessionState,
 )
+
+
+def test_studio_session_lifecycle_keeps_process_ready_for_another_run():
+    session = StudioSessionState()
+    assert session.status == "setup"
+    session.begin("january_client_report_provisional")
+    assert session.status == "running"
+    session.complete({"run_id": "run-one", "qa_status": "pass"})
+    assert session.status == "completed"
+    session.reset()
+    assert session.status == "setup"
+    assert session.run_id is None
+    assert session.completion == {}
+    session.begin("january_client_report_provisional")
+    session.fail("cancelled", cancelled=True)
+    assert session.status == "cancelled"
+
+
+def test_textual_adapter_reset_discards_run_state_without_duplicating_queues():
+    from src.ui.textual_app import TextualUIAdapter
+
+    adapter = TextualUIAdapter()
+    event_queue = adapter._event_queue
+    prompt_queue = adapter._prompt_request_queue
+    adapter.run_started("first")
+    adapter.output("old", "old.txt")
+    new_state = adapter.reset_session()
+    assert adapter._event_queue is event_queue
+    assert adapter._prompt_request_queue is prompt_queue
+    assert not new_state.outputs
+    assert new_state.start_time is None
+    assert adapter._event_queue.empty()
+
+
+def test_pipeline_stop_keeps_studio_open_until_deliberate_exit():
+    from src.ui.textual_app import TextualUIAdapter
+
+    adapter = TextualUIAdapter()
+    adapter._app = MagicMock()
+    adapter.stop()
+    adapter._app.exit.assert_not_called()
+
+
+def test_second_session_gets_new_context_and_preserves_previous_artifacts(tmp_path):
+    from src.utils.run_integrity import RunContext
+
+    first = RunContext.create()
+    first_dir = tmp_path / first.run_id
+    first_dir.mkdir()
+    artifact = first_dir / "one_stop_output.json"
+    artifact.write_text("{}", encoding="utf-8")
+    session = StudioSessionState()
+    session.begin("january_client_report_provisional")
+    session.complete({"run_id": first.run_id})
+    session.reset()
+    second = RunContext.create()
+    assert second.run_id != first.run_id
+    assert artifact.is_file()
+
 from src.ui.terminal import TerminalInfo, detect_terminal, recommended_tui_mode
 
 

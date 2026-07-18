@@ -21,6 +21,7 @@ from config.config import (
     load_config,
     get_heat_network_params,
     get_financial_params,
+    get_resolved_energy_prices,
     DATA_PROCESSED_DIR,
     DATA_OUTPUTS_DIR
 )
@@ -40,6 +41,7 @@ class PenetrationSensitivityAnalyzer:
         self.config = load_config()
         self.hn_params = get_heat_network_params()
         self.financial = get_financial_params()
+        self.resolved_energy_prices = get_resolved_energy_prices(self.config)
 
         self.output_dir = output_dir or DATA_OUTPUTS_DIR
         self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -53,9 +55,9 @@ class PenetrationSensitivityAnalyzer:
         # Get price scenarios from config
         self.price_scenarios = self.financial.get('price_scenarios', {
             'baseline': {
-                'name': 'Current prices',
-                'gas': 0.0624,
-                'electricity': 0.245,
+                'name': 'Resolved run energy price profile',
+                'gas': self.resolved_energy_prices['gas'],
+                'electricity': self.resolved_energy_prices['electricity'],
                 'heat_network': 0.08
             },
             'low': {
@@ -70,6 +72,14 @@ class PenetrationSensitivityAnalyzer:
                 'electricity': 0.30,
                 'heat_network': 0.10
             }
+        })
+        self.price_scenarios.setdefault('baseline', {}).update({
+            'name': self.config.get('resolved_energy_price_profile', {}).get(
+                'label', 'Resolved run energy price profile'
+            ),
+            'gas': self.resolved_energy_prices['gas'],
+            'electricity': self.resolved_energy_prices['electricity'],
+            'energy_price_profile_id': self.resolved_energy_prices['profile_id'],
         })
 
         # Heat pump SCOP
@@ -161,8 +171,8 @@ class PenetrationSensitivityAnalyzer:
             self.price_scenarios.keys()
         ):
             prices = self.price_scenarios[price_scenario]
-            gas_price = prices.get('gas', 0.0624)
-            elec_price = prices.get('electricity', 0.245)
+            gas_price = prices['gas']
+            elec_price = prices['electricity']
             hn_tariff = prices.get('heat_network', 0.08)
 
             # Number of homes on each pathway

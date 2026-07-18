@@ -26,6 +26,7 @@ from config.config import (
 )
 from src.acquisition.hnpd_downloader import HNPDDownloader
 from src.spatial.postcode_geocoder import PostcodeGeocoder
+from src.modeling.contracts import HN_READY_TIERS
 from src.utils.profiling import (
     profile_enabled, log_memory, log_dataframe_info, log_dtype, timed_section
 )
@@ -1583,6 +1584,10 @@ class HeatNetworkAnalyzer:
                 heat_networks,
                 heat_zones
             )
+            properties_classified['tier_number'] = pd.to_numeric(
+                properties_classified['tier_number'], errors='raise'
+            ).astype(int)
+            properties_classified['hn_ready'] = properties_classified['tier_number'].isin(HN_READY_TIERS)
 
             logger.info(f"✓ Classified {len(properties_classified):,} properties into 5 tiers")
 

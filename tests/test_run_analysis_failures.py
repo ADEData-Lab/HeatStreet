@@ -402,7 +402,7 @@ def test_ensure_hp_hn_comparison_outputs_raises_both_attempt_failures(monkeypatc
     monkeypatch.setattr(run_analysis, "_hp_hn_comparison_outputs_cache", None)
 
     df = pd.DataFrame({"value": [1]})
-    df.to_parquet(processed_dir / "epc_london_adjusted.parquet", index=False)
+    df.to_parquet(processed_dir / "epc_london_adjusted_spatial.parquet", index=False)
 
     with pytest.raises(run_analysis.DiagnosticPathwayPhaseError) as caught:
         run_analysis.ensure_hp_hn_comparison_outputs(df=df)
@@ -506,7 +506,7 @@ def test_apply_methodological_adjustments_uses_staged_helper_for_dataset_referen
     assert json.loads((tmp_path / "methodological_adjustments_summary.json").read_text(encoding="utf-8")) == summary
 
 
-def test_main_completes_staged_pipeline_without_dataframe_assumptions(monkeypatch, tmp_path):
+def test_main_rejects_staged_pipeline_without_semantic_artifacts(monkeypatch, tmp_path):
     fake_console = FakeConsole()
     raw_ref = make_dataset_reference(
         tmp_path,
@@ -523,7 +523,7 @@ def test_main_completes_staged_pipeline_without_dataframe_assumptions(monkeypatc
     adjusted_ref = make_dataset_reference(
         tmp_path,
         "adjusted_stage",
-        pd.DataFrame({"value": [1]}),
+        pd.DataFrame({"value": [1], "CERTIFICATE_NUMBER": ["CERT-1"]}),
         stage="adjusted",
     )
 
@@ -582,7 +582,10 @@ def test_main_completes_staged_pipeline_without_dataframe_assumptions(monkeypatc
     monkeypatch.setattr(
         run_analysis,
         "run_spatial_analysis",
-        lambda df, analysis_logger=None, one_stop_only=False: (df.copy(), {"status": "ok"}),
+        lambda df, analysis_logger=None, one_stop_only=False: (
+            df.assign(tier_number=5, hn_ready=False),
+            pd.DataFrame({"Tier": ["Tier 5"], "Property Count": [len(df)], "Percentage": [100.0], "Recommended Pathway": ["ASHP"]}),
+        ),
     )
     monkeypatch.setattr(run_analysis, "generate_additional_reports", lambda *args, **kwargs: {})
     monkeypatch.setattr(run_analysis, "generate_reports", lambda *args, **kwargs: None)
@@ -603,7 +606,7 @@ def test_main_completes_staged_pipeline_without_dataframe_assumptions(monkeypatc
 
     exit_code = run_analysis.main()
 
-    assert exit_code == run_analysis.EXIT_SUCCESS
+    assert exit_code == run_analysis.EXIT_ANALYSIS_FAILED
     assert validate_calls == [raw_ref]
     assert adjustment_calls == [validated_ref]
 

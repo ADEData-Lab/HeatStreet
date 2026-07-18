@@ -629,7 +629,7 @@ The project models five scenarios:
 
 ### Targeting and shared-package assumptions
 
-- Hybrid heat-network targeting currently uses the existing `has_hn_access` flag or the configured heat-network penetration rate. It does **not** dynamically select properties from the spatial tier outputs; add geospatial filtering first if you want the hybrid run to follow map-derived tiers.
+- Hybrid heat-network targeting consumes the run-scoped spatial enrichment joined by `CERTIFICATE_NUMBER`: tiers 1–3 receive heat-network assignments and remaining homes receive ASHP assignments. Mixed cohorts must contain both technologies or semantic QA prevents publication.
 - Fabric packages are shared across scenarios by design. If you want differentiated fabric measures (e.g., lighter fabric for heat networks vs deeper fabric for heat pumps), add explicit branching logic before the packages are applied.
 
 ## Heat Network Tier Classification

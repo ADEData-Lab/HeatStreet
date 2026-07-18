@@ -47,6 +47,7 @@ from .state import (
     RetrofitTierState,
     SpatialState,
     OutputEntry,
+    StudioSessionState,
 )
 from .terminal import (
     TerminalInfo,
@@ -69,6 +70,7 @@ __all__ = [
     "RetrofitTierState",
     "SpatialState",
     "OutputEntry",
+    "StudioSessionState",
 
     # UI implementations
     "LiveDashboard",

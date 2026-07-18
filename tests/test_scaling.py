@@ -178,7 +178,9 @@ class TestScenarioModelingScaling:
         df['wall_type'] = np.random.choice(['Solid', 'Cavity'], len(df))
         df['glazing_type'] = 'unknown'
         df['estimated_flow_temp'] = np.random.uniform(55, 75, len(df))
+        df['CERTIFICATE_NUMBER'] = df['UPRN']
         df['hn_ready'] = False
+        df['tier_number'] = 5
 
         # Initialize modeler
         modeler = ScenarioModeler(mock_config, output_dir=Path('/tmp'))

@@ -289,12 +289,12 @@ The readiness module:
 - Flags barriers (e.g., loft insulation below threshold; walls uninsulated; glazing issues)
 - Estimates post‑fabric heat demand
 - Estimates flow temperature and therefore likely heat pump performance
-- Classifies each dwelling into a tier (Tier 1 “ready now” through Tier 5 “major intervention needed”) using a documented deficiency score approach
+- Classifies each dwelling using the exact canonical Tier 1–5 wording documented below and a documented deficiency score approach
 - Estimates prerequisite costs and total retrofit costs using the shared costing rules
 
 Policy interpretation guidance:
 - “Ready now” does not mean “install‑ready”: practical delivery still requires property‑specific checks (emitters, electrics, hot water cylinder, constraints).
-- “Not suitable for standard HP” means “requires major enabling works or alternative pathway”, not “impossible”.
+- Tier 5's standard-ASHP qualification is a current modelled constraint, not a claim that the property is impossible to decarbonise.
 
 ### Phase 4.5 — Spatial analysis (optional; requires GIS libraries)
 **Objective:** determine where heat networks are plausible alternatives to individual heat pumps, based on spatial evidence.
@@ -589,3 +589,18 @@ The analysis is implemented across these high‑level modules. This appendix is 
 - HP vs HN comparison artefacts: `src/reporting/comparisons.py` (CSV + markdown snippet + optional plot)
 - Dashboard packaging: `src/reporting/dashboard_data_builder.py` (dashboard-friendly exports)
 - Executive summary helpers: `src/reporting/executive_summary.py`, `src/reporting/report_headline_data.py`
+# Analytical pipeline contracts (2026-07)
+
+Spatial heat-network classification is a required model input. The authoritative adjusted EPC cohort is joined to the classification one-to-one using `CERTIFICATE_NUMBER`, with null/duplicate rejection, order preservation, row-count reconciliation, and the canonical HN-ready rule of tiers 1–3. Both the public `stock_scenario` model family and the internal `diagnostic_full_fabric_pathway` family consume this same enriched cohort.
+
+Simple payback is upfront capital cost divided by annual bill savings. The public scenario schema distinguishes aggregate simple payback from the mean and median of valid property paybacks. Every finite property payback with strictly positive savings is included; there is no 100-year truncation. Non-positive aggregate savings serialize as null with an explicit status and denominator counts.
+
+Readiness is a technology-neutral fabric and heat-demand classification. Full-ASHP cost is the canonical and sole headline readiness investment. The supporting calculation is labelled **Tier 4 ASHP-plus-boiler capital-cost sensitivity**. It is not the spatial heat-network/ASHP hybrid scenario, is not part of the readiness classification, is not a recommended pathway, retains boiler backup, and is not the modelled net-zero endpoint. The readiness-cost calculation alone does not establish its operating-cost or carbon implications. It remains in `retrofit_readiness_analysis.csv` and technical supporting material, but not primary dashboards, one-stop headline metrics, tables or charts. Generic mixed `system_cost`, `total_cost`, and `total_retrofit_cost` fields are not published.
+
+Domestic gas and electricity unit rates are configured under `energy_price_profiles` as stable named profiles. A run resolves exactly one profile into its run-scoped `config_snapshot.yaml`; workers and reports reload that snapshot rather than repository YAML. The default `january_client_report_provisional` profile preserves gas at 0.0624 GBP/kWh and electricity at 0.245 GBP/kWh to reproduce the January provisional client report. Standing charges are excluded. Heat-network tariffs remain separate, and projected 2030/2040 analytical prices are not presented as Ofgem price-cap periods. The selected ID, label, period, rates, source/status and selection basis are recorded in run, one-stop, dashboard and artifact provenance metadata.
+
+The exact canonical readiness wording is **Tier 1: Ready now**; **Tier 2: Minor work**; **Tier 3: Moderate work**; **Tier 4: Significant work**; and **Tier 5: Extensive intervention / currently unsuitable for a standard ASHP**. The tiers describe fabric and heat-demand readiness and prescribe no heating technology.
+
+Aggregate simple payback is calculated as `capital_cost_total / annual_bill_savings`. Property mean and median include every finite result with finite capital cost and strictly positive finite savings, including values above 100 years. Zero and negative savings, missing inputs, non-finite inputs, and mathematically infinite calculated results are counted separately. Non-positive aggregate savings serialize as null with an explicit status.
+
+Publication QA reconciles count distributions to the authoritative cohort and percentage distributions to 100 within **0.1 percentage points**. Scenario and readiness costs use a **GBP 1 absolute / 1e-9 relative** rounding tolerance; payback arithmetic uses **1e-10 absolute and relative** tolerance. Public outputs use `stock_scenario`; full-fabric pathway diagnostics use `diagnostic_full_fabric_pathway`, `publication_scope=internal`, and `headline_reporting_eligible=false`. When a cohort contains both HN-ready and non-HN-ready homes, publication fails if the spatial hybrid has only one assigned technology or is identical to either pure pathway across assignment, capital cost, bills, savings, energy/CO2 outcomes, aggregate payback, and property median payback.

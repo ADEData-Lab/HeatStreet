@@ -67,3 +67,15 @@ This to-do list captures the follow-up items from the review call and assigns ow
   - *Owner:* DEA team  
   - *Action:* Share written comments on EPC error and pre-bound effects; coordinate with Phil to integrate into modelling.  
   - *Target:* Before methodological appendix is finalised.
+# Analysis pipeline contract repair — implemented
+
+- Spatial enrichment now runs before diagnostic and stock modeling and persists `epc_london_adjusted_spatial.parquet` plus a reconciliation summary.
+- `CERTIFICATE_NUMBER` is authoritative in both model families; hybrid HN/ASHP assignments are exclusive and complete.
+- Section 7 and dashboard comparison cards use the stock-scenario comparison; diagnostic pathway artifacts are internal.
+- Property paybacks are no longer discarded above 100 years, and aggregate/property statistics are explicitly named.
+- Readiness outputs keep full-ASHP as the sole headline total and retain the Tier 4 ASHP-plus-boiler capital-cost sensitivity only in detailed supporting data with its required caveats.
+- UTC timing, artifact provenance, cohort, scope, percentage, cost, payback, hybrid, unique-key, and source checks are consolidated in `qa_checks.json`; publication requires a passing current-run QA result.
+- Canonical readiness wording is Tier 1 “Ready now”, Tier 2 “Minor work”, Tier 3 “Moderate work”, Tier 4 “Significant work”, and Tier 5 “Extensive intervention / currently unsuitable for a standard ASHP”. Percentage distributions reconcile within 0.1 percentage points; cost totals reconcile within GBP 1 absolute / 1e-9 relative tolerance.
+- Public `stock_scenario` outputs and internal `diagnostic_full_fabric_pathway` outputs are scope-gated. For a mixed HN-ready cohort, a hybrid that collapses to either pure pathway is a critical publication failure.
+
+Reference values from the pre-repair analytical snapshot: heat-pump aggregate payback 43.10 years versus the formerly truncated property mean 46.66 years; diagnostic hybrid median 65.36 years, identical to pure HP because HN access defaulted false; mixed/full-ASHP readiness totals £3.762bn/£4.274bn. These are comparison anchors, not regenerated results from this code change.

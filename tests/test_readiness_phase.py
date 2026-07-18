@@ -37,10 +37,10 @@ class FakeAnalyzer:
         result["hp_readiness_tier"] = [1, 5][: len(result)]
         result["hp_readiness_label"] = "label"
         result["fabric_prerequisite_cost"] = 1.0
-        result["system_technology"] = "ashp"
-        result["system_cost"] = 2.0
-        result["total_cost"] = 3.0
-        result["total_retrofit_cost"] = 3.0
+        result["system_cost_full_ashp"] = 2.0
+        result["total_cost_full_ashp"] = 3.0
+        result["system_cost_hybrid_ashp_sensitivity"] = 1.5
+        result["total_cost_hybrid_ashp_sensitivity"] = 2.5
         return result
 
     def generate_readiness_summary(self, frame):
@@ -64,7 +64,7 @@ def test_copy_corruption_reloads_parquet_retries_and_registers(tmp_path):
     FakeAnalyzer.calls = 0
     context = _context(tmp_path)
     clean = pd.DataFrame({"property": [1, 2]})
-    clean.to_parquet(context.processed_dir / "epc_london_adjusted.parquet", index=False)
+    clean.to_parquet(context.processed_dir / "epc_london_adjusted_spatial.parquet", index=False)
 
     result = run_readiness_phase(
         pd.DataFrame({"property": [1, 2], "corrupt": [True, True]}),
@@ -88,7 +88,7 @@ def test_copy_corruption_reloads_parquet_retries_and_registers(tmp_path):
 def test_two_failures_keep_both_tracebacks_and_remove_candidates(tmp_path):
     context = _context(tmp_path)
     broken = pd.DataFrame({"property": [1, 2], "corrupt": [True, True]})
-    broken.to_parquet(context.processed_dir / "epc_london_adjusted.parquet", index=False)
+    broken.to_parquet(context.processed_dir / "epc_london_adjusted_spatial.parquet", index=False)
 
     with pytest.raises(RetrofitReadinessPhaseError) as caught:
         run_readiness_phase(
@@ -130,7 +130,7 @@ def test_readiness_validation_rejects_contract_failures(tmp_path, mutation, matc
         pd.concat([frame, frame.iloc[:1]]).to_csv(paths["readiness"], index=False)
         stamp_artifact_tree([context.output_dir], context)
     elif mutation == "columns":
-        frame.drop(columns=["total_cost"]).to_csv(paths["readiness"], index=False)
+        frame.drop(columns=["total_cost_full_ashp"]).to_csv(paths["readiness"], index=False)
         stamp_artifact_tree([context.output_dir], context)
     elif mutation == "tiers":
         frame.assign(hp_readiness_tier=9).to_csv(paths["readiness"], index=False)
