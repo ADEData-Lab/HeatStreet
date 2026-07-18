@@ -30,15 +30,18 @@ READINESS_INTERPRETATIONS: Mapping[str, str] = {
 
 TIER_READINESS_LABELS: Mapping[int, str] = {
     1: "Tier 1: Ready now",
-    2: "Tier 2: Minor enabling work required",
-    3: "Tier 3: Major enabling work required",
-    4: "Tier 4: Technically challenging",
-    5: "Tier 5: Further assessment required",
+    2: "Tier 2: Minor work",
+    3: "Tier 3: Moderate work",
+    4: "Tier 4: Significant work",
+    5: "Tier 5: Extensive intervention / currently unsuitable for a standard ASHP",
 }
 
 TIER_READINESS_INTERPRETATIONS: Mapping[int, str] = {
-    tier: "Fabric and heat-demand readiness classification; this does not prescribe a heating technology."
-    for tier in TIER_READINESS_LABELS
+    1: "Meets the modelled fabric and heat-demand readiness threshold; no heating technology is prescribed.",
+    2: "Minor fabric or heat-demand enabling work is indicated; no heating technology is prescribed.",
+    3: "Moderate fabric or heat-demand enabling work is indicated; no heating technology is prescribed.",
+    4: "Significant fabric or heat-demand enabling work is indicated; no heating technology is prescribed.",
+    5: "Extensive fabric or heat-demand intervention is indicated and the property is currently unsuitable for a standard ASHP; no alternative heating technology is prescribed.",
 }
 
 
@@ -76,8 +79,11 @@ MODEL_FAMILIES: Mapping[str, ModelFamilyContract] = {
 }
 
 PAYBACK_DEFINITION = "upfront capital cost divided by annual bill savings"
-PAYBACK_DENOMINATOR = "properties with finite capital cost and strictly positive annual bill savings"
-PAYBACK_SERIALIZATION_POLICY = "non-finite values are serialized as null with an explicit status and counts"
+PAYBACK_DENOMINATOR = "properties with finite capital cost, finite strictly positive annual bill savings, and finite calculated payback"
+PAYBACK_SERIALIZATION_POLICY = (
+    "missing inputs, non-finite inputs, non-positive savings, and mathematically infinite results "
+    "are counted separately; non-finite values are serialized as null"
+)
 
 
 def is_publication_eligible(model_family: str) -> bool:
@@ -189,7 +195,15 @@ def payback_summary(capital_cost: pd.Series, annual_savings: pd.Series) -> dict[
     """Return explicit aggregate and property simple-payback statistics."""
     capex = pd.to_numeric(capital_cost, errors="coerce")
     savings = pd.to_numeric(annual_savings, errors="coerce")
-    valid = capex.notna() & np.isfinite(capex) & savings.notna() & np.isfinite(savings) & savings.gt(0)
+    missing_input = capex.isna() | savings.isna()
+    non_finite_input = (~missing_input) & (~np.isfinite(capex) | ~np.isfinite(savings))
+    finite_inputs = ~missing_input & ~non_finite_input
+    non_positive_savings = finite_inputs & savings.le(0)
+    eligible = finite_inputs & savings.gt(0)
+    calculated_payback = capex[eligible] / savings[eligible]
+    infinite_result = pd.Series(False, index=capex.index)
+    infinite_result.loc[eligible] = ~np.isfinite(calculated_payback)
+    valid = eligible & ~infinite_result
     property_payback = capex[valid] / savings[valid]
     aggregate_savings = float(savings.fillna(0).sum())
     aggregate_capex = float(capex.fillna(0).sum())
@@ -200,8 +214,10 @@ def payback_summary(capital_cost: pd.Series, annual_savings: pd.Series) -> dict[
         "property_simple_payback_mean_years": float(property_payback.mean()) if len(property_payback) else None,
         "property_simple_payback_median_years": float(property_payback.median()) if len(property_payback) else None,
         "payback_valid_denominator_count": int(valid.sum()),
-        "payback_non_positive_savings_count": int((savings.notna() & savings.le(0)).sum()),
-        "payback_infinite_count": int((capex.notna() & ~valid).sum()),
+        "payback_non_positive_savings_count": int(non_positive_savings.sum()),
+        "payback_missing_input_count": int(missing_input.sum()),
+        "payback_non_finite_input_count": int(non_finite_input.sum()),
+        "payback_infinite_count": int(infinite_result.sum()),
         "truncation_threshold_years": None,
         "excluded_by_truncation_count": 0,
         "payback_definition": PAYBACK_DEFINITION,

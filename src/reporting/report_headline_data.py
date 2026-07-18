@@ -7,6 +7,7 @@ from typing import Dict, Iterable, Optional, Tuple
 import pandas as pd
 
 from config.config import get_analysis_horizon_years
+from src.modeling.contracts import TIER_READINESS_INTERPRETATIONS, TIER_READINESS_LABELS
 from src.reporting.report_headline_schema import (
     REPORT_HEADLINE_COLUMNS,
     validate_report_headline_dataframe,
@@ -113,6 +114,15 @@ def build_report_headline_dataframe(
         unit="count",
         source="archetype_results",
     )
+
+    for tier in range(1, 6):
+        add_row(
+            f"readiness_tier_{tier}_label",
+            TIER_READINESS_LABELS[tier],
+            f"Canonical readiness Tier {tier} label",
+            source="src/modeling/contracts.py",
+            definition=TIER_READINESS_INTERPRETATIONS[tier],
+        )
 
     if borough_breakdown is not None and not borough_breakdown.empty:
         top_borough = borough_breakdown.sort_values(
@@ -339,6 +349,13 @@ def build_report_headline_dataframe(
                 "Scenario property simple payback median",
                 "years",
             ),
+            ("scenario_payback_valid_denominator_count", results.get("payback_valid_denominator_count"), "Valid property payback denominator", "count"),
+            ("scenario_payback_non_positive_savings_count", results.get("payback_non_positive_savings_count"), "Non-positive savings count", "count"),
+            ("scenario_payback_missing_input_count", results.get("payback_missing_input_count"), "Missing payback input count", "count"),
+            ("scenario_payback_non_finite_input_count", results.get("payback_non_finite_input_count"), "Non-finite payback input count", "count"),
+            ("scenario_payback_infinite_count", results.get("payback_infinite_count"), "Mathematically infinite payback count", "count"),
+            ("scenario_excluded_by_truncation_count", results.get("excluded_by_truncation_count"), "Paybacks excluded by truncation", "count"),
+            ("scenario_truncation_threshold_years", results.get("truncation_threshold_years"), "Property payback truncation threshold", "years"),
             (
                 "scenario_cost_effective_pct",
                 cost_effective_pct,

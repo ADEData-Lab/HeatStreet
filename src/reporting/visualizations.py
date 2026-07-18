@@ -25,6 +25,7 @@ from config.config import (
     get_analysis_horizon_years,
 )
 from src.reporting.report_headline_data import build_report_headline_dataframe
+from src.modeling.contracts import TIER_READINESS_LABELS
 
 
 class ReportGenerator:
@@ -1527,13 +1528,7 @@ class ReportGenerator:
         fig.suptitle('Heat Pump Retrofit Readiness Dashboard', fontsize=16, fontweight='bold')
 
         # 1. Readiness Tier Distribution (top left)
-        tier_labels = [
-            'Tier 1\nReady Now',
-            'Tier 2\nMinor Work',
-            'Tier 3\nMajor Work',
-            'Tier 4\nChallenging',
-            'Tier 5\nNot Suitable'
-        ]
+        tier_labels = [TIER_READINESS_LABELS[tier].replace(": ", "\n", 1) for tier in range(1, 6)]
         tier_counts = [summary['tier_distribution'].get(i, 0) for i in range(1, 6)]
         tier_colors = ['#2ecc71', '#3498db', '#f39c12', '#e74c3c', '#95a5a6']
 
@@ -1720,13 +1715,7 @@ class ReportGenerator:
             5: '#95a5a6'
         }
 
-        tier_labels = {
-            1: 'Tier 1: Ready Now',
-            2: 'Tier 2: Minor Work',
-            3: 'Tier 3: Major Work',
-            4: 'Tier 4: Challenging',
-            5: 'Tier 5: Not Suitable'
-        }
+        tier_labels = TIER_READINESS_LABELS
 
         for tier in range(1, 6):
             mask = df_readiness['hp_readiness_tier'] == tier

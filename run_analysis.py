@@ -2538,11 +2538,13 @@ def analyze_retrofit_readiness(df, analysis_logger: AnalysisLogger = None, one_s
         console.print("[green]✓[/green] Retrofit readiness analysis complete")
         console.print()
         console.print("[cyan]Key Findings:[/cyan]")
-        console.print(f"  Tier 1 (Ready Now): {summary['tier_distribution'].get(1, 0):,} properties ({summary['tier_percentages'].get(1, 0):.1f}%)")
-        console.print(f"  Tier 2 (Minor Work): {summary['tier_distribution'].get(2, 0):,} properties ({summary['tier_percentages'].get(2, 0):.1f}%)")
-        console.print(f"  Tier 3 (Major Work): {summary['tier_distribution'].get(3, 0):,} properties ({summary['tier_percentages'].get(3, 0):.1f}%)")
-        console.print(f"  Tier 4 (Challenging): {summary['tier_distribution'].get(4, 0):,} properties ({summary['tier_percentages'].get(4, 0):.1f}%)")
-        console.print(f"  Tier 5 (Not Suitable): {summary['tier_distribution'].get(5, 0):,} properties ({summary['tier_percentages'].get(5, 0):.1f}%)")
+        from src.modeling.contracts import TIER_READINESS_LABELS
+        for tier in range(1, 6):
+            console.print(
+                f"  {TIER_READINESS_LABELS[tier]}: "
+                f"{summary['tier_distribution'].get(tier, 0):,} properties "
+                f"({summary['tier_percentages'].get(tier, 0):.1f}%)"
+            )
         console.print()
         console.print(f"  Solid wall barrier: {summary['needs_solid_wall_insulation']:,} properties need SWI")
         console.print(f"  Mean fabric cost: £{summary['mean_fabric_cost']:,.0f}")

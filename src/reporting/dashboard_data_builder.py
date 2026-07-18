@@ -380,6 +380,13 @@ class DashboardDataBuilder:
                     "aggregateSimplePaybackYears": results.get("aggregate_simple_payback_years"),
                     "propertySimplePaybackMeanYears": results.get("property_simple_payback_mean_years"),
                     "propertySimplePaybackMedianYears": results.get("property_simple_payback_median_years"),
+                    "paybackValidDenominatorCount": int(results.get("payback_valid_denominator_count") or 0),
+                    "paybackNonPositiveSavingsCount": int(results.get("payback_non_positive_savings_count") or 0),
+                    "paybackMissingInputCount": int(results.get("payback_missing_input_count") or 0),
+                    "paybackNonFiniteInputCount": int(results.get("payback_non_finite_input_count") or 0),
+                    "paybackInfiniteCount": int(results.get("payback_infinite_count") or 0),
+                    "excludedByTruncationCount": int(results.get("excluded_by_truncation_count") or 0),
+                    "truncationThresholdYears": results.get("truncation_threshold_years"),
                     "ashpReady": int(results.get("ashp_ready_properties", 0)),
                     "ashpFabricAssist": int(results.get("ashp_fabric_applied_properties", 0)),
                     "ashpIneligible": int(results.get("ashp_not_ready_properties", 0)),
@@ -617,6 +624,14 @@ class DashboardDataBuilder:
                     "co2SavingTotalKg": round(float(row.get("annual_co2_reduction_kg", 0)), 4),
                     "aggregateSimplePaybackYears": row.get("aggregate_simple_payback_years"),
                     "propertySimplePaybackMeanYears": row.get("property_simple_payback_mean_years"),
+                    "propertySimplePaybackMedianYears": row.get("property_simple_payback_median_years"),
+                    "paybackValidDenominatorCount": row.get("payback_valid_denominator_count"),
+                    "paybackNonPositiveSavingsCount": row.get("payback_non_positive_savings_count"),
+                    "paybackMissingInputCount": row.get("payback_missing_input_count"),
+                    "paybackNonFiniteInputCount": row.get("payback_non_finite_input_count"),
+                    "paybackInfiniteCount": row.get("payback_infinite_count"),
+                    "excludedByTruncationCount": row.get("excluded_by_truncation_count"),
+                    "truncationThresholdYears": row.get("truncation_threshold_years"),
                 }
             )
         return rows
@@ -722,6 +737,8 @@ class DashboardDataBuilder:
                     "meanSystemCostFullAshp": float(readiness_summary.get("mean_system_cost_full_ashp") or 0),
                     "meanTotalCostHybridAshpSensitivity": float(readiness_summary.get("mean_total_cost_hybrid_ashp_sensitivity") or 0),
                     "meanTotalCostFullAshp": float(readiness_summary.get("mean_total_cost_full_ashp") or 0),
+                    "totalCostFullAshp": float(readiness_summary.get("total_cost_full_ashp") or 0),
+                    "totalCostHybridAshpSensitivity": float(readiness_summary.get("total_cost_hybrid_ashp_sensitivity") or 0),
                     "heatDemandReduction": float(readiness_summary.get("heat_demand_reduction_percent", 0)),
                     "readyOrNearReady": float(
                         readiness_summary.get("tier_percentages", {}).get(1, 0)
@@ -964,13 +981,7 @@ class DashboardDataBuilder:
         full_ashp_costs = readiness_summary.get("total_cost_full_ashp_by_tier", {})
         technology_by_tier = readiness_summary.get("system_technology_by_tier", {})
 
-        tier_labels = {
-            1: "Ready Now",
-            2: "Minor Work",
-            3: "Moderate Work",
-            4: "Major Work",
-            5: "Extensive Work",
-        }
+        tier_labels = TIER_READINESS_LABELS
 
         baseline_demand = readiness_summary.get("mean_current_heat_demand", 250)
 

@@ -933,7 +933,9 @@ class ScenarioModeler:
             'property_simple_payback_median_years': None,
             'payback_valid_denominator_count': 0,
             'payback_non_positive_savings_count': len(df),
-            'payback_infinite_count': len(df),
+            'payback_missing_input_count': 0,
+            'payback_non_finite_input_count': 0,
+            'payback_infinite_count': 0,
             'truncation_threshold_years': None,
             'excluded_by_truncation_count': 0,
             'cost_per_tco2_20yr_gbp': None,
@@ -1742,8 +1744,15 @@ class ScenarioModeler:
             logger.info(f"  Analyzing {subsidy_pct}% subsidy level...")
 
             # Apply subsidy
-            capital_cost_subsidized = capital_cost_total_uplifted * (1 - subsidy_pct/100)
-            capital_cost_per_property = capital_cost_per_property_uplifted * (1 - subsidy_pct/100)
+            if subsidy_pct == 0:
+                # Zero subsidy is the canonical scenario, not a separate uplifted case.
+                capital_cost_subsidized = capital_cost_total_base
+                capital_cost_per_property = capital_cost_per_property_base
+                payback_scale = 1.0
+            else:
+                capital_cost_subsidized = capital_cost_total_uplifted * (1 - subsidy_pct/100)
+                capital_cost_per_property = capital_cost_per_property_uplifted * (1 - subsidy_pct/100)
+                payback_scale = uplift_multiplier * (1 - subsidy_pct / 100)
 
             # Recalculate payback with subsidy
             annual_savings = base_results['annual_bill_savings']
@@ -1776,6 +1785,24 @@ class ScenarioModeler:
                 'capital_cost_per_property_after_subsidy': capital_cost_per_property,
                 'aggregate_simple_payback_years': payback_years if annual_savings > 0 else None,
                 'aggregate_simple_payback_status': 'valid' if annual_savings > 0 else 'non_positive_aggregate_savings',
+                'property_simple_payback_mean_years': (
+                    base_results.get('property_simple_payback_mean_years') * payback_scale
+                    if base_results.get('property_simple_payback_mean_years') is not None else None
+                ),
+                'property_simple_payback_median_years': (
+                    base_results.get('property_simple_payback_median_years') * payback_scale
+                    if base_results.get('property_simple_payback_median_years') is not None else None
+                ),
+                'payback_valid_denominator_count': base_results.get('payback_valid_denominator_count', 0),
+                'payback_non_positive_savings_count': base_results.get('payback_non_positive_savings_count', 0),
+                'payback_missing_input_count': base_results.get('payback_missing_input_count', 0),
+                'payback_non_finite_input_count': base_results.get('payback_non_finite_input_count', 0),
+                'payback_infinite_count': base_results.get('payback_infinite_count', 0),
+                'excluded_by_truncation_count': 0,
+                'truncation_threshold_years': None,
+                'payback_definition': base_results.get('payback_definition'),
+                'payback_denominator': base_results.get('payback_denominator'),
+                'payback_serialization_policy': base_results.get('payback_serialization_policy'),
                 'estimated_uptake_rate': uptake_rate,
                 'uptake_model': 'logistic_smooth',
                 'uptake_ceiling': float(uptake_cfg.get('ceiling', 0.85)),
@@ -1995,6 +2022,8 @@ class ScenarioModeler:
                 'property_simple_payback_median_years': results.get('property_simple_payback_median_years'),
                 'payback_valid_denominator_count': results.get('payback_valid_denominator_count'),
                 'payback_non_positive_savings_count': results.get('payback_non_positive_savings_count'),
+                'payback_missing_input_count': results.get('payback_missing_input_count'),
+                'payback_non_finite_input_count': results.get('payback_non_finite_input_count'),
                 'payback_infinite_count': results.get('payback_infinite_count'),
                 'truncation_threshold_years': results.get('truncation_threshold_years'),
                 'excluded_by_truncation_count': results.get('excluded_by_truncation_count'),
@@ -2069,6 +2098,7 @@ class ScenarioModeler:
                     'aggregate_simple_payback_years', 'aggregate_simple_payback_status',
                     'property_simple_payback_mean_years', 'property_simple_payback_median_years',
                     'payback_valid_denominator_count', 'payback_non_positive_savings_count',
+                    'payback_missing_input_count', 'payback_non_finite_input_count',
                     'payback_infinite_count', 'truncation_threshold_years',
                     'excluded_by_truncation_count'
                 ]
@@ -2121,7 +2151,7 @@ class ScenarioModeler:
                     f.write(f"  HP-ready (current fabric): {results['ashp_ready_properties']:,} "
                             f"({results.get('ashp_ready_pct', 0):.1f}%)\n")
                     f.write(f"  Require fabric upgrades: {results.get('ashp_fabric_required_properties', 0):,}\n")
-                    f.write(f"  Not suitable for HP: {results.get('ashp_not_ready_properties', 0):,}\n")
+                    f.write(f"  Currently unsuitable for a standard ASHP: {results.get('ashp_not_ready_properties', 0):,}\n")
 
                 f.write("\n")
 

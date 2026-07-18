@@ -25,6 +25,7 @@ from .formatters import (
     format_carbon,
 )
 from .icons import get_icons, IconSet, phase_icon
+from src.modeling.contracts import TIER_READINESS_LABELS
 
 try:
     from textual.app import App, ComposeResult
@@ -859,13 +860,7 @@ if _TEXTUAL_AVAILABLE:
 
         def _refresh_retrofit(self, state: DashboardState) -> None:
             r = state.retrofit
-            TIER_LABELS = [
-                "Tier 1 Ready Now",
-                "Tier 2 Minor Work",
-                "Tier 3 Major Work",
-                "Tier 4 Challenging",
-                "Tier 5 Not Suitable",
-            ]
+            TIER_LABELS = [TIER_READINESS_LABELS[tier] for tier in range(1, 6)]
             TIER_COLOURS = ["green", "bright_green", "yellow", "orange3", "red"]
             counts = r.counts()
             total = r.total() or 1

@@ -33,7 +33,7 @@ from loguru import logger
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from config.config import DATA_OUTPUTS_DIR, DATA_PROCESSED_DIR, load_config, get_scenario_policy
-from src.modeling.contracts import TIER_READINESS_LABELS
+from src.modeling.contracts import TIER_READINESS_INTERPRETATIONS, TIER_READINESS_LABELS
 from src.utils.run_integrity import (
     RunContext,
     require_current_artifact,
@@ -322,6 +322,8 @@ class OneStopReportGenerator:
         self._sections["section_11"] = self._build_section_11(case_street_df)
         self._sections["section_12"] = self._build_section_12(adjustment_summary)
         self._sections["section_13"] = self._build_section_13()
+        for section_id, section in self._sections.items():
+            section["section_id"] = section_id
 
         # Build final JSON structure
         output = {
@@ -1068,6 +1070,21 @@ class OneStopReportGenerator:
                 ),
             ])
 
+        for field, label, usage in (
+            ("total_cost_full_ashp", "Canonical full-ASHP readiness total", "Main readiness capital requirement"),
+            ("total_cost_hybrid_ashp_sensitivity", "Hybrid-ASHP readiness sensitivity total", "Readiness sensitivity only"),
+        ):
+            if field in readiness_df.columns:
+                datapoints.append(AnnotatedDatapoint(
+                    name=label,
+                    key=f"{field}_gbp",
+                    value=readiness_df[field].sum(),
+                    definition=f"Sum of property-level {field} values (GBP).",
+                    denominator="All properties assessed",
+                    source=f"data/outputs/retrofit_readiness_analysis.csv -> {field}.sum()",
+                    usage=usage,
+                ))
+
         # Intervention requirements
         measures = {
             "needs_loft_topup": ("loft insulation", "Loft insulation top-up"),
@@ -1302,16 +1319,27 @@ class OneStopReportGenerator:
                     "aggregate_simple_payback_years": "Aggregate simple payback years",
                     "property_simple_payback_mean_years": "Property simple payback mean years",
                     "property_simple_payback_median_years": "Property simple payback median years",
+                    "payback_valid_denominator_count": "Valid property payback denominator",
+                    "payback_non_positive_savings_count": "Properties with non-positive savings",
+                    "payback_missing_input_count": "Properties with missing payback inputs",
+                    "payback_non_finite_input_count": "Properties with non-finite payback inputs",
+                    "payback_infinite_count": "Properties with mathematically infinite payback",
+                    "excluded_by_truncation_count": "Finite paybacks excluded by truncation",
+                    "truncation_threshold_years": "Property payback truncation threshold years",
                 }
                 for field, label in payback_fields.items():
                     value = row.get(field)
-                    if value is not None and not (isinstance(value, float) and pd.isna(value)):
+                    if field == "truncation_threshold_years" and pd.isna(value):
+                        value = None
+                    if value is not None or field == "truncation_threshold_years":
                         datapoints.append(AnnotatedDatapoint(
                             name=f"{label} ({scenario_label})",
                             key=f"{field}_{scenario_suffix}",
                             value=value,
-                            definition=f"{label} for cost-effective homes (years).",
-                            denominator="Cost-effective properties in scenario",
+                            definition=(
+                                f"{label}; property statistics include every finite payback with finite capital cost and strictly positive finite savings."
+                            ),
+                            denominator="All scenario properties, categorised explicitly by payback eligibility",
                             source=f"data/outputs/scenario_results_summary.csv -> {field}",
                             usage=f"Scenario {scenario_label} payback analysis",
                         ))
@@ -1369,7 +1397,7 @@ class OneStopReportGenerator:
                 ashp_fields = {
                     "ashp_ready_properties": "ASHP-ready properties",
                     "ashp_fabric_required_properties": "ASHP fabric required",
-                    "ashp_not_ready_properties": "ASHP not suitable",
+                    "ashp_not_ready_properties": "Currently unsuitable for a standard ASHP",
                 }
                 for field, label in ashp_fields.items():
                     value = row.get(field)
@@ -2063,19 +2091,23 @@ class OneStopReportGenerator:
 
         # Collect all datapoints from all sections
         all_datapoints = []
-        for section_data in self._sections.values():
-            all_datapoints.extend(section_data.get("datapoints", []))
+        for section_id, section_data in self._sections.items():
+            for datapoint in section_data.get("datapoints", []):
+                glossary_datapoint = dict(datapoint)
+                glossary_datapoint["origin_section_id"] = section_id
+                glossary_datapoint["key"] = f"{section_id}__{datapoint['key']}"
+                all_datapoints.append(glossary_datapoint)
 
         return {
             "title": self.SECTION_TITLES[12],
             "description": "Comprehensive glossary of all metrics, tier definitions, and thresholds used in Sections 1-12",
             "definitions": {
                 "heat_pump_readiness_tiers": {
-                    "tier_1": "Ready now - Properties that can install heat pump immediately without fabric upgrades",
-                    "tier_2": "Minor work - Properties requiring minor fabric improvements (e.g., loft top-up)",
-                    "tier_3": "Major work - Properties requiring major fabric work (e.g., wall insulation)",
-                    "tier_4": "Challenging - Properties with multiple fabric issues requiring substantial investment",
-                    "tier_5": "Not suitable - Properties not suitable for heat pump without extensive retrofit"
+                    f"tier_{tier}": {
+                        "label": TIER_READINESS_LABELS[tier],
+                        "interpretation": TIER_READINESS_INTERPRETATIONS[tier],
+                    }
+                    for tier in range(1, 6)
                 },
                 "heat_network_spatial_tiers": {
                     "tier_1": "Adjacent to existing heat network (within 250m)",

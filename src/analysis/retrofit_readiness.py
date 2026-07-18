@@ -65,7 +65,7 @@ class RetrofitReadinessAnalyzer:
     TIER DEFINITIONS:
     =================
 
-    Tier 1 - Heat Pump Ready Now (deficiency score 0-0.5)
+    Tier 1: Ready now (deficiency score 0-0.5)
     -----------------------------------------------------
     Properties meeting all these criteria:
     - Well-insulated walls (cavity filled or solid with insulation)
@@ -74,10 +74,10 @@ class RetrofitReadinessAnalyzer:
     - SAP score 65+ (EPC Band C or better)
     - Estimated flow temperature 55°C or below
     Typical fabric cost: £0-2,000
-    These properties can install a standard ASHP with minimal preparation.
+    These properties meet the modelled fabric and heat-demand readiness threshold.
     May still need emitter assessment but unlikely to need radiator upsizing.
 
-    Tier 2 - Minor Work Required (deficiency score 0.5-1.5)
+    Tier 2: Minor work (deficiency score 0.5-1.5)
     -------------------------------------------------------
     Properties with ONE of these issues:
     - Loft insulation needs topping up (100-200mm currently)
@@ -87,7 +87,7 @@ class RetrofitReadinessAnalyzer:
     Typical fabric cost: £1,200-3,500
     Quick wins: Usually loft top-up alone is sufficient.
 
-    Tier 3 - Moderate Work Required (deficiency score 1.5-2.5)
+    Tier 3: Moderate work (deficiency score 1.5-2.5)
     ----------------------------------------------------------
     Properties with TWO of these issues:
     - Loft needs significant upgrade
@@ -95,9 +95,9 @@ class RetrofitReadinessAnalyzer:
     - AND/OR glazing upgrade needed
     - SAP score 45-55 (EPC Band D, lower range)
     Typical fabric cost: £4,000-8,000
-    These properties need a coordinated fabric package before heat pump.
+    These properties need a coordinated fabric and heat-demand package.
 
-    Tier 4 - Significant Work Required (deficiency score 2.5-4.0)
+    Tier 4: Significant work (deficiency score 2.5-4.0)
     -------------------------------------------------------------
     Properties with MULTIPLE major issues:
     - Solid walls uninsulated (needs EWI or IWI)
@@ -108,15 +108,15 @@ class RetrofitReadinessAnalyzer:
     NOTE: May use hybrid heat pump (£8k) instead of pure ASHP (£12k)
     as a pragmatic solution, which can offset higher fabric costs.
 
-    Tier 5 - Major Intervention Needed (deficiency score 4.0+)
+    Tier 5: Extensive intervention / currently unsuitable for a standard ASHP (deficiency score 4.0+)
     ----------------------------------------------------------
     Properties with severe deficiencies:
     - Multiple uninsulated elements (solid walls + poor loft + single glazing)
     - Very poor SAP score (<35, EPC Band F/G)
     - High estimated flow temperature requirement (>65°C)
     Typical fabric cost: £15,000-25,000
-    These properties may need hybrid/alternative solutions or staged retrofit.
-    Standard ASHP may not be suitable without extensive fabric intervention.
+    These properties need extensive fabric or heat-demand intervention and are
+    currently unsuitable for a standard ASHP; the tier prescribes no alternative technology.
 
     IMPORTANT NOTES:
     ================

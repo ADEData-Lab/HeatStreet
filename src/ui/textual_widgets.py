@@ -19,6 +19,7 @@ from .formatters import (
     truncate_text,
 )
 from .icons import get_icons, IconSet
+from src.modeling.contracts import TIER_READINESS_LABELS
 
 try:
     from textual.widgets import Static, DataTable, RichLog, ListView, ListItem, Label
@@ -227,13 +228,7 @@ if _TEXTUAL_AVAILABLE:
     class RetrofitReadinessGrid(Static):
         """Tier distribution grid with counts, percentages and investment."""
 
-        _TIER_LABELS = [
-            "Tier 1 Ready Now",
-            "Tier 2 Minor Work",
-            "Tier 3 Major Work",
-            "Tier 4 Challenging",
-            "Tier 5 Not Suitable",
-        ]
+        _TIER_LABELS = [TIER_READINESS_LABELS[tier] for tier in range(1, 6)]
         _TIER_COLOURS = ["green", "bright_green", "yellow", "orange3", "red"]
 
         def update_state(self, state) -> None:

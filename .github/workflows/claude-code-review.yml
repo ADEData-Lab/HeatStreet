@@ -19,6 +19,8 @@ jobs:
     #   github.event.pull_request.author_association == 'FIRST_TIME_CONTRIBUTOR'
 
     runs-on: ubuntu-latest
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
     permissions:
       contents: read
       pull-requests: read
@@ -32,6 +34,7 @@ jobs:
           fetch-depth: 1
 
       - name: Run Claude Code Review
+        if: env.ANTHROPIC_API_KEY != ''
         id: claude-review
         uses: anthropics/claude-code-action@v1
         with:
@@ -54,4 +57,8 @@ jobs:
           # See https://github.com/anthropics/claude-code-action/blob/main/docs/usage.md
           # or https://code.claude.com/docs/en/cli-reference for available options
           claude_args: '--allowed-tools "Bash(gh issue view:*),Bash(gh search:*),Bash(gh issue list:*),Bash(gh pr comment:*),Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr list:*)"'
+
+      - name: Skip optional Claude review when credentials are unavailable
+        if: env.ANTHROPIC_API_KEY == ''
+        run: echo "ANTHROPIC_API_KEY is not configured; native analytical checks remain authoritative."
 
