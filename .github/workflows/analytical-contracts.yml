@@ -16,7 +16,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Install dependencies
-        run: python -m pip install -r requirements.txt
+        run: python -m pip install -r requirements.txt -r requirements-spatial.txt
       - name: Run full unit and integration suite
         shell: bash
         run: |
@@ -41,7 +41,7 @@ jobs:
           python-version: "3.12"
           cache: pip
       - name: Install dependencies
-        run: python -m pip install -r requirements.txt
+        run: python -m pip install -r requirements.txt -r requirements-spatial.txt
       - name: Run analytical contract and semantic QA tests
         shell: bash
         run: |
@@ -52,7 +52,10 @@ jobs:
         if: always()
         shell: bash
         run: |
-          latest_run="$(find data/runs -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort | tail -1)"
+          latest_run=""
+          if [ -d data/runs ]; then
+            latest_run="$(find data/runs -mindepth 1 -maxdepth 1 -type d | sort | tail -1)"
+          fi
           if [ -n "$latest_run" ]; then
             for artifact in qa_checks.json spatial_enrichment_summary.json scenario_results_summary.csv stock_scenario_comparison.csv; do
               if [ -f "$latest_run/outputs/$artifact" ]; then
