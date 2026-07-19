@@ -11,6 +11,7 @@ from src.modeling.implementation_pathways import (
     SPATIAL_IMPLEMENTATION,
     ImplementationPathwayModeler,
 )
+from src.modeling.implementation_summary import enrich_implementation_summary
 
 
 def _property(**overrides):
@@ -121,3 +122,116 @@ def test_each_property_has_one_final_state(modeler: ImplementationPathwayModeler
     assert len(result) == 2
     assert result["property_id"].is_unique
     assert result["implementation_status"].isin({"deployed", "deferred"}).all()
+
+
+def test_summary_separates_reason_combinations_from_incidence():
+    properties = pd.DataFrame(
+        [
+            {
+                "scenario": ASHP_IMPLEMENTATION,
+                "implementation_status": "deployed",
+                "capital_cost": 100.0,
+                "deferred_reason": "",
+                "deployment_contract_failures": [],
+            },
+            {
+                "scenario": ASHP_IMPLEMENTATION,
+                "implementation_status": "deferred",
+                "capital_cost": 20.0,
+                "deferred_reason": "heat_demand_above_threshold",
+                "deployment_contract_failures": ["heat_demand_above_threshold"],
+            },
+            {
+                "scenario": ASHP_IMPLEMENTATION,
+                "implementation_status": "deferred",
+                "capital_cost": 30.0,
+                "deferred_reason": (
+                    "heat_demand_above_threshold;flow_temperature_above_threshold"
+                ),
+                "deployment_contract_failures": [
+                    "heat_demand_above_threshold",
+                    "flow_temperature_above_threshold",
+                ],
+            },
+        ]
+    )
+    raw_summary = pd.DataFrame(
+        [
+            {
+                "scenario_id": ASHP_IMPLEMENTATION,
+                "total_properties": 3,
+                "properties_deployed": 1,
+                "properties_deferred": 2,
+                "capital_cost_total": 150.0,
+                "capital_cost_per_deployed_property": 100.0,
+                "deferred_reason_counts": {"heat_demand_above_threshold": 2},
+            }
+        ]
+    )
+
+    result = enrich_implementation_summary(properties, raw_summary).iloc[0]
+
+    assert result["deferred_reason_combination_counts"] == {
+        "heat_demand_above_threshold": 1,
+        "heat_demand_above_threshold;flow_temperature_above_threshold": 1,
+    }
+    assert result["deferred_reason_incidence_counts"] == {
+        "flow_temperature_above_threshold": 1,
+        "heat_demand_above_threshold": 2,
+    }
+    assert result["deployment_contract_failure_incidence_counts"] == {
+        "flow_temperature_above_threshold": 1,
+        "heat_demand_above_threshold": 2,
+    }
+    assert "deferred_reason_counts" not in result.index
+
+
+def test_summary_separates_deployed_and_deferred_costs():
+    properties = pd.DataFrame(
+        [
+            {
+                "scenario": ASHP_IMPLEMENTATION,
+                "implementation_status": "deployed",
+                "capital_cost": 100.0,
+                "deferred_reason": "",
+                "deployment_contract_failures": [],
+            },
+            {
+                "scenario": ASHP_IMPLEMENTATION,
+                "implementation_status": "deployed",
+                "capital_cost": 200.0,
+                "deferred_reason": "",
+                "deployment_contract_failures": [],
+            },
+            {
+                "scenario": ASHP_IMPLEMENTATION,
+                "implementation_status": "deferred",
+                "capital_cost": 60.0,
+                "deferred_reason": "heat_demand_above_threshold",
+                "deployment_contract_failures": ["heat_demand_above_threshold"],
+            },
+        ]
+    )
+    raw_summary = pd.DataFrame(
+        [
+            {
+                "scenario_id": ASHP_IMPLEMENTATION,
+                "total_properties": 3,
+                "properties_deployed": 2,
+                "properties_deferred": 1,
+                "capital_cost_total": 360.0,
+                "capital_cost_per_deployed_property": 150.0,
+                "deferred_reason_counts": {},
+            }
+        ]
+    )
+
+    result = enrich_implementation_summary(properties, raw_summary).iloc[0]
+
+    assert result["capital_cost_total"] == 360.0
+    assert result["capital_cost_deployed_total"] == 300.0
+    assert result["capital_cost_deferred_fabric_total"] == 60.0
+    assert result["capital_cost_per_total_stock_property"] == 120.0
+    assert result["mean_capital_cost_per_deployed_property"] == 150.0
+    assert result["mean_fabric_cost_per_deferred_property"] == 60.0
+    assert "capital_cost_per_deployed_property" not in result.index
