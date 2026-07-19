@@ -162,6 +162,8 @@ class PropertyUpgrade:
     heat_pump_cop_central: float = np.nan
     heat_pump_cop_low: float = np.nan
     heat_pump_cop_high: float = np.nan
+    post_fabric_heat_demand_kwh_m2: float = np.nan
+    ashp_ready_after_applied_measures: bool = False
     heat_pump_electricity_kwh: float = 0.0
     heat_pump_electricity_kwh_low: float = 0.0
     heat_pump_electricity_kwh_high: float = 0.0
@@ -395,6 +397,26 @@ def _calculate_property_upgrade_core(
     fabric_savings_adjusted = fabric_savings * rebound_factor
     energy_after_fabric = max(baseline_kwh - fabric_savings_adjusted, 0)
 
+    try:
+        floor_area_value = float(floor_area)
+    except (TypeError, ValueError):
+        floor_area_value = 0.0
+
+    if pd.isna(floor_area_value) or floor_area_value <= 0:
+        floor_area_value = 1.0
+
+    post_fabric_intensity = energy_after_fabric / floor_area_value
+
+    ashp_threshold = float(
+        config.get('eligibility', {})
+        .get('ashp', {})
+        .get('max_heat_demand_kwh_per_m2', 100)
+    )
+
+    ashp_ready_after_applied_measures = (
+        post_fabric_intensity <= ashp_threshold
+    )
+
     baseline_bill = baseline_kwh * gas_price
     baseline_co2 = baseline_kwh * gas_carbon
 
@@ -586,6 +608,8 @@ def _calculate_property_upgrade_core(
         heat_pump_cop_central=central_cop,
         heat_pump_cop_low=low_cop,
         heat_pump_cop_high=high_cop,
+        post_fabric_heat_demand_kwh_m2=post_fabric_intensity,
+        ashp_ready_after_applied_measures=ashp_ready_after_applied_measures,
         heat_pump_electricity_kwh=hp_electricity,
         heat_pump_electricity_kwh_low=hp_electricity_low,
         heat_pump_electricity_kwh_high=hp_electricity_high,
@@ -1088,25 +1112,52 @@ class ScenarioModeler:
 
         return processed
 
-    def _build_property_measures(self, measures: List[str], property_dict: Dict) -> Tuple[List[str], bool, bool, Optional[str], List[str]]:
-        """Insert ASHP-readiness fabric where needed and drop ASHP when infeasible."""
+    def _build_property_measures(
+        self,
+        measures: List[str],
+        property_dict: Dict,
+    ) -> Tuple[List[str], bool, bool, Optional[str], List[str]]:
+        """
+        Build the property-level measure plan.
 
+        Full-deployment ASHP scenarios retain ASHP installation for every
+        property assigned to ASHP. Readiness is handled through enabling
+        fabric rather than by removing the terminal heating technology.
+        """
         measure_plan = self._resolve_scenario_measures(measures)
         hybrid_pathway: Optional[str] = None
         removed: List[str] = []
 
-        if {'heat_network_where_available', 'ashp_elsewhere'} & set(measure_plan):
-            updated_plan: List[str] = [
-                m for m in measure_plan if m not in ['heat_network_where_available', 'ashp_elsewhere']
+        is_spatial_hybrid = bool(
+            {
+                'heat_network_where_available',
+                'ashp_elsewhere',
+            }
+            & set(measure_plan)
+        )
+
+        if is_spatial_hybrid:
+            updated_plan = [
+                measure
+                for measure in measure_plan
+                if measure not in {
+                    'heat_network_where_available',
+                    'ashp_elsewhere',
+                }
             ]
 
-            hn_ready = bool(property_dict['hn_ready'])
+            hn_ready = bool(property_dict.get('hn_ready', False))
 
             if hn_ready:
                 updated_plan.append('district_heating_connection')
                 hybrid_pathway = 'heat_network'
             else:
-                updated_plan.extend(['ashp_installation', 'emitter_upgrades'])
+                updated_plan.extend(
+                    [
+                        'ashp_installation',
+                        'emitter_upgrades',
+                    ]
+                )
                 hybrid_pathway = 'ashp'
 
             measure_plan = updated_plan
@@ -1116,18 +1167,30 @@ class ScenarioModeler:
         removed_hp = False
 
         if needs_heat_pump:
-            ready = bool(property_dict.get('ashp_ready', False))
-            projected_ready = bool(property_dict.get('ashp_projected_ready', False))
+            ready_now = bool(property_dict.get('ashp_ready', False))
 
-            if not ready and projected_ready:
-                measure_plan = self.fabric_minimum_measures + measure_plan
-                applied_fabric = True
-            elif not ready and not projected_ready and hybrid_pathway is None:
-                removed.extend([m for m in measure_plan if m in ['ashp_installation', 'emitter_upgrades']])
-                measure_plan = [m for m in measure_plan if m not in ['ashp_installation', 'emitter_upgrades']]
-                removed_hp = True
+            if not ready_now:
+                existing_measures = set(measure_plan)
+                enabling_fabric = [
+                    measure
+                    for measure in self.fabric_minimum_measures
+                    if measure not in existing_measures
+                ]
 
-        return self._dedupe_preserve_order(measure_plan), applied_fabric, removed_hp, hybrid_pathway, removed
+                if enabling_fabric:
+                    measure_plan = enabling_fabric + measure_plan
+                    applied_fabric = True
+
+            if 'emitter_upgrades' not in measure_plan:
+                measure_plan.append('emitter_upgrades')
+
+        return (
+            self._dedupe_preserve_order(measure_plan),
+            applied_fabric,
+            removed_hp,
+            hybrid_pathway,
+            removed,
+        )
 
     def _dedupe_preserve_order(self, measures: List[str]) -> List[str]:
         seen = set()
@@ -1440,22 +1503,97 @@ class ScenarioModeler:
         if 'band_shift_steps' in property_df.columns:
             results['epc_band_shift_mean_steps'] = float(property_df['band_shift_steps'].mean())
 
-        if {'ashp_ready', 'ashp_fabric_needed', 'ashp_not_ready_after_fabric'}.issubset(property_df.columns):
-            ready_count = int(property_df['ashp_ready'].sum())
-            fabric_count = int(property_df['ashp_fabric_needed'].sum())
-            not_ready_count = int(property_df['ashp_not_ready_after_fabric'].sum())
+        if {
+            'measures_applied',
+            'ashp_ready',
+            'ashp_ready_after_applied_measures',
+            'post_fabric_heat_demand_kwh_m2',
+            'baseline_energy_kwh',
+            'heat_pump_electricity_kwh',
+        }.issubset(property_df.columns):
+
+            def _has_measure(value, measure: str) -> bool:
+                if isinstance(value, (list, tuple, set, np.ndarray)):
+                    return measure in value
+                return measure in str(value)
+
+            ashp_installed_mask = property_df['measures_applied'].apply(
+                lambda value: _has_measure(value, 'ashp_installation')
+            )
+
+            ashp_installed_count = int(ashp_installed_mask.sum())
+
+            ready_before_mask = (
+                property_df['ashp_ready']
+                .fillna(False)
+                .astype(bool)
+            )
+
+            ready_after_mask = (
+                property_df['ashp_ready_after_applied_measures']
+                .fillna(False)
+                .astype(bool)
+            )
+
+            ready_before_count = int(
+                (ashp_installed_mask & ready_before_mask).sum()
+            )
+
+            ready_after_count = int(
+                (ashp_installed_mask & ready_after_mask).sum()
+            )
+
+            residual_gap_count = (
+                ashp_installed_count - ready_after_count
+            )
+
+            baseline_energy = pd.to_numeric(
+                property_df['baseline_energy_kwh'],
+                errors='coerce',
+            ).fillna(0)
+
+            hp_electricity = pd.to_numeric(
+                property_df['heat_pump_electricity_kwh'],
+                errors='coerce',
+            ).fillna(0)
+
+            positive_demand_mask = ashp_installed_mask & baseline_energy.gt(0)
+            zero_demand_mask = ashp_installed_mask & baseline_energy.le(0)
+
             results.update({
-                'ashp_ready_properties': ready_count,
-                'ashp_ready_pct': (ready_count / total_properties * 100) if total_properties > 0 else 0,
-                'ashp_fabric_required_properties': fabric_count,
-                'ashp_not_ready_properties': not_ready_count,
+                'ashp_installed_properties': ashp_installed_count,
+                'ashp_ready_before_installation_properties': ready_before_count,
+                'ashp_ready_after_applied_measures_properties': ready_after_count,
+                'ashp_residual_readiness_gap_properties': residual_gap_count,
+                'ashp_ready_after_applied_measures_pct': (
+                    ready_after_count / ashp_installed_count * 100
+                    if ashp_installed_count > 0
+                    else None
+                ),
+                'ashp_zero_baseline_energy_properties': int(
+                    zero_demand_mask.sum()
+                ),
+                'ashp_positive_demand_properties': int(
+                    positive_demand_mask.sum()
+                ),
+                'ashp_positive_electricity_properties': int(
+                    (
+                        ashp_installed_mask
+                        & hp_electricity.gt(0)
+                    ).sum()
+                ),
             })
 
         if 'fabric_inserted_for_hp' in property_df.columns:
             results['ashp_fabric_applied_properties'] = int(property_df['fabric_inserted_for_hp'].sum())
 
         if 'heat_pump_removed' in property_df.columns:
-            results['ashp_not_eligible_properties'] = int(property_df['heat_pump_removed'].sum())
+            results['ashp_removed_properties'] = int(
+                property_df['heat_pump_removed']
+                .fillna(False)
+                .astype(bool)
+                .sum()
+            )
 
         if 'hn_ready' in property_df.columns:
             results['hn_ready_properties'] = int(property_df['hn_ready'].sum())
@@ -2049,16 +2187,47 @@ class ScenarioModeler:
                 # EPC band metrics
                 'band_c_or_better_before_pct': band_summary.get('band_c_or_better_before_pct'),
                 'band_c_or_better_after_pct': band_summary.get('band_c_or_better_after_pct'),
-                # HP readiness
-                'ashp_ready_properties': results.get('ashp_ready_properties'),
-                'ashp_ready_pct': results.get('ashp_ready_pct'),
-                'ashp_fabric_required_properties': results.get('ashp_fabric_required_properties'),
-                'ashp_not_ready_properties': results.get('ashp_not_ready_properties'),
-                'ashp_fabric_applied_properties': results.get('ashp_fabric_applied_properties'),
-                'ashp_not_eligible_properties': results.get('ashp_not_eligible_properties'),
-                'hn_ready_properties': results.get('hn_ready_properties'),
-                'hn_assigned_properties': results.get('hn_assigned_properties'),
-                'ashp_assigned_properties': results.get('ashp_assigned_properties'),
+                # ASHP deployment and post-measure readiness
+                'ashp_installed_properties': results.get(
+                    'ashp_installed_properties'
+                ),
+                'ashp_ready_before_installation_properties': results.get(
+                    'ashp_ready_before_installation_properties'
+                ),
+                'ashp_ready_after_applied_measures_properties': results.get(
+                    'ashp_ready_after_applied_measures_properties'
+                ),
+                'ashp_residual_readiness_gap_properties': results.get(
+                    'ashp_residual_readiness_gap_properties'
+                ),
+                'ashp_ready_after_applied_measures_pct': results.get(
+                    'ashp_ready_after_applied_measures_pct'
+                ),
+                'ashp_fabric_applied_properties': results.get(
+                    'ashp_fabric_applied_properties'
+                ),
+                'ashp_zero_baseline_energy_properties': results.get(
+                    'ashp_zero_baseline_energy_properties'
+                ),
+                'ashp_positive_demand_properties': results.get(
+                    'ashp_positive_demand_properties'
+                ),
+                'ashp_positive_electricity_properties': results.get(
+                    'ashp_positive_electricity_properties'
+                ),
+                'ashp_removed_properties': results.get(
+                    'ashp_removed_properties',
+                    0,
+                ),
+                'hn_ready_properties': results.get(
+                    'hn_ready_properties'
+                ),
+                'hn_assigned_properties': results.get(
+                    'hn_assigned_properties'
+                ),
+                'ashp_assigned_properties': results.get(
+                    'ashp_assigned_properties'
+                ),
             })
 
         return pd.DataFrame(rows)
@@ -2146,13 +2315,128 @@ class ScenarioModeler:
                         if count > 0:
                             f.write(f"    Band {band}: {count:,}\n")
 
-                # Write HP readiness section
-                if 'ashp_ready_properties' in results:
-                    f.write("\nHeat Pump Readiness:\n")
-                    f.write(f"  HP-ready (current fabric): {results['ashp_ready_properties']:,} "
-                            f"({results.get('ashp_ready_pct', 0):.1f}%)\n")
-                    f.write(f"  Require fabric upgrades: {results.get('ashp_fabric_required_properties', 0):,}\n")
-                    f.write(f"  Currently unsuitable for a standard ASHP: {results.get('ashp_not_ready_properties', 0):,}\n")
+                # Write ASHP deployment and post-measure readiness section
+                ashp_installed = int(
+                    results.get(
+                        'ashp_installed_properties',
+                        0,
+                    )
+                    or 0
+                )
+
+                if ashp_installed > 0:
+                    ready_before = int(
+                        results.get(
+                            'ashp_ready_before_installation_properties',
+                            0,
+                        )
+                        or 0
+                    )
+                    ready_after = int(
+                        results.get(
+                            'ashp_ready_after_applied_measures_properties',
+                            0,
+                        )
+                        or 0
+                    )
+                    residual_gap = int(
+                        results.get(
+                            'ashp_residual_readiness_gap_properties',
+                            0,
+                        )
+                        or 0
+                    )
+                    fabric_applied = int(
+                        results.get(
+                            'ashp_fabric_applied_properties',
+                            0,
+                        )
+                        or 0
+                    )
+                    zero_baseline = int(
+                        results.get(
+                            'ashp_zero_baseline_energy_properties',
+                            0,
+                        )
+                        or 0
+                    )
+                    positive_demand = int(
+                        results.get(
+                            'ashp_positive_demand_properties',
+                            0,
+                        )
+                        or 0
+                    )
+                    positive_electricity = int(
+                        results.get(
+                            'ashp_positive_electricity_properties',
+                            0,
+                        )
+                        or 0
+                    )
+                    removed = int(
+                        results.get(
+                            'ashp_removed_properties',
+                            0,
+                        )
+                        or 0
+                    )
+
+                    ready_after_pct = results.get(
+                        'ashp_ready_after_applied_measures_pct'
+                    )
+
+                    if (
+                        ready_after_pct is None
+                        or pd.isna(ready_after_pct)
+                    ):
+                        ready_after_pct = (
+                            ready_after
+                            / ashp_installed
+                            * 100
+                        )
+
+                    f.write(
+                        "\nASHP Deployment and "
+                        "Post-Measure Readiness:\n"
+                    )
+                    f.write(
+                        "  Properties receiving an ASHP: "
+                        f"{ashp_installed:,}\n"
+                    )
+                    f.write(
+                        "  Ready before scenario measures: "
+                        f"{ready_before:,}\n"
+                    )
+                    f.write(
+                        "  Ready after applied measures: "
+                        f"{ready_after:,} "
+                        f"({float(ready_after_pct):.1f}%)\n"
+                    )
+                    f.write(
+                        "  Residual readiness gap: "
+                        f"{residual_gap:,}\n"
+                    )
+                    f.write(
+                        "  Additional fabric inserted for ASHP: "
+                        f"{fabric_applied:,}\n"
+                    )
+                    f.write(
+                        "  Positive baseline demand: "
+                        f"{positive_demand:,}\n"
+                    )
+                    f.write(
+                        "  Positive heat-pump electricity: "
+                        f"{positive_electricity:,}\n"
+                    )
+                    f.write(
+                        "  Zero baseline energy records: "
+                        f"{zero_baseline:,}\n"
+                    )
+                    f.write(
+                        "  ASHPs removed by model: "
+                        f"{removed:,}\n"
+                    )
 
                 f.write("\n")
 

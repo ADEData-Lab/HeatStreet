@@ -366,7 +366,21 @@ class DashboardDataBuilder:
 
         scenarios = []
         for scenario, results in scenario_results.items():
-            scenario_label = self._scenario_label(scenario, results)
+            scenario_label = self._scenario_label(
+                scenario,
+                results,
+            )
+
+            readiness_pct = results.get(
+                "ashp_ready_after_applied_measures_pct"
+            )
+
+            readiness_pct_value = (
+                None
+                if readiness_pct is None or pd.isna(readiness_pct)
+                else float(readiness_pct)
+            )
+
             scenarios.append(
                 {
                     "scenario": scenario_label,
@@ -388,9 +402,63 @@ class DashboardDataBuilder:
                     "paybackInfiniteCount": int(results.get("payback_infinite_count") or 0),
                     "excludedByTruncationCount": int(results.get("excluded_by_truncation_count") or 0),
                     "truncationThresholdYears": results.get("truncation_threshold_years"),
-                    "ashpReady": int(results.get("ashp_ready_properties", 0)),
-                    "ashpFabricAssist": int(results.get("ashp_fabric_applied_properties", 0)),
-                    "ashpIneligible": int(results.get("ashp_not_ready_properties", 0)),
+                    "ashpInstalled": int(
+                        results.get(
+                            "ashp_installed_properties",
+                            0,
+                        )
+                        or 0
+                    ),
+                    "ashpReadyBeforeMeasures": int(
+                        results.get(
+                            "ashp_ready_before_installation_properties",
+                            0,
+                        )
+                        or 0
+                    ),
+                    "ashpReadyAfterMeasures": int(
+                        results.get(
+                            "ashp_ready_after_applied_measures_properties",
+                            0,
+                        )
+                        or 0
+                    ),
+                    "ashpResidualReadinessGap": int(
+                        results.get(
+                            "ashp_residual_readiness_gap_properties",
+                            0,
+                        )
+                        or 0
+                    ),
+                    "ashpReadyAfterMeasuresPct": readiness_pct_value,
+                    "ashpFabricApplied": int(
+                        results.get(
+                            "ashp_fabric_applied_properties",
+                            0,
+                        )
+                        or 0
+                    ),
+                    "ashpZeroBaselineEnergy": int(
+                        results.get(
+                            "ashp_zero_baseline_energy_properties",
+                            0,
+                        )
+                        or 0
+                    ),
+                    "ashpPositiveDemand": int(
+                        results.get(
+                            "ashp_positive_demand_properties",
+                            0,
+                        )
+                        or 0
+                    ),
+                    "ashpPositiveElectricity": int(
+                        results.get(
+                            "ashp_positive_electricity_properties",
+                            0,
+                        )
+                        or 0
+                    ),
                     "hnReady": int(results.get("hn_ready_properties", 0)),
                     "hnAssignments": int(results.get("hn_assigned_properties", 0)),
                     "ashpAssignments": int(results.get("ashp_assigned_properties", 0)),

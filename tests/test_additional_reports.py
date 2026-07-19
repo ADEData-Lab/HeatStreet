@@ -129,3 +129,69 @@ def test_generate_tenure_segmentation_maps_groups_and_percentages(tmp_path):
     ].iloc[0]
     assert social_row["pct_district"] == 100.0
     assert "KEY FINDINGS" in summary_path.read_text(encoding="utf-8")
+def test_tenure_mapper_recognises_raw_epc_labels():
+    reporter = AdditionalReports()
+
+    assert (
+        reporter._map_tenure_group('Owner-occupied')
+        == 'owner_occupied'
+    )
+    assert (
+        reporter._map_tenure_group('Rented (private)')
+        == 'private_rented_sector'
+    )
+    assert (
+        reporter._map_tenure_group('Rented (social)')
+        == 'social_affordable'
+    )
+    assert reporter._map_tenure_group(None) == 'unknown'
+
+
+def test_tenure_report_uses_raw_tenure_when_canonical_is_damaged(
+    tmp_path,
+):
+    reporter = AdditionalReports()
+
+    df = pd.DataFrame(
+        [
+            {
+                'TENURE': 'Owner-occupied',
+                'tenure': 'owner_occupied',
+                'CURRENT_ENERGY_EFFICIENCY': 60,
+                'energy_kwh_per_m2_year': 200,
+                'wall_insulated': True,
+                'heating_system_type': 'Gas Boiler',
+            },
+            {
+                'TENURE': 'Rented (private)',
+                'tenure': 'unknown',
+                'CURRENT_ENERGY_EFFICIENCY': 55,
+                'energy_kwh_per_m2_year': 240,
+                'wall_insulated': False,
+                'heating_system_type': 'Gas Boiler',
+            },
+            {
+                'TENURE': 'Rented (social)',
+                'tenure': 'unknown',
+                'CURRENT_ENERGY_EFFICIENCY': 58,
+                'energy_kwh_per_m2_year': 220,
+                'wall_insulated': False,
+                'heating_system_type': 'Gas Boiler',
+            },
+        ]
+    )
+
+    result = reporter.generate_tenure_segmentation(
+        df,
+        output_path=tmp_path / 'tenure.csv',
+    )
+
+    counts = (
+        result.set_index('tenure_group')['property_count']
+        .astype(int)
+        .to_dict()
+    )
+
+    assert counts['owner_occupied'] == 1
+    assert counts['private_rented_sector'] == 1
+    assert counts['social_affordable'] == 1

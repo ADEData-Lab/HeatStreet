@@ -30,9 +30,16 @@ Each row corresponds to a modeled scenario with capital costs, savings, readines
 | `payback_non_finite_input_count` | A present capital-cost or savings input is non-finite |
 | `payback_infinite_count` | Division produced a mathematically infinite result; does not include other invalid categories |
 | `excluded_by_truncation_count` / `truncation_threshold_years` | Always `0` / null under the no-truncation policy |
-| `ashp_ready_properties` / `ashp_fabric_required_properties` / `ashp_not_ready_properties` | ASHP readiness diagnostics |
-| `ashp_fabric_applied_properties` | Homes where minimum fabric was injected to enable ASHP |
-| `ashp_not_eligible_properties` | Homes where ASHP was removed because fabric could not enable eligibility |
+| `ashp_installed_properties` | Properties receiving an ASHP in the scenario |
+| `ashp_ready_before_installation_properties` | ASHP properties meeting the configured readiness test before scenario measures |
+| `ashp_ready_after_applied_measures_properties` | ASHP properties meeting the heat-demand threshold after the actual scenario measures |
+| `ashp_residual_readiness_gap_properties` | ASHP properties remaining above the heat-demand threshold after the actual scenario measures |
+| `ashp_ready_after_applied_measures_pct` | Percentage of ASHP properties meeting the threshold after the actual scenario measures |
+| `ashp_fabric_applied_properties` | Properties where additional enabling fabric was inserted during ASHP measure planning |
+| `ashp_zero_baseline_energy_properties` | ASHP properties with zero modelled baseline energy |
+| `ashp_positive_demand_properties` | ASHP properties with positive modelled baseline energy demand |
+| `ashp_positive_electricity_properties` | ASHP properties with positive modelled heat-pump electricity |
+| `ashp_removed_properties` | Properties where the scenario model removed an ASHP, expected to be zero in full-deployment scenarios |
 | `hn_ready_properties` | Homes flagged as heat-network ready |
 | `hn_assigned_properties` / `ashp_assigned_properties` | Hybrid split between district heating and ASHP |
 
