@@ -74,6 +74,7 @@ def run_semantic_qa(context: RunContext, manifest: ArtifactManifest, output_path
     spatial = pd.read_csv(outputs / "pathway_suitability_by_tier.csv")
     subsidy = pd.read_csv(outputs / "subsidy_sensitivity_analysis.csv")
     windows = pd.read_csv(outputs / "window_economics.csv")
+    tenure = pd.read_csv(outputs / "reports" / "tenure_segmentation.csv")
     archetype = json.loads((outputs / "archetype_analysis_results.json").read_text(encoding="utf-8"))
     one_stop = json.loads((outputs / "one_stop_output.json").read_text(encoding="utf-8"))
     run_metadata = json.loads((outputs / "run_metadata.json").read_text(encoding="utf-8"))
@@ -90,6 +91,31 @@ def run_semantic_qa(context: RunContext, manifest: ArtifactManifest, output_path
     _check(checks, "spatial_tier_distribution_reconciliation", lambda: _validate_spatial_distribution(spatial, cohort))
     _check(checks, "percentage_distribution_reconciliation", lambda: _validate_percentage_distributions(scenarios, archetype, readiness, spatial))
     _check(checks, "hybrid_assignment_exclusivity", lambda: _validate_hybrid(scenario_properties, cohort))
+    _check(
+        checks,
+        "full_deployment_technology_contract",
+        lambda: _validate_full_deployment_technology_contract(
+            scenario_properties,
+            scenarios,
+            cohort,
+        ),
+    )
+    _check(
+        checks,
+        "scenario_readiness_reconciliation",
+        lambda: _validate_scenario_readiness_reconciliation(
+            scenario_properties,
+            scenarios,
+        ),
+    )
+    _check(
+        checks,
+        "tenure_category_reconciliation",
+        lambda: _validate_tenure_category_reconciliation(
+            tenure,
+            cohort,
+        ),
+    )
     _check(checks, "hybrid_pathway_distinction", lambda: _validate_hybrid_distinction(scenarios, scenario_properties, enriched))
     _check(checks, "model_family_scope", lambda: _validate_model_scopes(
         scenarios, scenario_properties, diagnostic, diagnostic_summary, diagnostic_comparison, public_comparison
@@ -112,7 +138,7 @@ def run_semantic_qa(context: RunContext, manifest: ArtifactManifest, output_path
 
     critical_failures = [item for item in checks if item["critical"] and item["status"] != "pass"]
     payload = {
-        "schema_version": "1.1",
+        "schema_version": "1.2",
         "run_id": context.run_id,
         "dataset_fingerprint": context.dataset_fingerprint,
         "authoritative_cohort": cohort,
@@ -246,7 +272,473 @@ def _validate_percentage_distributions(
             checked += 1
     return checked
 
+def _measure_mask(frame: pd.DataFrame, measure: str) -> pd.Series:
+    """Return a Boolean mask for rows containing a modelled measure."""
+    if "measures_applied" not in frame.columns:
+        raise ValueError("scenario property output lacks measures_applied")
 
+    def contains_measure(value: Any) -> bool:
+        if value is None:
+            return False
+
+        if isinstance(value, str):
+            values = {
+                item.strip()
+                for item in value.split("|")
+                if item.strip()
+            }
+            return measure in values
+
+        if isinstance(value, (list, tuple, set, np.ndarray, pd.Series)):
+            return measure in list(value)
+
+        try:
+            if pd.isna(value):
+                return False
+        except (TypeError, ValueError):
+            return False
+
+        return value == measure
+
+    return frame["measures_applied"].map(contains_measure).astype(bool)
+
+
+def _scenario_summary_index(scenarios: pd.DataFrame) -> pd.DataFrame:
+    """Return scenario summary rows indexed by their stable identifier."""
+    key = "scenario_id" if "scenario_id" in scenarios.columns else "scenario"
+
+    if key not in scenarios.columns:
+        raise ValueError("scenario summary lacks scenario identifier")
+
+    if scenarios[key].duplicated().any():
+        duplicates = scenarios.loc[scenarios[key].duplicated(), key].tolist()
+        raise ValueError(f"duplicate scenario summary rows: {duplicates}")
+
+    return scenarios.set_index(key)
+
+
+def _validate_full_deployment_technology_contract(
+    properties: pd.DataFrame,
+    scenarios: pd.DataFrame,
+    cohort: int,
+) -> dict[str, dict[str, int]]:
+    """Verify that full-deployment scenarios actually deploy their technology."""
+    required_property_columns = {
+        "scenario",
+        "measures_applied",
+        "heat_pump_removed",
+        "hybrid_pathway",
+    }
+    missing = required_property_columns.difference(properties.columns)
+    if missing:
+        raise ValueError(
+            f"missing technology-contract property fields: {sorted(missing)}"
+        )
+
+    summary = _scenario_summary_index(scenarios)
+    required_summary_columns = {
+        "ashp_installed_properties",
+        "ashp_removed_properties",
+        "hn_assigned_properties",
+        "ashp_assigned_properties",
+    }
+    missing = required_summary_columns.difference(summary.columns)
+    if missing:
+        raise ValueError(
+            f"missing technology-contract summary fields: {sorted(missing)}"
+        )
+
+    result: dict[str, dict[str, int]] = {}
+
+    for scenario_id in ("heat_pump", "minimum_fabric_hp_ready"):
+        if scenario_id not in summary.index:
+            raise ValueError(f"missing scenario summary: {scenario_id}")
+
+        subset = properties[properties["scenario"].eq(scenario_id)].copy()
+        if len(subset) != cohort:
+            raise ValueError(
+                f"{scenario_id} contains {len(subset)} properties, expected {cohort}"
+            )
+
+        ashp_mask = _measure_mask(subset, "ashp_installation")
+        emitter_mask = _measure_mask(subset, "emitter_upgrades")
+        removed = subset["heat_pump_removed"].fillna(False).astype(bool)
+
+        if int(ashp_mask.sum()) != cohort:
+            raise ValueError(
+                f"{scenario_id} installs ASHPs at "
+                f"{int(ashp_mask.sum())} of {cohort} properties"
+            )
+
+        if int(emitter_mask.sum()) != cohort:
+            raise ValueError(
+                f"{scenario_id} applies emitter upgrades at "
+                f"{int(emitter_mask.sum())} of {cohort} properties"
+            )
+
+        if removed.any():
+            raise ValueError(
+                f"{scenario_id} removes {int(removed.sum())} heat pumps"
+            )
+
+        row = summary.loc[scenario_id]
+        if int(row["ashp_installed_properties"]) != cohort:
+            raise ValueError(
+                f"{scenario_id} summary reports "
+                f"{row['ashp_installed_properties']} installations, "
+                f"expected {cohort}"
+            )
+
+        if int(row["ashp_removed_properties"]) != 0:
+            raise ValueError(
+                f"{scenario_id} summary reports heat-pump removals"
+            )
+
+        result[scenario_id] = {
+            "properties": int(len(subset)),
+            "ashp_installations": int(ashp_mask.sum()),
+            "emitter_upgrades": int(emitter_mask.sum()),
+            "heat_pumps_removed": int(removed.sum()),
+        }
+
+    if "hybrid" not in summary.index:
+        raise ValueError("missing hybrid scenario summary")
+
+    hybrid = properties[properties["scenario"].eq("hybrid")].copy()
+    if len(hybrid) != cohort:
+        raise ValueError(
+            f"hybrid contains {len(hybrid)} properties, expected {cohort}"
+        )
+
+    assigned_ashp = hybrid["hybrid_pathway"].eq("ashp")
+    assigned_hn = hybrid["hybrid_pathway"].eq("heat_network")
+    ashp_mask = _measure_mask(hybrid, "ashp_installation")
+    emitter_mask = _measure_mask(hybrid, "emitter_upgrades")
+    hn_mask = _measure_mask(hybrid, "district_heating_connection")
+    removed = hybrid["heat_pump_removed"].fillna(False).astype(bool)
+
+    if not (assigned_ashp | assigned_hn).all():
+        raise ValueError("hybrid contains unassigned properties")
+
+    if (assigned_ashp & assigned_hn).any():
+        raise ValueError("hybrid contains dual technology assignments")
+
+    if not ashp_mask.equals(assigned_ashp):
+        mismatches = int((ashp_mask != assigned_ashp).sum())
+        raise ValueError(
+            f"hybrid ASHP measures disagree with assignments for "
+            f"{mismatches} properties"
+        )
+
+    if not emitter_mask.equals(assigned_ashp):
+        mismatches = int((emitter_mask != assigned_ashp).sum())
+        raise ValueError(
+            f"hybrid emitter upgrades disagree with ASHP assignments for "
+            f"{mismatches} properties"
+        )
+
+    if not hn_mask.equals(assigned_hn):
+        mismatches = int((hn_mask != assigned_hn).sum())
+        raise ValueError(
+            f"hybrid heat-network measures disagree with assignments for "
+            f"{mismatches} properties"
+        )
+
+    if removed.any():
+        raise ValueError(
+            f"hybrid removes {int(removed.sum())} heat pumps"
+        )
+
+    hybrid_row = summary.loc["hybrid"]
+    expected_ashp = int(assigned_ashp.sum())
+    expected_hn = int(assigned_hn.sum())
+
+    if int(hybrid_row["ashp_installed_properties"]) != expected_ashp:
+        raise ValueError("hybrid ASHP installation summary does not reconcile")
+
+    if int(hybrid_row["ashp_assigned_properties"]) != expected_ashp:
+        raise ValueError("hybrid ASHP assignment summary does not reconcile")
+
+    if int(hybrid_row["hn_assigned_properties"]) != expected_hn:
+        raise ValueError(
+            "hybrid heat-network assignment summary does not reconcile"
+        )
+
+    if int(hybrid_row["ashp_removed_properties"]) != 0:
+        raise ValueError("hybrid summary reports heat-pump removals")
+
+    result["hybrid"] = {
+        "properties": int(len(hybrid)),
+        "ashp_assignments": expected_ashp,
+        "heat_network_assignments": expected_hn,
+        "heat_pumps_removed": int(removed.sum()),
+    }
+
+    return result
+
+
+def _validate_scenario_readiness_reconciliation(
+    properties: pd.DataFrame,
+    scenarios: pd.DataFrame,
+) -> dict[str, dict[str, float]]:
+    """Recalculate ASHP readiness metrics from property-level results."""
+    required_property_columns = {
+        "scenario",
+        "measures_applied",
+        "ashp_ready",
+        "ashp_ready_after_applied_measures",
+        "fabric_inserted_for_hp",
+        "heat_pump_removed",
+        "baseline_energy_kwh",
+        "heat_pump_electricity_kwh",
+    }
+    missing = required_property_columns.difference(properties.columns)
+    if missing:
+        raise ValueError(
+            f"missing ASHP readiness property fields: {sorted(missing)}"
+        )
+
+    required_summary_columns = {
+        "ashp_installed_properties",
+        "ashp_ready_before_installation_properties",
+        "ashp_ready_after_applied_measures_properties",
+        "ashp_residual_readiness_gap_properties",
+        "ashp_ready_after_applied_measures_pct",
+        "ashp_fabric_applied_properties",
+        "ashp_zero_baseline_energy_properties",
+        "ashp_positive_demand_properties",
+        "ashp_positive_electricity_properties",
+        "ashp_removed_properties",
+    }
+    missing = required_summary_columns.difference(scenarios.columns)
+    if missing:
+        raise ValueError(
+            f"missing ASHP readiness summary fields: {sorted(missing)}"
+        )
+
+    summary = _scenario_summary_index(scenarios)
+    result: dict[str, dict[str, float]] = {}
+
+    for scenario_id, row in summary.iterrows():
+        reported_installed = int(
+            pd.to_numeric(
+                pd.Series([row["ashp_installed_properties"]]),
+                errors="raise",
+            ).iloc[0]
+        )
+
+        subset = properties[properties["scenario"].eq(scenario_id)].copy()
+        installed_mask = _measure_mask(subset, "ashp_installation")
+        installed = subset.loc[installed_mask].copy()
+
+        actual_installed = int(len(installed))
+        if reported_installed != actual_installed:
+            raise ValueError(
+                f"{scenario_id} reports {reported_installed} ASHP installations "
+                f"but property results contain {actual_installed}"
+            )
+
+        if actual_installed == 0:
+            continue
+
+        ready_before = int(
+            installed["ashp_ready"].fillna(False).astype(bool).sum()
+        )
+        ready_after = int(
+            installed["ashp_ready_after_applied_measures"]
+            .fillna(False)
+            .astype(bool)
+            .sum()
+        )
+        residual_gap = actual_installed - ready_after
+        fabric_applied = int(
+            installed["fabric_inserted_for_hp"]
+            .fillna(False)
+            .astype(bool)
+            .sum()
+        )
+
+        baseline = pd.to_numeric(
+            installed["baseline_energy_kwh"],
+            errors="coerce",
+        )
+        electricity = pd.to_numeric(
+            installed["heat_pump_electricity_kwh"],
+            errors="coerce",
+        )
+
+        zero_baseline = int(baseline.fillna(0).le(0).sum())
+        positive_demand = int(baseline.gt(0).sum())
+        positive_electricity = int(electricity.gt(0).sum())
+        removed = int(
+            installed["heat_pump_removed"]
+            .fillna(False)
+            .astype(bool)
+            .sum()
+        )
+        ready_pct = ready_after / actual_installed * 100
+
+        expected = {
+            "ashp_installed_properties": actual_installed,
+            "ashp_ready_before_installation_properties": ready_before,
+            "ashp_ready_after_applied_measures_properties": ready_after,
+            "ashp_residual_readiness_gap_properties": residual_gap,
+            "ashp_fabric_applied_properties": fabric_applied,
+            "ashp_zero_baseline_energy_properties": zero_baseline,
+            "ashp_positive_demand_properties": positive_demand,
+            "ashp_positive_electricity_properties": positive_electricity,
+            "ashp_removed_properties": removed,
+        }
+
+        for field, recalculated in expected.items():
+            reported = int(
+                pd.to_numeric(
+                    pd.Series([row[field]]),
+                    errors="raise",
+                ).iloc[0]
+            )
+            if reported != recalculated:
+                raise ValueError(
+                    f"{scenario_id} {field}={reported}, "
+                    f"recalculated={recalculated}"
+                )
+
+        reported_pct = float(row["ashp_ready_after_applied_measures_pct"])
+        if not np.isclose(
+            reported_pct,
+            ready_pct,
+            atol=1e-9,
+            rtol=1e-9,
+        ):
+            raise ValueError(
+                f"{scenario_id} readiness percentage={reported_pct}, "
+                f"recalculated={ready_pct}"
+            )
+
+        if ready_after + residual_gap != actual_installed:
+            raise ValueError(
+                f"{scenario_id} readiness categories do not reconcile"
+            )
+
+        if zero_baseline + positive_demand != actual_installed:
+            raise ValueError(
+                f"{scenario_id} baseline-demand categories do not reconcile"
+            )
+
+        if positive_electricity > positive_demand:
+            raise ValueError(
+                f"{scenario_id} has more positive-electricity properties "
+                f"than positive-demand properties"
+            )
+
+        result[str(scenario_id)] = {
+            "ashp_installed": actual_installed,
+            "ready_before": ready_before,
+            "ready_after": ready_after,
+            "residual_gap": residual_gap,
+            "ready_after_pct": ready_pct,
+            "zero_baseline": zero_baseline,
+            "positive_demand": positive_demand,
+            "positive_electricity": positive_electricity,
+            "removed": removed,
+        }
+
+    if not result:
+        raise ValueError("no ASHP deployment scenarios were checked")
+
+    return result
+
+
+def _validate_tenure_category_reconciliation(
+    tenure: pd.DataFrame,
+    cohort: int,
+) -> dict[str, Any]:
+    """Verify tenure categories, counts and percentages."""
+    required = {
+        "tenure_group",
+        "property_count",
+        "share_pct",
+    }
+    missing = required.difference(tenure.columns)
+    if missing:
+        raise ValueError(
+            f"missing tenure reconciliation fields: {sorted(missing)}"
+        )
+
+    if tenure["tenure_group"].isna().any():
+        raise ValueError("tenure report contains missing category names")
+
+    if tenure["tenure_group"].duplicated().any():
+        duplicates = tenure.loc[
+            tenure["tenure_group"].duplicated(),
+            "tenure_group",
+        ].tolist()
+        raise ValueError(f"duplicate tenure categories: {duplicates}")
+
+    allowed = {
+        "owner_occupied",
+        "private_rented_sector",
+        "social_affordable",
+        "unknown",
+    }
+    categories = set(tenure["tenure_group"].astype(str))
+    unexpected = categories.difference(allowed)
+    if unexpected:
+        raise ValueError(
+            f"unexpected tenure categories: {sorted(unexpected)}"
+        )
+
+    counts = pd.to_numeric(
+        tenure["property_count"],
+        errors="raise",
+    )
+    shares = pd.to_numeric(
+        tenure["share_pct"],
+        errors="raise",
+    )
+
+    if (counts < 0).any():
+        raise ValueError("tenure report contains negative property counts")
+
+    total_count = int(counts.sum())
+    if total_count != cohort:
+        raise ValueError(
+            f"tenure categories total {total_count}, expected {cohort}"
+        )
+
+    total_share = float(shares.sum())
+    if not np.isclose(
+        total_share,
+        100.0,
+        atol=PERCENTAGE_RECONCILIATION_TOLERANCE_PP,
+        rtol=0,
+    ):
+        raise ValueError(
+            f"tenure shares sum to {total_share}, expected 100"
+        )
+
+    calculated_shares = counts / cohort * 100 if cohort else counts.astype(float)
+    differences = (shares - calculated_shares).abs()
+
+    if (
+        differences
+        > PERCENTAGE_RECONCILIATION_TOLERANCE_PP
+    ).any():
+        bad = tenure.loc[
+            differences
+            > PERCENTAGE_RECONCILIATION_TOLERANCE_PP,
+            ["tenure_group", "property_count", "share_pct"],
+        ]
+        raise ValueError(
+            "tenure shares do not reconcile with counts: "
+            f"{bad.to_dict(orient='records')}"
+        )
+
+    return {
+        "categories": sorted(categories),
+        "property_count": total_count,
+        "share_pct": total_share,
+    }
 def _validate_hybrid(frame: pd.DataFrame, cohort: int | None = None) -> dict[str, int]:
     hybrid = frame[frame["scenario"].eq("hybrid")].copy()
     hybrid["assigned_heat_network"] = hybrid["hybrid_pathway"].eq("heat_network")

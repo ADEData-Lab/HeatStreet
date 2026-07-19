@@ -98,3 +98,8 @@ docs/_templates/
 
 # OS
 Thumbs.db
+data/runs/
+heatstreet_*_review_bundle.zip
+.tmp_existing_stock_check/
+.tmp_sample_window/
+temp_verify_dir/
