@@ -98,3 +98,5 @@ docs/_templates/
 
 # OS
 Thumbs.db
+data/runs/
+heatstreet_*_review_bundle.zip
