@@ -10,7 +10,7 @@ technology deployment is deferred.
 from __future__ import annotations
 
 from collections import Counter
-from typing import Any, Dict, Iterable
+from typing import Any, Dict, Iterable, Mapping, Optional
 
 import numpy as np
 import pandas as pd
@@ -18,6 +18,18 @@ import pandas as pd
 
 COST_RECONCILIATION_ABS_TOLERANCE_GBP = 1.0
 COST_RECONCILIATION_REL_TOLERANCE = 1e-9
+REQUIRED_IMPLEMENTATION_SCENARIOS = {
+    "ashp_implementation",
+    "spatial_implementation",
+}
+REQUIRED_IMPLEMENTATION_CONTRACTS = {
+    "no_unready_ashp_installations",
+    "no_unavailable_heat_network_connections",
+    "exclusive_final_state",
+    "deferred_reason_complete",
+    "deferred_reason_combinations_reconcile",
+    "capital_cost_components_reconcile",
+}
 
 
 def _reason_tokens(values: Iterable[Any]) -> Counter[str]:
@@ -181,3 +193,116 @@ def enrich_implementation_summary(
         enriched_rows.append(clean_row)
 
     return pd.DataFrame(enriched_rows)
+
+
+def build_implementation_qa(
+    properties: pd.DataFrame,
+    summary: pd.DataFrame,
+    authoritative_cohort: int,
+    *,
+    policy: Optional[Mapping[str, Any]] = None,
+) -> Dict[str, Any]:
+    """Build and validate the Route A QA payload used by every execution path."""
+    cohort = int(authoritative_cohort)
+    expected_rows = cohort * len(REQUIRED_IMPLEMENTATION_SCENARIOS)
+    if len(properties) != expected_rows:
+        raise ValueError(
+            f"Implementation property rows total {len(properties)}, expected {expected_rows}"
+        )
+
+    required_property_columns = {
+        "scenario",
+        "implementation_status",
+        "ashp_installed",
+        "heat_network_connected",
+        "heat_network_confirmed_available",
+        "deployment_contract_passed",
+        "deferred_reason",
+        "capital_cost",
+    }
+    missing = required_property_columns.difference(properties.columns)
+    if missing:
+        raise ValueError(f"Implementation QA fields are missing: {sorted(missing)}")
+
+    scenarios = set(properties["scenario"].astype(str).unique())
+    if scenarios != REQUIRED_IMPLEMENTATION_SCENARIOS:
+        raise ValueError(
+            f"Implementation property scenarios are {sorted(scenarios)}, "
+            f"expected {sorted(REQUIRED_IMPLEMENTATION_SCENARIOS)}"
+        )
+
+    installed_unready = properties["ashp_installed"].astype(bool) & ~properties[
+        "deployment_contract_passed"
+    ].astype(bool)
+    unavailable_network = properties["heat_network_connected"].astype(bool) & ~properties[
+        "heat_network_confirmed_available"
+    ].astype(bool)
+    deployed = properties["implementation_status"].eq("deployed")
+    deferred = properties["implementation_status"].eq("deferred")
+    missing_deferred_reason = deferred & properties["deferred_reason"].fillna("").str.strip().eq("")
+
+    contracts = {
+        "no_unready_ashp_installations": not bool(installed_unready.any()),
+        "no_unavailable_heat_network_connections": not bool(unavailable_network.any()),
+        "exclusive_final_state": bool((deployed ^ deferred).all()),
+        "deferred_reason_complete": not bool(missing_deferred_reason.any()),
+        "deferred_reason_combinations_reconcile": True,
+        "capital_cost_components_reconcile": True,
+    }
+
+    scenario_key = "scenario_id" if "scenario_id" in summary.columns else "scenario"
+    if scenario_key not in summary.columns:
+        raise ValueError("Implementation summary lacks a scenario identifier")
+    summary_scenarios = set(summary[scenario_key].astype(str))
+    if summary_scenarios != REQUIRED_IMPLEMENTATION_SCENARIOS:
+        raise ValueError(
+            f"Implementation summary scenarios are {sorted(summary_scenarios)}, "
+            f"expected {sorted(REQUIRED_IMPLEMENTATION_SCENARIOS)}"
+        )
+
+    for row in summary.to_dict("records"):
+        scenario = str(row[scenario_key])
+        total = int(row["total_properties"])
+        deployed_count = int(row["properties_deployed"])
+        deferred_count = int(row["properties_deferred"])
+        technology_count = int(row["ashp_installed_properties"]) + int(
+            row["heat_network_connected_properties"]
+        )
+        if total != cohort:
+            raise ValueError(f"{scenario} total_properties={total}, expected {cohort}")
+        if deployed_count + deferred_count != cohort:
+            raise ValueError(f"{scenario} deployed and deferred counts do not reconcile")
+        if technology_count != deployed_count:
+            raise ValueError(f"{scenario} technology deployments do not reconcile")
+        combinations = row.get("deferred_reason_combination_counts", {})
+        if not isinstance(combinations, dict) or sum(int(v) for v in combinations.values()) != deferred_count:
+            contracts["deferred_reason_combinations_reconcile"] = False
+        total_cost = float(row["capital_cost_total"])
+        components = float(row["capital_cost_deployed_total"]) + float(
+            row["capital_cost_deferred_fabric_total"]
+        )
+        if not np.isclose(
+            total_cost,
+            components,
+            rtol=COST_RECONCILIATION_REL_TOLERANCE,
+            atol=COST_RECONCILIATION_ABS_TOLERANCE_GBP,
+        ):
+            contracts["capital_cost_components_reconcile"] = False
+
+    failed = [name for name in REQUIRED_IMPLEMENTATION_CONTRACTS if not contracts.get(name)]
+    if failed:
+        raise ValueError(f"Route A implementation contracts failed: {sorted(failed)}")
+
+    payload: Dict[str, Any] = {
+        "status": "pass",
+        "authoritative_cohort": cohort,
+        "property_rows": int(len(properties)),
+        "scenarios": summary.to_dict("records"),
+        "contracts": contracts,
+    }
+    if policy is not None:
+        payload["implementation_policy"] = {
+            key: sorted(value) if isinstance(value, (set, frozenset)) else value
+            for key, value in dict(policy).items()
+        }
+    return payload
