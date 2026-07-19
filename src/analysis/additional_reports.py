@@ -387,29 +387,65 @@ class AdditionalReports:
 
     @staticmethod
     def _map_tenure_group(value) -> str:
-        """Map EPC tenure values into report tenure groups."""
+        """Map raw or canonical EPC tenure values into report groups."""
         if pd.isna(value):
             return 'unknown'
 
-        cleaned = str(value).strip().lower()
-        mapping = {
-            'owner_occupied': 'owner_occupied',
-            'owner occupied': 'owner_occupied',
-            'owner-occupied': 'owner_occupied',
-            'private_rented': 'private_rented_sector',
-            'private_rented_sector': 'private_rented_sector',
-            'rental (private)': 'private_rented_sector',
-            'private rented': 'private_rented_sector',
-            'social': 'social_affordable',
-            'social_affordable': 'social_affordable',
-            'rental (social)': 'social_affordable',
-            'social rented': 'social_affordable',
-            'unknown': 'unknown',
-            'not defined': 'unknown',
-            '': 'unknown',
-        }
-        return mapping.get(cleaned, 'unknown')
+        cleaned = str(value).strip().casefold()
 
+        if not cleaned or cleaned in {
+            'unknown',
+            'not defined',
+            'not recorded',
+            'n/a',
+            'na',
+            'none',
+        }:
+            return 'unknown'
+
+        owner_values = {
+            'owner_occupied',
+            'owner occupied',
+            'owner-occupied',
+            'owner occupier',
+            'owner-occupier',
+            'owned',
+        }
+
+        if cleaned in owner_values or 'owner' in cleaned:
+            return 'owner_occupied'
+
+        social_markers = (
+            'social',
+            'council',
+            'housing association',
+            'local authority',
+            'registered social landlord',
+            'rsl',
+            'rental (social)',
+            'rented (social)',
+        )
+
+        if any(marker in cleaned for marker in social_markers):
+            return 'social_affordable'
+
+        private_markers = (
+            'private rent',
+            'private rented',
+            'rental (private)',
+            'rented (private)',
+            'rented privately',
+            'private_rented',
+            'private_rented_sector',
+        )
+
+        if any(marker in cleaned for marker in private_markers):
+            return 'private_rented_sector'
+
+        if 'rent' in cleaned or 'rental' in cleaned:
+            return 'private_rented_sector'
+
+        return 'unknown'
     def generate_tenure_segmentation(
         self,
         df: pd.DataFrame,
@@ -432,8 +468,20 @@ class AdditionalReports:
         logger.info("Generating tenure segmentation analysis...")
 
         total_properties = len(df)
-        tenure_col = self._first_available_column(df, ['tenure', 'TENURE'])
-        sap_col = self._first_available_column(df, ['CURRENT_ENERGY_EFFICIENCY'])
+
+        if 'TENURE' in df.columns:
+            tenure_source = df['TENURE']
+        elif 'tenure' in df.columns:
+            tenure_source = df['tenure']
+        else:
+            raise KeyError(
+                "Neither TENURE nor tenure is available for tenure reporting"
+            )
+
+        sap_col = self._first_available_column(
+            df,
+            ['CURRENT_ENERGY_EFFICIENCY'],
+        )
         energy_col = self._first_available_column(
             df,
             ['energy_kwh_per_m2_year', 'ENERGY_CONSUMPTION_CURRENT']
@@ -442,13 +490,16 @@ class AdditionalReports:
         heating_col = self._first_available_column(df, ['heating_system_type'])
 
         tenure_df = df.copy()
-        tenure_df['tenure_group'] = tenure_df[tenure_col].apply(self._map_tenure_group)
+        tenure_df['tenure_source_value'] = tenure_source
+        tenure_df['tenure_group'] = tenure_source.apply(
+            self._map_tenure_group
+        )
         tenure_df[wall_col] = tenure_df[wall_col].fillna(False).astype(bool)
         tenure_df[heating_col] = tenure_df[heating_col].fillna('Unknown')
 
         grouped = tenure_df.groupby('tenure_group', dropna=False)
         summary = grouped.agg(
-            property_count=(tenure_col, 'size'),
+            property_count=('tenure_group', 'size'),
             mean_sap_score=(sap_col, 'mean'),
             mean_energy_intensity_kwh_m2_year=(energy_col, 'mean'),
             wall_insulation_rate_pct=(wall_col, lambda s: s.mean() * 100),

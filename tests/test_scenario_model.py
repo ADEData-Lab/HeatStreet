@@ -256,3 +256,112 @@ def test_subsidy_sensitivity_includes_configured_50_percent_narrative(scenario_m
     assert "uptake" in line
     assert "public spend" in line
     assert "abatement cost" in line
+def test_full_deployment_heat_pump_is_not_removed(
+    scenario_modeler_factory,
+):
+    modeler = scenario_modeler_factory()
+
+    property_data = {
+        'CERTIFICATE_NUMBER': 'NOT_READY',
+        'TOTAL_FLOOR_AREA': 80,
+        'ENERGY_CONSUMPTION_CURRENT': 250,
+        'CURRENT_ENERGY_RATING': 'E',
+        'CURRENT_ENERGY_EFFICIENCY': 45,
+        'wall_type': 'solid_brick',
+        'glazing_type': 'single',
+        'ashp_ready': False,
+        'ashp_projected_ready': False,
+        'hn_ready': False,
+    }
+
+    measures = [
+        'loft_insulation_topup',
+        'wall_insulation',
+        'double_glazing',
+        'ashp_installation',
+        'emitter_upgrades',
+    ]
+
+    plan, _, removed_hp, pathway, removed = (
+        modeler._build_property_measures(
+            measures,
+            property_data,
+        )
+    )
+
+    assert 'ashp_installation' in plan
+    assert 'emitter_upgrades' in plan
+    assert removed_hp is False
+    assert removed == []
+    assert pathway is None
+
+
+def test_minimum_fabric_ashp_retains_terminal_technology(
+    scenario_modeler_factory,
+):
+    modeler = scenario_modeler_factory()
+
+    property_data = {
+        'CERTIFICATE_NUMBER': 'MINIMUM_FABRIC',
+        'TOTAL_FLOOR_AREA': 80,
+        'ENERGY_CONSUMPTION_CURRENT': 250,
+        'CURRENT_ENERGY_RATING': 'E',
+        'CURRENT_ENERGY_EFFICIENCY': 45,
+        'wall_type': 'solid_brick',
+        'glazing_type': 'single',
+        'ashp_ready': False,
+        'ashp_projected_ready': False,
+        'hn_ready': False,
+    }
+
+    plan, _, removed_hp, _, removed = (
+        modeler._build_property_measures(
+            [
+                'loft_insulation_topup',
+                'ashp_installation',
+                'emitter_upgrades',
+            ],
+            property_data,
+        )
+    )
+
+    assert 'ashp_installation' in plan
+    assert 'emitter_upgrades' in plan
+    assert removed_hp is False
+    assert removed == []
+
+
+def test_hybrid_ashp_assignment_includes_ashp(
+    scenario_modeler_factory,
+):
+    modeler = scenario_modeler_factory()
+
+    property_data = {
+        'CERTIFICATE_NUMBER': 'HYBRID_ASHP',
+        'TOTAL_FLOOR_AREA': 80,
+        'ENERGY_CONSUMPTION_CURRENT': 250,
+        'CURRENT_ENERGY_RATING': 'E',
+        'CURRENT_ENERGY_EFFICIENCY': 45,
+        'wall_type': 'solid_brick',
+        'glazing_type': 'single',
+        'ashp_ready': False,
+        'ashp_projected_ready': False,
+        'hn_ready': False,
+    }
+
+    plan, _, removed_hp, pathway, _ = (
+        modeler._build_property_measures(
+            [
+                'fabric_improvements',
+                'heat_network_where_available',
+                'ashp_elsewhere',
+            ],
+            property_data,
+        )
+    )
+
+    assert pathway == 'ashp'
+    assert 'ashp_installation' in plan
+    assert 'emitter_upgrades' in plan
+    assert 'district_heating_connection' not in plan
+    assert removed_hp is False

@@ -1374,25 +1374,101 @@ class OneStopReportGenerator:
                         usage=f"Scenario {scenario_label} EPC shift",
                     ))
 
-            # ASHP readiness (if not baseline)
-            if not is_baseline:
+            # ASHP deployment and readiness after the actual scenario measures
+            ashp_installed_value = row.get(
+                "ashp_installed_properties",
+                0,
+            )
+
+            ashp_installed_count = (
+                0
+                if ashp_installed_value is None
+                or pd.isna(ashp_installed_value)
+                else int(ashp_installed_value)
+            )
+
+            if not is_baseline and ashp_installed_count > 0:
                 ashp_fields = {
-                    "ashp_ready_properties": "ASHP-ready properties",
-                    "ashp_fabric_required_properties": "ASHP fabric required",
-                    "ashp_not_ready_properties": "Currently unsuitable for a standard ASHP",
+                    "ashp_installed_properties": (
+                        "Properties receiving an ASHP",
+                        (
+                            "Number of properties with an ASHP included "
+                            "in the modelled scenario."
+                        ),
+                        "Properties assigned an ASHP",
+                    ),
+                    "ashp_ready_before_installation_properties": (
+                        "ASHP properties ready before scenario measures",
+                        (
+                            "Properties receiving an ASHP that met the "
+                            "configured readiness test before the scenario "
+                            "measures were applied."
+                        ),
+                        "Properties assigned an ASHP",
+                    ),
+                    "ashp_ready_after_applied_measures_properties": (
+                        "ASHP properties ready after applied measures",
+                        (
+                            "Properties receiving an ASHP that meet the "
+                            "configured heat-demand threshold after the "
+                            "actual scenario measures."
+                        ),
+                        "Properties assigned an ASHP",
+                    ),
+                    "ashp_residual_readiness_gap_properties": (
+                        "ASHP properties retaining a readiness gap",
+                        (
+                            "Properties receiving an ASHP that remain above "
+                            "the configured heat-demand threshold after the "
+                            "actual scenario measures."
+                        ),
+                        "Properties assigned an ASHP",
+                    ),
+                    "ashp_ready_after_applied_measures_pct": (
+                        "ASHP readiness after applied measures (%)",
+                        (
+                            "Percentage of properties receiving an ASHP that "
+                            "meet the configured threshold after the actual "
+                            "scenario measures."
+                        ),
+                        "Properties assigned an ASHP",
+                    ),
+                    "ashp_zero_baseline_energy_properties": (
+                        "ASHP properties with zero baseline energy",
+                        (
+                            "Properties receiving an ASHP for which the "
+                            "modelled baseline energy value is zero."
+                        ),
+                        "Properties assigned an ASHP",
+                    ),
                 }
-                for field, label in ashp_fields.items():
+
+                for field, (
+                    label,
+                    definition,
+                    denominator,
+                ) in ashp_fields.items():
                     value = row.get(field)
-                    if value is not None and not (isinstance(value, float) and pd.isna(value)):
-                        datapoints.append(AnnotatedDatapoint(
-                            name=f"{label} ({scenario_label})",
-                            key=f"{field}_{scenario_suffix}",
-                            value=value,
-                            definition=f"{label} (count).",
-                            denominator="All properties in scenario",
-                            source=f"data/outputs/scenario_results_summary.csv -> {field}",
-                            usage=f"Scenario {scenario_label} HP readiness",
-                        ))
+
+                    if value is not None and not pd.isna(value):
+                        datapoints.append(
+                            AnnotatedDatapoint(
+                                name=f"{label} ({scenario_label})",
+                                key=f"{field}_{scenario_suffix}",
+                                value=value,
+                                definition=definition,
+                                denominator=denominator,
+                                source=(
+                                    "data/outputs/"
+                                    "scenario_results_summary.csv"
+                                    f" -> {field}"
+                                ),
+                                usage=(
+                                    f"Scenario {scenario_label} "
+                                    "ASHP deployment and readiness"
+                                ),
+                            )
+                        )
 
             # Hybrid allocation (hybrid scenarios only)
             if is_hybrid:

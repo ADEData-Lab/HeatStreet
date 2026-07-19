@@ -999,36 +999,91 @@ class EPCDataValidator:
 
     def _standardize_tenure(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Standardize tenure field.
-
-        Creates:
-        - tenure: owner_occupied, private_rented, social, unknown
+        Standardize tenure into owner_occupied, private_rented, social,
+        or unknown.
         """
         df['tenure'] = 'unknown'
 
-        # Check TENURE column (EPC API field)
-        if 'TENURE' in df.columns:
-            tenure_raw = df['TENURE'].fillna('').astype(str).str.lower()
+        if 'TENURE' not in df.columns:
+            logger.warning(
+                "TENURE column not found; all tenure values remain unknown"
+            )
+            return df
 
-            # Owner-occupied
-            owner = tenure_raw.str.contains('owner|owned|freeholder', na=False)
-            df.loc[owner, 'tenure'] = 'owner_occupied'
+        tenure_raw = (
+            df['TENURE']
+            .astype('string')
+            .fillna('')
+            .str.strip()
+            .str.casefold()
+        )
 
-            # Private rented
-            private_rent = tenure_raw.str.contains('private.*rent|rental.*private|rented.*private', na=False)
-            df.loc[private_rent, 'tenure'] = 'private_rented'
+        owner_mask = tenure_raw.str.contains(
+            r'owner|owned|freehold',
+            regex=True,
+            na=False,
+        )
 
-            # Social housing
-            social = tenure_raw.str.contains('social|council|housing.*assoc|ha|local.*authority', na=False)
-            df.loc[social, 'tenure'] = 'social'
+        social_mask = tenure_raw.str.contains(
+            (
+                r'social|council|housing association|'
+                r'local authority|registered social landlord|'
+                r'\brsl\b|rented \(social\)|rental \(social\)'
+            ),
+            regex=True,
+            na=False,
+        )
 
-            # Generic rental (classify as private if not social)
-            generic_rental = tenure_raw.str.contains('rent', na=False) & (df['tenure'] == 'unknown')
-            df.loc[generic_rental, 'tenure'] = 'private_rented'
+        private_mask = tenure_raw.str.contains(
+            (
+                r'private.*rent|rent.*private|rental.*private|'
+                r'rented privately|rented \(private\)|'
+                r'rental \(private\)'
+            ),
+            regex=True,
+            na=False,
+        )
 
-        # Log summary
-        tenure_counts = df['tenure'].value_counts()
-        logger.info(f"Tenure breakdown: {tenure_counts.to_dict()}")
+        generic_rental_mask = (
+            tenure_raw.str.contains(
+                r'rent|rental',
+                regex=True,
+                na=False,
+            )
+            & ~social_mask
+        )
+
+        df.loc[owner_mask, 'tenure'] = 'owner_occupied'
+        df.loc[social_mask, 'tenure'] = 'social'
+        df.loc[
+            private_mask | generic_rental_mask,
+            'tenure',
+        ] = 'private_rented'
+
+        tenure_counts = df['tenure'].value_counts(dropna=False)
+        logger.info(
+            f"Canonical tenure breakdown: {tenure_counts.to_dict()}"
+        )
+
+        raw_counts = (
+            df['TENURE']
+            .fillna('<MISSING>')
+            .astype(str)
+            .value_counts(dropna=False)
+        )
+        logger.info(
+            f"Raw TENURE values: {raw_counts.to_dict()}"
+        )
+
+        tenure_crosstab = pd.crosstab(
+            df['TENURE'].fillna('<MISSING>').astype(str),
+            df['tenure'].astype(str),
+            dropna=False,
+        )
+        logger.info(
+            "Raw-to-canonical tenure mapping:\n{}",
+            tenure_crosstab.to_string(),
+        )
 
         return df
 

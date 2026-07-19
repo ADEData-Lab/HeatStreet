@@ -1442,10 +1442,42 @@ class ReportGenerator:
                 # EPC band metrics
                 'Band C+ Before (%)': band_summary.get('band_c_or_better_before_pct', 0),
                 'Band C+ After (%)': band_summary.get('band_c_or_better_after_pct', 0),
-                # HP readiness
-                'ASHP Ready Properties': results.get('ashp_ready_properties', 0),
-                'ASHP Fabric Applied': results.get('ashp_fabric_applied_properties', 0),
-                'ASHP Not Eligible': results.get('ashp_not_ready_properties', 0),
+                # ASHP deployment and post-measure readiness
+                'ASHP Installed Properties': results.get(
+                    'ashp_installed_properties',
+                    0,
+                ),
+                'ASHP Ready Before Measures': results.get(
+                    'ashp_ready_before_installation_properties',
+                    0,
+                ),
+                'ASHP Ready After Applied Measures': results.get(
+                    'ashp_ready_after_applied_measures_properties',
+                    0,
+                ),
+                'ASHP Residual Readiness Gap': results.get(
+                    'ashp_residual_readiness_gap_properties',
+                    0,
+                ),
+                'ASHP Ready After Measures (%)': results.get(
+                    'ashp_ready_after_applied_measures_pct',
+                ),
+                'ASHP Fabric Applied': results.get(
+                    'ashp_fabric_applied_properties',
+                    0,
+                ),
+                'ASHP Zero Baseline Energy': results.get(
+                    'ashp_zero_baseline_energy_properties',
+                    0,
+                ),
+                'ASHP Positive Demand': results.get(
+                    'ashp_positive_demand_properties',
+                    0,
+                ),
+                'ASHP Positive Electricity': results.get(
+                    'ashp_positive_electricity_properties',
+                    0,
+                ),
                 'HN Ready Properties': results.get('hn_ready_properties', 0),
                 'HN Assigned (Hybrid)': results.get('hn_assigned_properties', 0),
                 'ASHP Assigned (Hybrid)': results.get('ashp_assigned_properties', 0),
