@@ -24,6 +24,7 @@ from rich.table import Table
 
 from config.config import load_config
 from src.modeling.implementation_pathways import ImplementationPathwayModeler
+from src.modeling.implementation_summary import enrich_implementation_summary
 
 
 console = Console()
@@ -100,7 +101,14 @@ def main() -> int:
         config=load_yaml(args.config),
         output_dir=args.output_dir,
     )
-    properties, summary = modeler.run(frame)
+    properties, raw_summary = modeler.run(frame)
+    summary = enrich_implementation_summary(properties, raw_summary)
+
+    # ImplementationPathwayModeler writes its raw aggregation during modeler.run().
+    # Replace it with the publication-safe summary whose cost and reason fields are
+    # explicitly defined and internally reconciled.
+    summary_path = args.output_dir / "implementation_results_summary.csv"
+    summary.to_csv(summary_path, index=False)
 
     table = Table(title="Route A implementation results")
     table.add_column("Scenario")
@@ -130,13 +138,17 @@ def main() -> int:
             "no_unavailable_heat_network_connections": True,
             "exclusive_final_state": True,
             "deferred_reason_complete": True,
+            "deferred_reason_combinations_reconcile": True,
+            "capital_cost_components_reconcile": True,
         },
     }
     qa_path = args.output_dir / "implementation_qa.json"
     qa_path.write_text(json.dumps(qa, indent=2, default=str), encoding="utf-8")
 
-    console.print(f"Property results: [bold]{args.output_dir / 'implementation_results_by_property.parquet'}[/bold]")
-    console.print(f"Summary: [bold]{args.output_dir / 'implementation_results_summary.csv'}[/bold]")
+    console.print(
+        f"Property results: [bold]{args.output_dir / 'implementation_results_by_property.parquet'}[/bold]"
+    )
+    console.print(f"Summary: [bold]{summary_path}[/bold]")
     console.print(f"QA: [bold]{qa_path}[/bold]")
     return 0
 
