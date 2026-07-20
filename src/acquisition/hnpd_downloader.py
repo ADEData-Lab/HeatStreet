@@ -1,16 +1,12 @@
-"""Download, validate, and load Heat Network Planning Database data."""
+"""Validate and load the manually supplied Heat Network Planning Database CSV."""
 
 from __future__ import annotations
 
 import csv
-import ssl
-import subprocess
-import sys
-import urllib.request
+import hashlib
 from collections import Counter
 from pathlib import Path
 from typing import Any, Dict, List, Mapping, Optional, Sequence
-from urllib.parse import urlparse
 
 from loguru import logger
 
@@ -29,13 +25,15 @@ EXTERNAL_DIR = PROJECT_ROOT / "data" / "external"
 
 
 class HNPDDownloader:
-    """Manage the HNPD CSV and expose Tier 1 and Tier 2 scheme points."""
+    """Validate the local HNPD CSV and expose Tier 1 and Tier 2 scheme points.
 
-    HNPD_URL = (
-        "https://assets.publishing.service.gov.uk/media/"
-        "65c9f7b89c5b7f000c951cad/hnpd-january-2024.csv"
-    )
-    DEFAULT_FILENAME = "hnpd-january-2024.csv"
+    The current government publication is downloaded manually because the asset URL
+    and filename change between quarterly releases. HeatStreet deliberately does not
+    download a historic fallback when the configured file is absent.
+    """
+
+    DEFAULT_FILENAME = "heat_networks_procurement_pipeline_Q1_2026.csv"
+    DOWNLOAD_PAGE = "https://www.gov.uk/government/publications/heat-networks-pipelines"
     TIER_1_STATUSES = (
         "Operational",
         "Under Construction",
@@ -48,8 +46,11 @@ class HNPDDownloader:
         "Secretary of State - Granted",
     )
     REQUIRED_COLUMNS = (
+        "Ref ID",
+        "Site Name",
         "Region",
         "Development Status",
+        "Development Status (short)",
         "X-coordinate",
         "Y-coordinate",
     )
@@ -75,12 +76,8 @@ class HNPDDownloader:
             .get("heat_networks", {})
             .get("hnpd", {})
         )
-        self.url = str(hnpd_cfg.get("url") or self.HNPD_URL)
-        self.filename = str(
-            hnpd_cfg.get("filename")
-            or Path(urlparse(self.url).path).name
-            or self.DEFAULT_FILENAME
-        )
+        self.filename = str(hnpd_cfg.get("filename") or self.DEFAULT_FILENAME)
+        self.download_page = str(hnpd_cfg.get("download_page") or self.DOWNLOAD_PAGE)
         self.external_dir = Path(external_dir or EXTERNAL_DIR)
         self.csv_path = self.external_dir / self.filename
         self.default_region_filter = hnpd_cfg.get("region_filter")
@@ -91,7 +88,7 @@ class HNPDDownloader:
             hnpd_cfg.get("tier_2_statuses") or (), self.TIER_2_STATUSES
         )
         self.external_dir.mkdir(parents=True, exist_ok=True)
-        logger.info(f"Initialized HNPD Downloader ({self.csv_path})")
+        logger.info(f"Initialized HNPD loader ({self.csv_path})")
 
     @staticmethod
     def _normalise(value: Any) -> str:
@@ -148,6 +145,14 @@ class HNPDDownloader:
     def _plausible_bng(x: float, y: float) -> bool:
         return 0 <= x <= 700_000 and 0 <= y <= 1_300_000
 
+    def manual_download_instructions(self) -> str:
+        return (
+            "HeatStreet requires the current Heat Networks Planning Database CSV. "
+            f"Download it manually from {self.download_page} and save it as "
+            f"{self.csv_path}. Do not rename a different quarterly release to this "
+            "filename without updating config/config.yaml and validating its schema."
+        )
+
     def _read_rows(self) -> List[Dict[str, Any]]:
         if not self.csv_path.exists():
             return []
@@ -167,7 +172,11 @@ class HNPDDownloader:
 
     def validate_hnpd_file(self) -> Dict[str, Any]:
         if not self.csv_path.exists():
-            return {"valid": False, "reason": f"HNPD CSV not found: {self.csv_path}"}
+            return {
+                "valid": False,
+                "reason": self.manual_download_instructions(),
+                "csv_path": str(self.csv_path),
+            }
         try:
             rows = self._read_rows()
         except Exception as exc:
@@ -187,106 +196,72 @@ class HNPDDownloader:
                 "rows": len(rows),
             }
 
-        coordinates = 0
+        valid_coordinates = 0
+        london_rows = 0
+        london_valid_coordinates = 0
         for row in rows:
+            is_london = self._normalise(self._field(row, "Region")) == "london"
+            if is_london:
+                london_rows += 1
             x = self._coordinate(self._field(row, "X-coordinate"))
             y = self._coordinate(self._field(row, "Y-coordinate"))
             if x is not None and y is not None and self._plausible_bng(x, y):
-                coordinates += 1
-        if coordinates == 0:
+                valid_coordinates += 1
+                if is_london:
+                    london_valid_coordinates += 1
+
+        if valid_coordinates == 0:
             return {
                 "valid": False,
                 "reason": "HNPD CSV contains no valid British National Grid coordinates",
                 "rows": len(rows),
             }
+        if self._normalise(self.default_region_filter) == "london" and london_valid_coordinates == 0:
+            return {
+                "valid": False,
+                "reason": "HNPD CSV contains no valid London rows with British National Grid coordinates",
+                "rows": len(rows),
+            }
+
+        digest = hashlib.sha256(self.csv_path.read_bytes()).hexdigest()
         return {
             "valid": True,
             "reason": "ok",
             "rows": len(rows),
-            "coordinates_available": coordinates,
+            "coordinates_available": valid_coordinates,
+            "london_rows": london_rows,
+            "london_coordinates_available": london_valid_coordinates,
+            "sha256": digest,
+            "size_bytes": self.csv_path.stat().st_size,
+            "filename": self.csv_path.name,
         }
 
     def download_hnpd(self, force_redownload: bool = False) -> bool:
-        if self.csv_path.exists() and not force_redownload:
-            validation = self.validate_hnpd_file()
-            if validation.get("valid"):
-                logger.info(f"HNPD data already downloaded and valid: {self.csv_path}")
-                return True
-            logger.warning(
-                f"Existing HNPD file is invalid and will be replaced: {validation['reason']}"
-            )
-
-        temp_path = self.csv_path.with_suffix(self.csv_path.suffix + ".part")
-        temp_path.unlink(missing_ok=True)
-        logger.info(f"Downloading HNPD from {self.url}")
-        try:
-            try:
-                context = ssl.create_default_context()
-                try:
-                    import certifi  # type: ignore
-
-                    context = ssl.create_default_context(cafile=certifi.where())
-                except Exception:
-                    pass
-                with urllib.request.urlopen(self.url, context=context) as response:
-                    with temp_path.open("wb") as stream:
-                        while chunk := response.read(1024 * 1024):
-                            stream.write(chunk)
-            except Exception as exc:
-                logger.warning(f"Python download failed ({exc}); trying system tools")
-                if not self._system_download(temp_path):
-                    return False
-
-            if not temp_path.exists() or temp_path.stat().st_size == 0:
-                logger.error("HNPD download produced an empty file")
-                return False
-
-            original_path = self.csv_path
-            self.csv_path = temp_path
-            validation = self.validate_hnpd_file()
-            self.csv_path = original_path
-            if not validation.get("valid"):
-                logger.error(f"Downloaded HNPD failed validation: {validation['reason']}")
-                return False
-            temp_path.replace(original_path)
-            logger.info(
-                f"Downloaded and validated {validation['rows']:,} HNPD records, "
-                f"including {validation['coordinates_available']:,} with coordinates"
-            )
+        """Compatibility entry point. HNPD must now be downloaded manually."""
+        validation = self.validate_hnpd_file()
+        if validation.get("valid"):
+            logger.info(f"HNPD file is present and valid: {self.csv_path}")
             return True
-        except Exception as exc:
-            logger.error(f"Error downloading HNPD: {exc}")
-            return False
-        finally:
-            self.csv_path = self.external_dir / self.filename
-            temp_path.unlink(missing_ok=True)
-
-    def _system_download(self, output_path: Path) -> bool:
-        commands = [
-            ["curl", "-L", "--fail", "-o", str(output_path), self.url],
-            ["wget", "--no-check-certificate", "-O", str(output_path), self.url],
-        ]
-        if sys.platform.startswith("win"):
-            commands.append([
-                "powershell", "-NoProfile", "-Command",
-                f"Invoke-WebRequest -Uri '{self.url}' -OutFile '{output_path}'",
-            ])
-        for command in commands:
-            try:
-                result = subprocess.run(command, capture_output=True, text=True)
-            except FileNotFoundError:
-                continue
-            if result.returncode == 0 and output_path.exists() and output_path.stat().st_size:
-                return True
-            logger.debug(result.stderr.strip() or result.stdout.strip())
-        logger.error("HNPD download failed using urllib and available system tools")
+        logger.error(validation["reason"])
         return False
 
-    def load_hnpd_csv(self, region_filter: Optional[str] = None) -> List[Dict[str, Any]]:
+    def download_and_prepare(self, force_redownload: bool = False) -> bool:
+        return self.download_hnpd(force_redownload=force_redownload)
+
+    def require_local_file(self) -> Dict[str, Any]:
         validation = self.validate_hnpd_file()
         if not validation.get("valid"):
-            logger.error(validation["reason"])
-            return []
+            raise FileNotFoundError(validation["reason"])
+        logger.info(
+            f"Validated HNPD input: {validation['rows']:,} rows, "
+            f"{validation['london_rows']:,} London rows, "
+            f"{validation['london_coordinates_available']:,} London coordinate pairs, "
+            f"SHA-256 {validation['sha256']}"
+        )
+        return validation
+
+    def load_hnpd_csv(self, region_filter: Optional[str] = None) -> List[Dict[str, Any]]:
+        self.require_local_file()
         rows = self._read_rows()
         logger.info(f"Loaded HNPD: {len(rows):,} total records")
         if region_filter:
@@ -297,7 +272,7 @@ class HNPDDownloader:
             ]
             logger.info(f"Filtered to {region_filter}: {len(rows):,} records")
             if not rows:
-                logger.error(
+                raise RuntimeError(
                     f"No HNPD rows matched region {region_filter!r}; "
                     f"available regions are {self.get_data_summary().get('regions', [])}"
                 )
@@ -309,23 +284,18 @@ class HNPDDownloader:
         status_filter: Optional[Sequence[str]] = None,
     ) -> Optional["gpd.GeoDataFrame"]:
         if not SPATIAL_AVAILABLE:
-            logger.error("GeoDataFrame conversion requires geopandas")
-            return None
+            raise RuntimeError("GeoDataFrame conversion requires geopandas")
         rows = self.load_hnpd_csv(region_filter=region_filter)
-        if not rows:
-            return None
-
         if status_filter:
             allowed = {self._normalise(value) for value in status_filter}
             available_statuses = Counter(self._status(row).strip() for row in rows)
             rows = [row for row in rows if self._normalise(self._status(row)) in allowed]
             logger.info(f"Filtered to statuses {list(status_filter)}: {len(rows):,} records")
             if not rows:
-                logger.error(
+                raise RuntimeError(
                     "No HNPD rows matched the configured status filter; "
                     f"statuses present after region filtering: {dict(available_statuses)}"
                 )
-                return None
 
         geometries = []
         valid_rows = []
@@ -339,8 +309,7 @@ class HNPDDownloader:
             geometries.append(Point(x, y))
             valid_rows.append(row)
         if not valid_rows:
-            logger.error("Matching HNPD rows contain no valid British National Grid coordinates")
-            return None
+            raise RuntimeError("Matching HNPD rows contain no valid British National Grid coordinates")
 
         gdf = gpd.GeoDataFrame(valid_rows, geometry=geometries, crs="EPSG:27700")
         bounds = tuple(round(value) for value in gdf.total_bounds)
@@ -363,6 +332,7 @@ class HNPDDownloader:
                 "available": False,
                 "message": validation["reason"],
                 "csv_path": str(self.csv_path),
+                "download_page": self.download_page,
                 "validation": validation,
             }
         rows = self._read_rows()
@@ -385,38 +355,17 @@ class HNPDDownloader:
             "coordinate_percentage": validation["coordinates_available"] / len(rows) * 100,
             "regions": sorted(region_names.values(), key=str.casefold),
             "region_count": len(region_names),
-            "region_counts": {
-                region_names[key]: count for key, count in region_counts.items()
-            },
+            "region_counts": {region_names[key]: count for key, count in region_counts.items()},
             "csv_path": str(self.csv_path),
-            "source_url": self.url,
+            "download_page": self.download_page,
             "spatial_analysis_available": SPATIAL_AVAILABLE,
             "validation": validation,
         }
 
-    def download_and_prepare(self, force_redownload: bool = False) -> bool:
-        if not self.download_hnpd(force_redownload=force_redownload):
-            return False
-        summary = self.get_data_summary()
-        if not summary.get("available"):
-            logger.error(summary.get("message", "HNPD input unavailable"))
-            return False
-        logger.info(
-            f"HNPD ready: {summary['total_records']:,} records, "
-            f"{summary['tier_1_networks']:,} Tier 1 sources, "
-            f"{summary['tier_2_networks']:,} Tier 2 sources, "
-            f"{summary['coordinates_available']:,} coordinate pairs"
-        )
-        if summary["tier_1_networks"] + summary["tier_2_networks"] == 0:
-            logger.error("HNPD has no records matching the configured Tier 1 or Tier 2 statuses")
-            return False
-        return True
-
 
 def main() -> None:
     downloader = HNPDDownloader()
-    if not downloader.download_and_prepare():
-        raise SystemExit(1)
+    downloader.require_local_file()
     print(downloader.get_data_summary())
 
 
