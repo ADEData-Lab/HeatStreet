@@ -1,23 +1,27 @@
-# External Data Cache
+# External Data Inputs
 
-This directory stores downloaded external datasets used by HeatStreet.
+This directory stores manually supplied external datasets used by HeatStreet. These files are not committed to Git.
 
-## Active Heat Network Source
+## Heat Networks Planning Database
 
-HeatStreet uses the Heat Network Planning Database (HNPD) as its only external heat-network infrastructure source.
-
-Expected cache file:
+HeatStreet expects the current Q1 2026 Heat Networks Planning Database export at exactly:
 
 ```text
-data/external/hnpd-january-2024.csv
+data/external/heat_networks_procurement_pipeline_Q1_2026.csv
 ```
 
-The pipeline can download this file automatically through `src/acquisition/hnpd_downloader.py`.
+Download the CSV manually from the GOV.UK Heat Networks Pipelines publication page:
 
-## If HNPD Is Missing
+```text
+https://www.gov.uk/government/publications/heat-networks-pipelines
+```
 
-If HNPD cannot be downloaded or read, HeatStreet does not fall back to another external heat-network infrastructure source. Tier 1-2 network-proximity evidence may be unavailable, but Tier 3-5 density-based classification can still run from EPC/property heat-density calculations.
+Place the downloaded file in `data/external` without changing its filename. HeatStreet validates the schema, British National Grid coordinates, London coverage, file size and SHA-256 fingerprint before using it.
 
-## Local Files
+The expected file is the Q1 2026 procurement pipeline CSV. It contains the columns used by HeatStreet, including `Ref ID`, `Site Name`, `Region`, `Development Status`, `Development Status (short)`, `X-coordinate` and `Y-coordinate`.
 
-Do not commit downloaded datasets from this directory unless they are intentionally small fixtures. The `.gitkeep` file keeps the directory present in fresh clones.
+## Missing or invalid file
+
+HeatStreet does not automatically download an older HNPD release and does not substitute density-only classification for missing Tier 1 and Tier 2 evidence. When the file is missing or invalid, the log tells the user which file to download and where to place it.
+
+When a later quarterly release is adopted, update the configured filename and regression expectations rather than renaming the new file to look like Q1 2026.
