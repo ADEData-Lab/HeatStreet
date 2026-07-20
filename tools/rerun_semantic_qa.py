@@ -8,14 +8,18 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from dataclasses import replace
 from pathlib import Path
+
+REPO_ROOT = Path(__file__).resolve().parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 
 from src.utils.run_integrity import ArtifactManifest, RunContext, stamp_artifact
 from src.utils.semantic_qa import require_passing_qa, run_semantic_qa
 
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
 RUNS_DIR = REPO_ROOT / "data" / "runs"
 
 
