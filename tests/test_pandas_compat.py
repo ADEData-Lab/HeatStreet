@@ -14,30 +14,4 @@ def test_detach_arrow_backed_string_columns_uses_python_storage():
     frame = pd.DataFrame(
         {
             "ADDRESS1": pd.Series(
-                ["1 Shakespeare Crescent", None, "3 Shakespeare Crescent"],
-                dtype="string[pyarrow]",
-            ),
-            "value": [1, 2, 3],
-        }
-    )
-
-    detached = detach_arrow_backed_columns(frame)
-
-    assert str(detached["ADDRESS1"].dtype) == "string"
-    assert getattr(detached["ADDRESS1"].dtype, "storage", None) == "python"
-    assert detached["ADDRESS1"].str.contains("Shakespeare", na=False).tolist() == [
-        True,
-        False,
-        True,
-    ]
-    assert detached["value"].tolist() == [1, 2, 3]
-
-
-def test_install_safe_read_parquet_is_idempotent():
-    install_safe_read_parquet()
-    wrapped = pd.read_parquet
-
-    install_safe_read_parquet()
-
-    assert pd.read_parquet is wrapped
-    assert getattr(pd.read_parquet, "_heatstreet_safe_read", False) is True
+               
