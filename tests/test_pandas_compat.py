@@ -41,3 +41,17 @@ def test_install_safe_read_parquet_is_idempotent():
 
     assert pd.read_parquet is wrapped
     assert getattr(pd.read_parquet, "_heatstreet_safe_read", False) is True
+
+
+def test_boolean_series_equals_ignores_backend_dtype_when_values_match():
+    left = pd.Series([True, False, True], dtype=bool)
+    right = pd.Series([True, False, True], dtype="boolean")
+
+    assert left.equals(right) is True
+
+
+def test_boolean_series_equals_still_detects_value_mismatch():
+    left = pd.Series([True, False, True], dtype=bool)
+    right = pd.Series([True, True, True], dtype="boolean")
+
+    assert left.equals(right) is False
