@@ -2510,7 +2510,14 @@
         }
 
         function buildScenarioDataFromOneStop(oneStop) {
-            const rows = oneStop?.sections?.section_6?.tables?.[0]?.data || [];
+            const section = oneStop?.sections?.section_6;
+            const scenarioTable = findSectionTable(oneStop, 'section_6', 'stock-wide scenario')
+                || (section?.tables || []).find(table =>
+                    (table.data || []).some(row =>
+                        row?.scenario_id && Object.prototype.hasOwnProperty.call(row, 'capital_cost_per_property')
+                    )
+                );
+            const rows = scenarioTable?.data || [];
             const shortLabels = {
                 fabric_only: 'Fabric Only',
                 fabric_to_tipping_point: 'Fabric Tipping',
@@ -2524,7 +2531,10 @@
             rows
                 .filter(r => r?.scenario_id && r.scenario_id !== 'baseline')
                 .forEach(r => {
-                    const paybackYears = r.average_payback_years ?? null;
+                    const paybackYears = r.aggregate_simple_payback_years
+                        ?? r.average_payback_years
+                        ?? r.property_simple_payback_mean_years
+                        ?? null;
                     out[r.scenario_id] = {
                         name: r.scenario || r.scenario_id,
                         shortLabel: shortLabels[r.scenario_id] || r.scenario_id,
@@ -2597,7 +2607,7 @@
                 tr.dataset.row = id;
                 if (id === 'hybrid') tr.classList.add('selected');
 
-                tr.innerHTML = `\n                    <td>${s.shortLabel}</td>\n                    <td>${formatGbpCompact(s.capitalCostTotalValue)}</td>\n                    <td>${formatGbp(s.capitalCostPerPropertyValue, 0)}</td>\n                    <td class=\"text-green\">${formatMtFromKg(s.annualCo2ReductionKgValue)}</td>\n                    <td class=\"text-orange\">${formatGbpCompact(s.annualBillSavingsValue)}</td>\n                    <td class=\"text-purple\">${Math.round(Number(s.paybackYearsValue || 0))} yrs</td>\n                `;
+                tr.innerHTML = `\n                    <td>${s.shortLabel}</td>\n                    <td>${formatGbpCompact(s.capitalCostTotalValue)}</td>\n                    <td>${formatGbp(s.capitalCostPerPropertyValue, 0)}</td>\n                    <td class=\"text-green\">${formatMtFromKg(s.annualCo2ReductionKgValue)}</td>\n                    <td class=\"text-orange\">${formatGbpCompact(s.annualBillSavingsValue)}</td>\n                    <td class=\"text-purple\">${formatYears(s.paybackYearsValue)}</td>\n                `;
                 tbody.appendChild(tr);
             });
         }
@@ -2607,14 +2617,21 @@
             const rows = table?.data || [];
             renderTableBody(
                 'hnVsHpTable',
-                rows.map((row) => ({
-                    pathway_name: row.pathway_name || row.pathway_id,
-                    n_homes: row.n_homes,
-                    capex_mean: row.capex_mean,
-                    bill_saving_mean: row.bill_saving_mean,
-                    co2_saving_mean: row.co2_saving_mean,
-                    payback_mean: row.payback_mean,
-                })),
+                rows.map((row) => {
+                    const homes = row.n_homes ?? row.total_properties;
+                    return {
+                        pathway_name: row.pathway_name || row.scenario || row.pathway_id || row.scenario_id,
+                        n_homes: homes,
+                        capex_mean: row.capex_mean ?? row.capital_cost_per_property,
+                        bill_saving_mean: row.bill_saving_mean
+                            ?? (homes ? Number(row.annual_bill_savings) / Number(homes) : null),
+                        co2_saving_mean: row.co2_saving_mean
+                            ?? (homes ? Number(row.annual_co2_reduction_kg) / Number(homes) : null),
+                        payback_mean: row.payback_mean
+                            ?? row.property_simple_payback_mean_years
+                            ?? row.aggregate_simple_payback_years,
+                    };
+                }),
                 [
                     { key: 'pathway_name' },
                     { key: 'n_homes', kind: 'int' },
@@ -2813,6 +2830,9 @@
             document.getElementById('hpTier5Count').textContent = formatInt(sec4.tier_5_count) + ' properties';
 
             scenarioData = buildScenarioDataFromOneStop(oneStop);
+            document.querySelectorAll('.scenario-btn').forEach(btn => {
+                btn.hidden = !scenarioData[btn.dataset.scenario];
+            });
             renderScenarioTable();
             renderHnVsHpComparisonTable(oneStop);
             renderHeatNetworkTierTable(oneStop);
