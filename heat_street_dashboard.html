@@ -617,7 +617,7 @@
         /* Glazing Grid */
         .glazing-grid {
             display: grid;
-            grid-template-columns: repeat(4, 1fr);
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
             gap: 16px;
         }
 
@@ -975,26 +975,9 @@
                     <h2 class="card-title">Glazing Status</h2>
                     <p class="card-subtitle">Window types across the stock</p>
                 </div>
-                <div class="glazing-grid">
+                <div class="glazing-grid" id="glazingGrid">
                     <div class="glazing-card">
-                        <p class="glazing-label">Double Glazing</p>
-                        <p class="glazing-value" id="glazingDoublePct">—</p>
-                        <p class="glazing-count" id="glazingDoubleCount">—</p>
-                    </div>
-                    <div class="glazing-card">
-                        <p class="glazing-label">Unknown</p>
-                        <p class="glazing-value" id="glazingUnknownPct">—</p>
-                        <p class="glazing-count" id="glazingUnknownCount">—</p>
-                    </div>
-                    <div class="glazing-card">
-                        <p class="glazing-label">Single Glazing</p>
-                        <p class="glazing-value" id="glazingSinglePct">—</p>
-                        <p class="glazing-count" id="glazingSingleCount">—</p>
-                    </div>
-                    <div class="glazing-card">
-                        <p class="glazing-label">Triple Glazing</p>
-                        <p class="glazing-value" id="glazingTriplePct">—</p>
-                        <p class="glazing-count" id="glazingTripleCount">—</p>
+                        <p class="glazing-label">Loading glazing data…</p>
                     </div>
                 </div>
             </div>
@@ -1215,6 +1198,7 @@
                 <div class="chart-container chart-container-lg" style="margin-top: 14px;">
                     <canvas id="tippingPointChart"></canvas>
                 </div>
+                <div class="narrative" id="tippingPointFallback" style="display:none; margin-top: 12px;"></div>
             </div>
 
             <div class="card">
@@ -1615,6 +1599,42 @@
             cornerRadius: 8
         };
 
+        const BOROUGH_NAME_BY_CODE = {
+            E09000001: 'City of London',
+            E09000002: 'Barking and Dagenham',
+            E09000003: 'Barnet',
+            E09000004: 'Bexley',
+            E09000005: 'Brent',
+            E09000006: 'Bromley',
+            E09000007: 'Camden',
+            E09000008: 'Croydon',
+            E09000009: 'Ealing',
+            E09000010: 'Enfield',
+            E09000011: 'Greenwich',
+            E09000012: 'Hackney',
+            E09000013: 'Hammersmith and Fulham',
+            E09000014: 'Haringey',
+            E09000015: 'Harrow',
+            E09000016: 'Havering',
+            E09000017: 'Hillingdon',
+            E09000018: 'Hounslow',
+            E09000019: 'Islington',
+            E09000020: 'Kensington and Chelsea',
+            E09000021: 'Kingston upon Thames',
+            E09000022: 'Lambeth',
+            E09000023: 'Lewisham',
+            E09000024: 'Merton',
+            E09000025: 'Newham',
+            E09000026: 'Redbridge',
+            E09000027: 'Richmond upon Thames',
+            E09000028: 'Southwark',
+            E09000029: 'Sutton',
+            E09000030: 'Tower Hamlets',
+            E09000031: 'Waltham Forest',
+            E09000032: 'Wandsworth',
+            E09000033: 'Westminster'
+        };
+
         function setDataStatus({ message, error = false } = {}) {
             const wrapper = document.getElementById('dataLoadStatus');
             const msg = document.getElementById('dataLoadMessage');
@@ -1666,6 +1686,74 @@
             const out = {};
             (section?.datapoints || []).forEach(dp => { out[dp.key] = dp.value; });
             return out;
+        }
+
+        function normaliseCategoryKey(value) {
+            return String(value ?? '').trim().toLowerCase();
+        }
+
+        function formatCategoryLabel(value) {
+            return String(value ?? '')
+                .replace(/_/g, ' ')
+                .replace(/\b\w/g, char => char.toUpperCase());
+        }
+
+        function orderedDistribution(distribution, preferred = []) {
+            const values = new Map();
+            Object.entries(distribution || {}).forEach(([rawKey, rawValue]) => {
+                const key = normaliseCategoryKey(rawKey);
+                const numericValue = Number(rawValue);
+                if (!key || !Number.isFinite(numericValue)) return;
+                const existing = values.get(key);
+                values.set(key, {
+                    key,
+                    label: existing?.label || formatCategoryLabel(rawKey),
+                    value: (existing?.value || 0) + numericValue
+                });
+            });
+
+            const ordered = [];
+            preferred.forEach(({ key: preferredKey, label }) => {
+                const key = normaliseCategoryKey(preferredKey);
+                const entry = values.get(key);
+                if (!entry) return;
+                ordered.push({ ...entry, label: label || entry.label });
+                values.delete(key);
+            });
+
+            ordered.push(...[...values.values()].sort((a, b) => a.label.localeCompare(b.label)));
+            return ordered;
+        }
+
+        function categoryColours(count, offset = 0) {
+            const palette = ['#3b82f6', '#8b5cf6', '#06b6d4', '#f97316', '#ef4444', '#22c55e', '#64748b', '#eab308', '#14b8a6', '#ec4899'];
+            return Array.from({ length: count }, (_, index) => palette[(index + offset) % palette.length]);
+        }
+
+        function renderGlazingCards(distribution) {
+            const grid = document.getElementById('glazingGrid');
+            if (!grid) return;
+            const entries = orderedDistribution(distribution, [
+                { key: 'double', label: 'Double Glazing' },
+                { key: 'single', label: 'Single Glazing' },
+                { key: 'mixed', label: 'Mixed Glazing' },
+                { key: 'triple', label: 'Triple Glazing' },
+                { key: 'unknown', label: 'Unknown' }
+            ]);
+            const total = entries.reduce((sum, entry) => sum + entry.value, 0);
+
+            if (!entries.length || !total) {
+                grid.innerHTML = '<div class="glazing-card"><p class="glazing-label">Glazing data unavailable</p></div>';
+                return;
+            }
+
+            grid.innerHTML = entries.map(entry => `
+                <div class="glazing-card" data-glazing-category="${escapeHtml(entry.key)}">
+                    <p class="glazing-label">${escapeHtml(entry.label)}</p>
+                    <p class="glazing-value">${formatPercent(100 * entry.value / total, 1)}</p>
+                    <p class="glazing-count">${formatInt(entry.value)} properties</p>
+                </div>
+            `).join('');
         }
 
         function escapeHtml(value) {
@@ -1746,7 +1834,9 @@
             destroyCharts();
 
             const {
+                epcLabels,
                 epcCounts,
+                epcColors,
                 scenarioLabels,
                 scenarioCostK,
                 scenarioCo2Mt,
@@ -1763,10 +1853,10 @@
             STATE.charts.epcChart = new Chart(document.getElementById('epcChart'), {
                 type: 'bar',
                 data: {
-                    labels: ['A', 'B', 'C', 'D', 'E', 'F', 'G'],
+                    labels: epcLabels,
                     datasets: [{
                         data: epcCounts,
-                        backgroundColor: ['#1a5f2a', '#2d8f3e', '#5cb85c', '#f0ad4e', '#d9534f', '#a94442', '#7a2a2a'],
+                        backgroundColor: epcColors,
                         borderRadius: 6,
                         borderSkipped: false
                     }]
@@ -1850,7 +1940,7 @@
                     labels: wallLabels,
                     datasets: [{
                         data: wallCounts,
-                        backgroundColor: ['#3b82f6', '#8b5cf6', '#06b6d4', '#f97316', '#ef4444', '#22c55e'],
+                        backgroundColor: categoryColours(wallCounts.length),
                         borderWidth: 0,
                         hoverOffset: 8
                     }]
@@ -1885,7 +1975,7 @@
                     labels: heatingLabels,
                     datasets: [{
                         data: heatingCounts,
-                        backgroundColor: ['#4a90d9', '#f5a623', '#9b9b9b', '#7ed321', '#50e3c2'],
+                        backgroundColor: categoryColours(heatingCounts.length, 2),
                         borderRadius: 6
                     }]
                 },
@@ -1984,11 +2074,22 @@
 
         function renderTippingPointChart(oneStop) {
             const canvas = document.getElementById('tippingPointChart');
-            if (!canvas) return;
+            const fallback = document.getElementById('tippingPointFallback');
+            if (!canvas || !fallback) return;
 
             const rows = oneStop?.sections?.section_8?.tables?.[0]?.data || [];
             const steps = rows.filter(r => Number(r?.step || 0) > 0);
-            if (!steps.length) return;
+            if (!steps.length) {
+                const sectionStatus = getDatapointMap(oneStop?.sections?.section_8).tipping_point_analysis_status;
+                canvas.style.display = 'none';
+                fallback.style.display = 'block';
+                fallback.innerHTML = `<p><strong>Tipping-point analysis unavailable.</strong> ${escapeHtml(sectionStatus || 'No curve data was included in this run.')}</p>`;
+                return;
+            }
+
+            canvas.style.display = 'block';
+            fallback.style.display = 'none';
+            fallback.innerHTML = '';
 
             const labels = steps.map(r => r.measure_name || r.measure_id || `Step ${r.step}`);
             const marginalCapex = steps.map(r => Number(r.marginal_capex || 0));
@@ -2241,7 +2342,12 @@
                     scenarioLabel: String(r.scenario_label ?? r.scenarioLabel ?? r.scenario ?? r.scenario_id ?? 'Scenario'),
                     subsidyPct: toNum(r.subsidy_percentage ?? r.subsidy_pct ?? r.subsidy_level_pct),
                     uptakeRate: toNum(r.estimated_uptake_rate ?? r.uptake_rate ?? r.uptake_rate_pct),
-                    paybackYears: toNum(r.payback_years ?? r.payback ?? r.payback_period_years),
+                    paybackYears: toNum(
+                        r.aggregate_simple_payback_years
+                        ?? r.payback_years
+                        ?? r.payback
+                        ?? r.payback_period_years
+                    ),
                     propertiesUpgraded: toNum(r.properties_upgraded ?? r.upgraded_properties),
                     publicSpend: toNum(r.public_expenditure_total ?? r.total_public_expenditure),
                     carbonCost: toNum(r.carbon_abatement_cost_per_tonne ?? r.carbon_abatement_cost),
@@ -2506,7 +2612,14 @@
         }
 
         function buildScenarioDataFromOneStop(oneStop) {
-            const rows = oneStop?.sections?.section_6?.tables?.[0]?.data || [];
+            const section = oneStop?.sections?.section_6;
+            const scenarioTable = findSectionTable(oneStop, 'section_6', 'stock-wide scenario')
+                || (section?.tables || []).find(table =>
+                    (table.data || []).some(row =>
+                        row?.scenario_id && Object.prototype.hasOwnProperty.call(row, 'capital_cost_per_property')
+                    )
+                );
+            const rows = scenarioTable?.data || [];
             const shortLabels = {
                 fabric_only: 'Fabric Only',
                 fabric_to_tipping_point: 'Fabric Tipping',
@@ -2520,7 +2633,10 @@
             rows
                 .filter(r => r?.scenario_id && r.scenario_id !== 'baseline')
                 .forEach(r => {
-                    const paybackYears = r.average_payback_years ?? null;
+                    const paybackYears = r.aggregate_simple_payback_years
+                        ?? r.average_payback_years
+                        ?? r.property_simple_payback_mean_years
+                        ?? null;
                     out[r.scenario_id] = {
                         name: r.scenario || r.scenario_id,
                         shortLabel: shortLabels[r.scenario_id] || r.scenario_id,
@@ -2593,7 +2709,7 @@
                 tr.dataset.row = id;
                 if (id === 'hybrid') tr.classList.add('selected');
 
-                tr.innerHTML = `\n                    <td>${s.shortLabel}</td>\n                    <td>${formatGbpCompact(s.capitalCostTotalValue)}</td>\n                    <td>${formatGbp(s.capitalCostPerPropertyValue, 0)}</td>\n                    <td class=\"text-green\">${formatMtFromKg(s.annualCo2ReductionKgValue)}</td>\n                    <td class=\"text-orange\">${formatGbpCompact(s.annualBillSavingsValue)}</td>\n                    <td class=\"text-purple\">${Math.round(Number(s.paybackYearsValue || 0))} yrs</td>\n                `;
+                tr.innerHTML = `\n                    <td>${s.shortLabel}</td>\n                    <td>${formatGbpCompact(s.capitalCostTotalValue)}</td>\n                    <td>${formatGbp(s.capitalCostPerPropertyValue, 0)}</td>\n                    <td class=\"text-green\">${formatMtFromKg(s.annualCo2ReductionKgValue)}</td>\n                    <td class=\"text-orange\">${formatGbpCompact(s.annualBillSavingsValue)}</td>\n                    <td class=\"text-purple\">${formatYears(s.paybackYearsValue)}</td>\n                `;
                 tbody.appendChild(tr);
             });
         }
@@ -2603,14 +2719,21 @@
             const rows = table?.data || [];
             renderTableBody(
                 'hnVsHpTable',
-                rows.map((row) => ({
-                    pathway_name: row.pathway_name || row.pathway_id,
-                    n_homes: row.n_homes,
-                    capex_mean: row.capex_mean,
-                    bill_saving_mean: row.bill_saving_mean,
-                    co2_saving_mean: row.co2_saving_mean,
-                    payback_mean: row.payback_mean,
-                })),
+                rows.map((row) => {
+                    const homes = row.n_homes ?? row.total_properties;
+                    return {
+                        pathway_name: row.pathway_name || row.scenario || row.pathway_id || row.scenario_id,
+                        n_homes: homes,
+                        capex_mean: row.capex_mean ?? row.capital_cost_per_property,
+                        bill_saving_mean: row.bill_saving_mean
+                            ?? (homes ? Number(row.annual_bill_savings) / Number(homes) : null),
+                        co2_saving_mean: row.co2_saving_mean
+                            ?? (homes ? Number(row.annual_co2_reduction_kg) / Number(homes) : null),
+                        payback_mean: row.payback_mean
+                            ?? row.property_simple_payback_mean_years
+                            ?? row.aggregate_simple_payback_years,
+                    };
+                }),
                 [
                     { key: 'pathway_name' },
                     { key: 'n_homes', kind: 'int' },
@@ -2633,12 +2756,19 @@
 
             renderTableBody(
                 'boroughBreakdownTable',
-                boroughRows.map((row) => ({
-                    borough: row.LOCAL_AUTHORITY_NAME || row.LOCAL_AUTHORITY || row.index,
-                    property_count: row.property_count,
-                    mean_epc_rating: row.mean_epc_rating,
-                    mean_energy_kwh_m2_year: row.mean_energy_kwh_m2_year,
-                })),
+                boroughRows.map((row) => {
+                    const code = row.LOCAL_AUTHORITY || row.code;
+                    return {
+                        borough: row.LOCAL_AUTHORITY_NAME
+                            || row.LOCAL_AUTHORITY_LABEL
+                            || BOROUGH_NAME_BY_CODE[code]
+                            || code
+                            || row.index,
+                        property_count: row.property_count,
+                        mean_epc_rating: row.mean_epc_rating,
+                        mean_energy_kwh_m2_year: row.mean_energy_kwh_m2_year,
+                    };
+                }),
                 [
                     { key: 'borough' },
                     { key: 'property_count', kind: 'int' },
@@ -2767,9 +2897,17 @@
             document.getElementById('footerPropertiesCount').textContent = formatInt(totalProps);
 
             const heating = sec3.heating_system_distribution || {};
-            const heatTotal = Object.values(heating).reduce((a, b) => a + (Number(b) || 0), 0);
-            const gasPct = heatTotal ? 100 * (heating['Gas Boiler'] || 0) / heatTotal : null;
-            const hpPct = heatTotal ? 100 * (heating['Heat Pump'] || 0) / heatTotal : null;
+            const heatingEntries = orderedDistribution(heating, [
+                { key: 'Gas Boiler', label: 'Gas Boiler' },
+                { key: 'Electric', label: 'Electric' },
+                { key: 'Other', label: 'Other' },
+                { key: 'District/Communal/Heat Network', label: 'Heat Network' },
+                { key: 'Heat Pump', label: 'Heat Pump' }
+            ]);
+            const heatTotal = heatingEntries.reduce((sum, entry) => sum + entry.value, 0);
+            const heatingValue = key => heatingEntries.find(entry => entry.key === normaliseCategoryKey(key))?.value ?? 0;
+            const gasPct = heatTotal ? 100 * heatingValue('Gas Boiler') / heatTotal : null;
+            const hpPct = heatTotal ? 100 * heatingValue('Heat Pump') / heatTotal : null;
             document.getElementById('kpiGasPct').textContent = formatPercent(gasPct, 1);
             document.getElementById('insightHeatPumps').textContent = formatPercent(hpPct, 1);
 
@@ -2777,25 +2915,19 @@
             document.getElementById('kpiHpReadyPct').textContent = formatPercent(hpReadyPct, 1);
             document.getElementById('kpiSapMean').textContent = sec3.sap_score_mean ? Number(sec3.sap_score_mean).toFixed(1) : '—';
 
-            const epcPct = sec3.epc_band_percentages || {};
-            const belowEpcC = 100 - ((epcPct.A || 0) + (epcPct.B || 0) + (epcPct.C || 0));
+            const epcPctEntries = orderedDistribution(sec3.epc_band_percentages || {});
+            const epcPctValue = key => epcPctEntries.find(entry => entry.key === normaliseCategoryKey(key))?.value ?? 0;
+            const belowEpcC = 100 - (epcPctValue('A') + epcPctValue('B') + epcPctValue('C'));
             document.getElementById('insightBelowEpcC').textContent = formatPercent(belowEpcC, 1);
             document.getElementById('insightWallInsulation').textContent = formatPercent(sec3.wall_insulation_rate_pct, 1);
 
             const glazing = sec3.glazing_distribution || {};
-            const glazingTotal = Object.values(glazing).reduce((a, b) => a + (Number(b) || 0), 0);
-            const glazingPct = key => (glazingTotal ? 100 * (glazing[key] || 0) / glazingTotal : null);
-
-            document.getElementById('insightDoubleGlazing').textContent = formatPercent(glazingPct('Double'), 1);
-
-            document.getElementById('glazingDoublePct').textContent = formatPercent(glazingPct('Double'), 1);
-            document.getElementById('glazingDoubleCount').textContent = formatInt(glazing.Double) + ' properties';
-            document.getElementById('glazingUnknownPct').textContent = formatPercent(glazingPct('Unknown'), 1);
-            document.getElementById('glazingUnknownCount').textContent = formatInt(glazing.Unknown) + ' properties';
-            document.getElementById('glazingSinglePct').textContent = formatPercent(glazingPct('Single'), 1);
-            document.getElementById('glazingSingleCount').textContent = formatInt(glazing.Single) + ' properties';
-            document.getElementById('glazingTriplePct').textContent = formatPercent(glazingPct('Triple'), 1);
-            document.getElementById('glazingTripleCount').textContent = formatInt(glazing.Triple) + ' properties';
+            const glazingEntries = orderedDistribution(glazing);
+            const glazingTotal = glazingEntries.reduce((sum, entry) => sum + entry.value, 0);
+            const doubleGlazing = glazingEntries.find(entry => entry.key === 'double')?.value ?? 0;
+            const doubleGlazingPct = glazingTotal ? 100 * doubleGlazing / glazingTotal : null;
+            document.getElementById('insightDoubleGlazing').textContent = formatPercent(doubleGlazingPct, 1);
+            renderGlazingCards(glazing);
 
             document.getElementById('hpTier1Pct').textContent = formatPercent(sec4.tier_1_pct, 1);
             document.getElementById('hpTier1Count').textContent = formatInt(sec4.tier_1_count) + ' properties';
@@ -2809,14 +2941,31 @@
             document.getElementById('hpTier5Count').textContent = formatInt(sec4.tier_5_count) + ' properties';
 
             scenarioData = buildScenarioDataFromOneStop(oneStop);
+            document.querySelectorAll('.scenario-btn').forEach(btn => {
+                btn.hidden = !scenarioData[btn.dataset.scenario];
+            });
             renderScenarioTable();
             renderHnVsHpComparisonTable(oneStop);
             renderHeatNetworkTierTable(oneStop);
             renderPrioritiesTab(oneStop);
 
-            const epcDist = sec3.epc_band_distribution || {};
-            const epcLabels = ['A', 'B', 'C', 'D', 'E', 'F', 'G'];
-            const epcCounts = epcLabels.map(l => epcDist[l] || 0);
+            const epcEntries = orderedDistribution(sec3.epc_band_distribution || {}, [
+                { key: 'A', label: 'A' },
+                { key: 'B', label: 'B' },
+                { key: 'C', label: 'C' },
+                { key: 'D', label: 'D' },
+                { key: 'E', label: 'E' },
+                { key: 'F', label: 'F' },
+                { key: 'G', label: 'G' },
+                { key: 'Unknown', label: 'Unknown' }
+            ]);
+            const epcLabels = epcEntries.map(entry => entry.label);
+            const epcCounts = epcEntries.map(entry => entry.value);
+            const epcColorMap = {
+                a: '#1a5f2a', b: '#2d8f3e', c: '#5cb85c', d: '#f0ad4e',
+                e: '#d9534f', f: '#a94442', g: '#7a2a2a', unknown: '#64748b'
+            };
+            const epcColors = epcEntries.map((entry, index) => epcColorMap[entry.key] || categoryColours(epcEntries.length)[index]);
 
             const scenarioOrder = [
                 'fabric_only',
@@ -2830,30 +2979,22 @@
             const scenarioCostK = scenarioOrder.map(id => scenarioData[id]).filter(Boolean).map(s => Number(s.capitalCostPerPropertyValue || 0) / 1000);
             const scenarioCo2Mt = scenarioOrder.map(id => scenarioData[id]).filter(Boolean).map(s => Number(s.annualCo2ReductionKgValue || 0) / 1e9);
 
-            const wallDist = sec3.wall_type_distribution || {};
-            const wallLabelMap = {
-                solid_brick: 'Solid Brick',
-                cavity: 'Cavity',
-                other: 'Other',
-                timber_frame: 'Timber Frame',
-                system_built: 'System Built',
-                stone: 'Stone'
-            };
-            const wallKeys = Object.keys(wallLabelMap);
-            const wallLabels = wallKeys.map(k => wallLabelMap[k]);
-            const wallCounts = wallKeys.map(k => wallDist[k] || 0);
+            const wallEntries = orderedDistribution(sec3.wall_type_distribution || {}, [
+                { key: 'solid_brick', label: 'Solid Brick' },
+                { key: 'cavity', label: 'Cavity' },
+                { key: 'other', label: 'Other' },
+                { key: 'timber_frame', label: 'Timber Frame' },
+                { key: 'system_built', label: 'System Built' },
+                { key: 'stone', label: 'Stone' },
+                { key: 'unknown', label: 'Unknown' }
+            ]);
+            const wallLabels = wallEntries.map(entry => entry.label);
+            const wallCounts = wallEntries.map(entry => entry.value);
 
-            const heatingLabels = ['Gas Boiler', 'Electric', 'Other', 'Heat Network', 'Heat Pump'];
-            const heatingCounts = [
-                heating['Gas Boiler'] || 0,
-                heating['Electric'] || 0,
-                heating['Other'] || 0,
-                heating['District/Communal/Heat Network'] || 0,
-                heating['Heat Pump'] || 0
-            ];
+            const heatingLabels = heatingEntries.map(entry => entry.label);
+            const heatingCounts = heatingEntries.map(entry => entry.value);
 
-            const loftDist = sec3.loft_status_distribution || {};
-            const loftOrder = [
+            const loftEntries = orderedDistribution(sec3.loft_status_distribution || {}, [
                 { key: 'Partial (100-200mm)', label: 'Partial (100-200mm)' },
                 { key: 'None', label: 'None' },
                 { key: 'Good (200-269mm)', label: 'Good (200-269mm)' },
@@ -2864,9 +3005,9 @@
                 { key: 'Very Poor (efficiency rating)', label: 'Very Poor' },
                 { key: 'Poor (efficiency rating)', label: 'Poor' },
                 { key: 'Unknown', label: 'Unknown' }
-            ];
-            const loftLabels = loftOrder.map(o => o.label);
-            const loftCounts = loftOrder.map(o => loftDist[o.key] || 0);
+            ]);
+            const loftLabels = loftEntries.map(entry => entry.label);
+            const loftCounts = loftEntries.map(entry => entry.value);
 
             const readinessCounts = [
                 sec4.tier_1_count || 0,
@@ -2877,7 +3018,9 @@
             ];
 
             renderCharts({
+                epcLabels,
                 epcCounts,
+                epcColors,
                 scenarioLabels,
                 scenarioCostK,
                 scenarioCo2Mt,
