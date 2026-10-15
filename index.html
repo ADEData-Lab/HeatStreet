@@ -182,6 +182,20 @@
             font-size: 14px;
         }
 
+        .lodgement-documentation-link {
+            display: inline-block;
+            margin-top: 10px;
+            color: #3b82f6;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .lodgement-documentation-link:hover,
+        .lodgement-documentation-link:focus {
+            color: #60a5fa;
+            text-decoration: underline;
+        }
+
         /* Stats Grid */
         .stats-grid {
             display: grid;
@@ -952,6 +966,7 @@
                 <div class="card-header">
                     <h2 class="card-title">EPC lodgement mix over time</h2>
                     <p class="card-subtitle">Within-year share, stacked by EPC band</p>
+                    <a class="lodgement-documentation-link" href="data/outputs/figures/epc_lodgement_year_band_stacked_share_calculation.md" target="_blank" rel="noopener">View the EPC lodgement share calculation note</a>
                 </div>
                 <div class="narrative">
                     <p>
@@ -962,9 +977,6 @@
                     <p>
                         Important caveat: lodgements are not a random sample of the entire stock. This is a trend in the
                         <em>certified</em> subset, so we interpret it alongside the stock-wide baseline shown elsewhere in the dashboard.
-                    </p>
-                    <p>
-                        <a class="lodgement-documentation-link" href="data/outputs/figures/epc_lodgement_year_band_stacked_share_calculation.md" target="_blank" rel="noopener">View the EPC lodgement share calculation note</a>
                     </p>
                 </div>
                 <div class="chart-container chart-container-lg" style="margin-top: 14px;">
