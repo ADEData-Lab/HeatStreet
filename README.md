@@ -1,17 +1,881 @@
-# HeatStreet public dashboard snapshot
+# Heat Street EPC Analysis
 
-This branch is a static, public snapshot of completed run
-`20261014T112524095003Z-bd8937ef01e1`. It contains client-facing report
-outputs and supporting validation evidence only; it does not contain pipeline
-source code or raw/property-level data.
+Large-scale Energy Performance Certificate (EPC) analysis for London's Edwardian terraced housing stock, with a focus on decarbonization pathways and heat network zone planning.
 
-- [Open the interactive dashboard](./index.html)
-- [Read the EPC lodgement share calculation note](./data/outputs/figures/epc_lodgement_year_band_stacked_share_calculation.md)
-- [Open the EPC lodgement share chart](./data/outputs/figures/epc_lodgement_year_band_stacked_share.png)
-- [Inspect the one-stop report data](./data/outputs/one_stop_output.json)
-- [Review semantic QA evidence](./data/outputs/qa_checks.json)
-- [Review run metadata](./data/outputs/run_metadata.json)
+## Project Overview
 
-The dashboard presents EPC lodgements as a 100%-stacked, within-year share by
-EPC band. Its visible calculation-note link points to the same documentation
-included above.
+This project analyzes approximately 500,000 EPC certificates for Edwardian and late Victorian terraced houses across London's 33 boroughs to:
+
+- **Characterize** the current state of the housing stock (insulation, heating systems, energy efficiency)
+- **Model** different decarbonization pathways (fabric improvements, heat pumps, district heating)
+- **Analyze** heat network zone suitability and optimal technology deployment strategies
+- **Evaluate** policy interventions and subsidy mechanisms
+
+## Key Features
+
+✅ **Comprehensive Data Pipeline**: Automated EPC data acquisition, cleaning, and validation
+✅ **Quality Assurance**: Implements Hardy & Glew validation protocols (addresses 36-62% error rate in EPCs)
+✅ **Archetype Analysis**: Detailed characterization of building fabric, heating systems, and energy performance
+✅ **Scenario Modeling**: Cost-benefit analysis for multiple decarbonization pathways
+✅ **Spatial Analysis**: GIS-based heat network zone overlay and property classification
+✅ **Policy Analysis**: Subsidy sensitivity modeling and carbon abatement cost calculations
+✅ **Visualization**: Charts, maps, and executive summary reports
+
+## Project Structure
+
+```
+HeatStreet/
+├── config/
+│   ├── config.yaml           # Main configuration file
+│   └── config.py             # Configuration loader
+├── data/
+│   ├── raw/                  # Raw EPC data files
+│   ├── processed/            # Cleaned and validated data
+│   ├── supplementary/        # Heat map and boundary files
+│   └── outputs/              # Analysis outputs, figures, reports
+├── src/
+│   ├── acquisition/          # EPC data download modules
+│   ├── cleaning/             # Data validation and cleaning
+│   ├── analysis/             # Archetype characterization
+│   ├── modeling/             # Scenario modeling
+│   ├── spatial/              # Heat network zone analysis
+│   ├── reporting/            # Visualization and reporting
+│   └── utils/                # Utility functions
+├── tests/                    # Unit tests
+├── docs/                     # Additional documentation
+├── run_analysis.py           # Interactive Mission Control runner
+├── run-conda.bat             # Windows conda launcher (recommended for spatial analysis)
+├── run-conda.ps1             # PowerShell conda launcher (recommended for spatial analysis)
+├── requirements.txt          # Core Python dependencies
+└── requirements-spatial.txt  # Optional spatial dependencies (GDAL/geopandas)
+```
+
+## HeatStreet Studio
+
+HeatStreet Studio is the built-in terminal application for running and monitoring the analysis pipeline. It replaces the earlier Rich live dashboard with a full-screen Textual TUI and stable fallbacks for all terminal types.
+
+### TUI Modes
+
+| Command | Mode | Best for |
+|---|---|---|
+| `python run_analysis.py` | Auto-detect | Interactive terminals |
+| `python run_analysis.py --tui textual` | Full Textual TUI | Windows Terminal, PowerShell, VS Code |
+| `python run_analysis.py --tui rich` | Rich compact display | Any colour terminal |
+| `python run_analysis.py --simple-tui` | One line per phase | Anaconda Prompt, limited terminals |
+| `python run_analysis.py --no-tui` | Silent | CI, automation, log files |
+
+### Text Mockup
+
+```
++-- HeatStreet Studio -----------------------------------------+
+| Elapsed: 14m 32s | Phase 6/12: Scenario Modeling | Hybrid HP  |
++---------------------------------------------------------------+
+| Phases          | Current Work            | Modelling Counters |
+| [+] 1 Preflight | Scenario Modeling       | properties: 42,150 |
+| [+] 2 Download  | Action: Heat pump calc  | scenarios:  5      |
+| [+] 3 Validation| Elapsed: 6m 18s         | tier 1 ready: 8,420|
+| [+] 4 Adjustmts | [######......] 62.4%    | solid wall: 34,200 |
+| [>] 5 Archetypes| ETA: 3m 44s | 1,240/s  |                    |
+| [>] 6 Scenarios |                         |                    |
+| [ ] 7 Retrofit  +-------------------------+--------------------+
+| [ ] 8 Spatial   |
++-----+-----------+
+| Scenarios       | Status   | Cost/home |
+| Heat pump       | running  | GBP 8,200 |
+| Hybrid HP       | pending  | -         |
+| Heat network    | pending  | -         |
+| Fabric first    | pending  | -         |
++---------------------------------------------------+
+| Tabs: [1]Overview [2]Acquisition [3]Validation [4]Archetypes |
+|       [5]Scenarios [6]Retrofit [7]Spatial [8]Outputs [9]Logs |
+| Keys: q=quit  o=outputs  l=logs  s=scenarios  ?=help         |
++--------------------------------------------------------------+
+```
+
+### Keyboard Shortcuts
+
+| Key | Action |
+|---|---|
+| `q` | Request quit / cancel |
+| `1`-`9` | Switch to tab by number |
+| `o` | Outputs tab |
+| `l` | Logs tab |
+| `s` | Scenarios tab |
+| `a` | Acquisition tab |
+| `v` | Validation tab |
+| `w` | Warnings drawer |
+| `p` / `r` | Pause / resume display updates |
+| `?` | Show shortcuts |
+
+### Vector Assets
+
+After the run completes, SVG diagrams are saved to `data/outputs/ui_assets/`:
+- `pipeline_flow.svg` - full pipeline with status styling
+- `acquisition_flow.svg` - API to stock dataset flow
+- `validation_funnel.svg` - input to validated dataset
+- `epc_distribution.svg` - EPC band bar chart
+- `scenario_swimlanes.svg` - scenario status lanes
+- `scenario_comparison.svg` - cost and carbon comparison
+- `retrofit_readiness.svg` - tier distribution
+- `run_summary.svg` - shareable one-page summary
+
+The terminal shows simplified previews; the SVG files are the full vector graphics.
+
+### Windows Terminal Guidance
+
+- **Best experience**: Windows Terminal or PowerShell with `--tui textual`
+- **Stable fallback**: Anaconda Prompt with `--simple-tui`
+- **Conda launchers** (`run-conda.bat` / `run-conda.ps1`) remain the recommended way to run with spatial analysis
+
+### Troubleshooting TUI
+
+| Problem | Fix |
+|---|---|
+| Flicker or garbled output | Use `--simple-tui` or `--tui rich` |
+| Bad or missing icons | Use `--simple-tui` (ASCII mode) |
+| No colours | Set `TERM=xterm-256color` or use `--no-tui` |
+| Text wrapping / overflow | Widen your terminal window |
+| Textual unavailable | `pip install textual>=0.47.0` or use `--tui rich` |
+| CI mode | `--no-tui` or set `CI=true`; logs always written |
+| HEATSTREET_TUI env var | `HEATSTREET_TUI=0` disables all UI; `=1` enables |
+
+### Assurance
+
+UI changes in HeatStreet Studio do not alter analytical assumptions, EPC filtering logic, scenario modelling semantics, spatial classification, or output file schemas. All analytical outputs remain byte-for-byte compatible with prior runs.
+
+## Installation
+
+### Prerequisites
+
+**Core Requirements**:
+- Python 3.11 or 3.12 recommended
+- pip package manager
+
+**For Spatial Analysis (Heat Network Tiers)**:
+- **Option A (Recommended on Windows)**: Miniconda/Anaconda with `environment.yml`
+- **Option B**: `requirements-spatial.txt` on Linux/macOS or advanced setups with working GDAL tooling
+- **Option C**: Skip spatial analysis - 85% of functionality still works
+- **Windows note**: Python 3.13/3.14 is not the supported default for the spatial stack in this repo
+
+### 🚀 Quick Start (Recommended Methods)
+
+#### Method 1: Conda Launcher (Best for Windows + Spatial Analysis)
+
+**Recommended if you want heat network tier analysis on Windows!**
+
+This method automatically installs GDAL/geopandas via Conda, avoiding Windows installation issues.
+
+**Step 1**: Install Miniconda (if not already installed)
+- Download: https://docs.conda.io/en/latest/miniconda.html
+- Run installer with default settings
+- Restart your terminal
+
+**Step 2**: Clone, create the Conda env, activate it, then run the launcher
+```bash
+git clone https://github.com/ADEData-Lab/HeatStreet.git
+cd HeatStreet
+conda env create -f environment.yml
+conda activate heatstreet
+
+# Windows Command Prompt
+run-conda.bat
+
+# OR Windows PowerShell
+.\run-conda.ps1
+```
+
+This supported path:
+- Creates a fresh Conda env from `environment.yml`
+- Keeps the GDAL-backed stack on `conda-forge`
+- Installs the repo's pure-Python dependencies from `requirements.txt`
+- Detects mixed-interpreter shells before install steps
+- Runs the interactive analysis with spatial support available
+
+On Windows, `run-conda.ps1` / `run-conda.bat` is the canonical launcher. Avoid bare `python run_analysis.py` unless `python`, `pip`, and `CONDA_PREFIX` are already aligned inside the active Conda environment.
+
+#### Method 2: Standard Launcher (Core Analysis Only)
+
+**Use this if you don't need spatial analysis (or you're not on Windows).**
+
+```bash
+git clone https://github.com/ADEData-Lab/HeatStreet.git
+cd HeatStreet
+
+python -m venv venv
+# Activate venv (platform-specific)
+# Windows PowerShell: .\venv\Scripts\Activate.ps1
+# Windows Cmd:       venv\Scripts\activate.bat
+# Linux/Mac:         source venv/bin/activate
+
+pip install -r requirements.txt
+python run_analysis.py
+```
+
+For spatial analysis on Windows, use the Conda workflow above (or see `docs/SPATIAL_SETUP.md`).
+For Phase 1 runtime verification on Windows, the launcher is the source of truth for interpreter and prefix alignment.
+
+#### Method 3: Manual Setup (Advanced Users)
+
+See [Manual Setup](#manual-setup-all-platforms) section below.
+
+### Manual Setup (All Platforms)
+
+<details>
+<summary>Click to expand manual setup instructions</summary>
+
+#### Step 1: Clone the repository
+
+**Windows (PowerShell)**:
+```powershell
+git clone https://github.com/ADEData-Lab/HeatStreet.git
+cd HeatStreet
+```
+
+**Linux/Mac**:
+```bash
+git clone https://github.com/ADEData-Lab/HeatStreet.git
+cd HeatStreet
+```
+
+#### Step 2: Create virtual environment
+
+**All platforms**:
+```bash
+python -m venv venv
+```
+
+#### Step 3: Activate virtual environment
+
+**Windows PowerShell**:
+```powershell
+.\venv\Scripts\Activate.ps1
+```
+
+**Windows Command Prompt**:
+```cmd
+venv\Scripts\activate.bat
+```
+
+**Linux/Mac**:
+```bash
+source venv/bin/activate
+```
+
+#### Step 4: Install dependencies
+
+**All platforms**:
+```bash
+pip install -r requirements.txt
+```
+
+#### Step 5: Verify installation
+
+**All platforms**:
+```bash
+python -c "from config.config import load_config; print('✓ Installation successful!')"
+```
+
+</details>
+
+### Troubleshooting
+
+#### Common Issues
+
+**Windows: "cannot be loaded because running scripts is disabled"**
+```powershell
+Set-ExecutionPolicy -ExecutionPolicy RemoteSigned -Scope CurrentUser
+```
+
+**Any platform: "python is not recognized"**
+- Ensure Python is in your PATH
+- Try using `python3` instead of `python`
+- Reinstall Python and check "Add to PATH" during installation
+
+**Conda: "conda is not recognized"**
+- Install Miniconda: https://docs.conda.io/en/latest/miniconda.html
+- Restart your terminal after installation
+- Create the environment with `conda env create -f environment.yml`
+- Activate it with `conda activate heatstreet`
+- Then use `run-conda.bat` or `run-conda.ps1`
+
+**GDAL/Geopandas installation fails**
+- This is common on Windows when `pip` tries to build Fiona/GDAL from source
+- If you see `GDAL_VERSION` or `gdal-config`, switch to the Conda path immediately
+- Rebuild with `conda env create -f environment.yml`
+- Activate with `conda activate heatstreet`
+- Then run `run-conda.bat` or `.\run-conda.ps1`
+- See [docs/SPATIAL_SETUP.md](docs/SPATIAL_SETUP.md) for detailed guide
+
+**"No module named 'osgeo'" during spatial analysis**
+- GDAL not installed
+- Use the Conda environment from `environment.yml`
+- Or skip spatial analysis (analysis works without it)
+
+**`conda info` shows one Python but `python --version` shows another**
+- Your shell is mixed and the launcher will stop on purpose
+- Run these diagnosis commands:
+
+```powershell
+where python
+where pip
+conda info
+conda list | findstr /i "python geopandas fiona gdal shapely"
+```
+
+- If `pip` points into `AppData\Roaming\Python\...`, reactivate the Conda env or recreate it from `environment.yml`
+
+**Runtime mismatch: startup diagnostics show old Phase 1 behavior**
+- First response: rerun with `run-conda.bat` or `.\run-conda.ps1` on Windows so the launcher validates `python`, `pip`, and `CONDA_PREFIX` before `run_analysis.py` starts.
+- Then compare the startup diagnostics against the staged runtime expected in this checkout:
+  `download_data()` should resolve to `run_analysis.py` around line 805 and include `download_national_domestic_dataset(` plus `materialize_full_load_subset(`.
+  `download_national_domestic_dataset()` should resolve to `src/acquisition/epc_api_downloader.py` around line 674 and include `ensure_clean_directory(dataset_dir)`, `write_parquet_part(`, and `ignored_recommendation_members`.
+- Deterministic diagnosis sequence:
+  1. Print `sys.executable` and `os.getcwd()`.
+  2. Print `run_analysis.__file__`.
+  3. Print the resolved line numbers for `download_data()` and `download_national_domestic_dataset()`.
+  4. Compare them against the expected staged line ranges above.
+  5. If they do not match, classify the mismatch as one of: different checkout, stale installed package / alternate import path, wrong interpreter, or stale copied script outside the repo root.
+- Minimal probe:
+
+```bash
+python - <<'PY'
+import inspect, os, sys
+import run_analysis
+from src.acquisition.epc_api_downloader import EPCAPIDownloader
+
+print("sys.executable =", sys.executable)
+print("os.getcwd() =", os.getcwd())
+print("run_analysis.__file__ =", run_analysis.__file__)
+print("download_data line =", inspect.getsourcelines(run_analysis.download_data)[1])
+print(
+    "download_national_domestic_dataset line =",
+    inspect.getsourcelines(EPCAPIDownloader.download_national_domestic_dataset)[1],
+)
+PY
+```
+
+**Mission Control dashboard renders oddly**
+- Use `python run_analysis.py --no-tui` for plain fallback output.
+- Use `python run_analysis.py --quiet` for minimal output in logs or scripted runs.
+- CI, redirected output, `TERM=dumb`, and `HEATSTREET_TUI=0` disable the live dashboard automatically.
+- `analysis_log.json` is unchanged and remains the source of truth even when the live dashboard is disabled.
+
+#### How Should I Run It?
+
+| Option | Best For | Spatial Analysis? |
+|--------|----------|-------------------|
+| `run-conda.bat/ps1` | **Windows users wanting heat network tiers** | ✅ Yes (Conda-managed GDAL stack) |
+| `python run_analysis.py` (in your own env) | Core analysis and non-Windows runs | ⚠️ Depends on GDAL/geopandas |
+
+**Recommendation**: Use `environment.yml` plus `run-conda.bat` / `.\run-conda.ps1` for the complete Windows spatial workflow.
+
+## Data Acquisition
+
+### EPC Register Data
+
+HeatStreet can obtain EPC data via the UK Government EPC Register in two ways:
+
+1. **API download (recommended)**: run the interactive pipeline and choose a download scope. Full-London stock-definition runs use the EPC **full-load CSV extract** so `epc_london_filtered.csv` is a true London pre-1930 terraced-house subset rather than all London houses. The runner will prompt for (or read) your API bearer token from `.env`.
+2. **Bulk/manual download**: place EPC CSVs in `data/raw/` and skip the download step when prompted, or use the full-load download mode in the API downloader.
+
+Register for API access at [https://get-energy-performance-data.communities.gov.uk/](https://get-energy-performance-data.communities.gov.uk/) and copy `.env.example` to `.env` if you prefer to set the token up-front.
+
+### Supplementary Data
+
+**Heat Network Planning Database (HNPD) (recommended for Tiering)**:
+- DESNZ/BEIS Heat Network Planning Database (January 2024) is used as the primary source of up-to-date heat network scheme locations.
+- The pipeline auto-downloads it to `data/external/hnpd-january-2024.csv` (see `data_sources.heat_networks` in `config/config.yaml`).
+
+**Boundary Files**:
+- London borough boundaries
+- LSOA boundaries for aggregation
+
+## Usage
+
+### Interactive Mission Control Runner
+
+The easiest way to run the complete analysis is using the Mission Control runner:
+
+```bash
+# Windows Command Prompt (Conda launcher)
+run-conda.bat
+
+# Windows PowerShell (Conda launcher)
+.\run-conda.ps1
+
+# Any platform (if dependencies already installed)
+python run_analysis.py
+```
+
+For the best full Mission Control TUI rendering on Windows, use Windows Terminal or PowerShell. Anaconda Prompt and Windows cmd are supported with conservative rendering, but if Rich Live still flickers there, use `--simple-tui`, or switch to Windows Terminal/PowerShell for the full TUI.
+
+In a capable interactive terminal, `python run_analysis.py` opens the compact live Mission Control panel with phase status, the current action, headline counters, warnings, and key output paths. `--simple-tui` prints one stable line per phase plus the final summary. `--no-tui` uses plain, log-friendly console output. In CI, redirected output, `TERM=dumb`, `HEATSTREET_TUI=0`, `--no-tui`, or `--quiet`, the full Rich Live dashboard is disabled.
+
+Common runner options:
+
+```bash
+# Full compact Mission Control TUI when the terminal supports it
+python run_analysis.py
+
+# Stable line-oriented TUI for cmd/Anaconda or narrow terminals
+python run_analysis.py --simple-tui
+
+# Plain fallback output
+python run_analysis.py --no-tui
+
+# Conservative full TUI refresh rate
+python run_analysis.py --tui-refresh-rate 2
+
+# Minimal operator output
+python run_analysis.py --quiet
+
+# Expanded fallback diagnostics
+python run_analysis.py --verbose
+
+# Noninteractive sample window
+python run_analysis.py --sample-start 2016-01-01 --sample-end 2025-12-31
+
+# Reuse matching raw data, or force a fresh EPC full-load download
+python run_analysis.py --use-existing
+python run_analysis.py --fresh
+
+# Scope download without prompting
+python run_analysis.py --download-scope full-london
+python run_analysis.py --download-scope single-borough --borough Camden
+```
+
+Terminal environment overrides:
+
+```bash
+# Disable or request the full Rich TUI where the terminal supports it
+HEATSTREET_TUI=0
+HEATSTREET_TUI=1
+
+# Clamp the full TUI refresh rate to the supported 2-4 FPS range
+HEATSTREET_TUI_REFRESH_RATE=2
+```
+
+The dashboard is for operators. `data/outputs/analysis_log.json` remains the audit source for phases, metrics, outputs, and run metadata. This runner change does not alter scientific assumptions, formulas, filters, schemas, or output locations.
+
+The Mission Control runner will guide you through:
+
+1. **EPC Data Download**
+   - Choose borough(s) to analyze
+   - Automatically downloads from EPC API
+   - Validates and cleans data
+
+2. **Archetype Characterization**
+   - Analyzes building fabric (walls, loft, floors, windows)
+   - Summarizes heating systems and fuel types
+   - Reports EPC band distribution
+   - Calculates energy consumption and CO₂ emissions
+
+3. **Scenario Modeling**
+   - Models 5 decarbonization pathways
+   - Calculates costs, savings, payback periods
+   - Estimates EPC band improvements
+   - Performs subsidy sensitivity analysis
+
+4. **Spatial Analysis** (if GDAL available)
+   - Uses HNPD (2024) as the external heat network infrastructure evidence layer
+   - Classifies properties into heat network tiers (Tier 1–5)
+   - Calculates local heat density (GWh/km²) from EPC-derived demand
+   - Generates interactive HTML maps
+   - Exports GeoJSON with tier classifications
+
+5. **Visualization & Reports**
+   - Creates charts (EPC bands, scenarios, subsidies)
+   - Generates formatted Excel workbook
+   - Produces executive summary report
+   - Saves all outputs to `data/outputs/`
+
+### 📊 Output Locations
+
+After running the analysis, find your results in:
+
+```
+data/outputs/
+├── figures/
+│   ├── epc_band_distribution.png
+│   ├── scenario_comparison.png
+│   ├── subsidy_sensitivity.png
+│   └── heat_network_tiers.png
+├── reports/
+│   └── executive_summary.txt
+├── maps/
+│   └── heat_network_tiers.html  (interactive map)
+├── analysis_results.xlsx         (comprehensive workbook)
+└── properties_with_tiers.geojson (spatial data)
+```
+
+### 🔧 Advanced: Command-Line Interface
+
+For automated workflows or specific phases:
+
+```bash
+# Activate environment first
+conda activate heatstreet  # if using Conda
+# OR
+.\venv\Scripts\activate    # if using venv
+
+# Run specific phases
+python run_analysis.py
+```
+
+### 🛠️ Advanced: Running Individual Modules
+
+Each module can be run independently for testing:
+
+```bash
+# Data acquisition
+python src/acquisition/epc_downloader.py
+
+# Data validation
+python src/cleaning/data_validator.py
+
+# Archetype analysis
+python src/analysis/archetype_analysis.py
+
+# Scenario modeling
+python src/modeling/scenario_model.py
+
+# Spatial analysis (requires GDAL)
+python src/spatial/heat_network_analysis.py
+```
+
+## Configuration
+
+Edit `config/config.yaml` to customize:
+
+- **Geographic scope**: London boroughs to include
+- **Property filters**: Construction period, property types
+- **Quality thresholds**: Floor area ranges, required fields
+- **Scenario definitions**: Measures for each pathway
+- **Cost assumptions**: Installation costs, energy prices
+- **Subsidy levels**: For sensitivity analysis
+
+Example:
+```yaml
+property_filters:
+  construction_period:
+    end_year: 1930
+  property_types:
+    - "Mid-terrace"
+    - "End-terrace"
+
+scenarios:
+  heat_pump:
+    name: "Heat pump pathway"
+    measures:
+      - "loft_insulation_topup"
+      - "wall_insulation"
+      - "ashp_installation"
+```
+
+## Key Outputs
+
+### Data Files
+
+- `data/processed/epc_london_validated.csv` - Cleaned EPC dataset
+- `data/processed/epc_london_with_tiers.geojson` - Properties with heat network tier classification
+- `data/outputs/pathway_suitability_by_tier.csv` - Recommended pathways by tier
+
+### Analysis Reports
+
+- `data/outputs/one_stop_output.json` - One-stop report output (definitive reporting output when `reporting.one_stop_only: true`)
+- `data/outputs/one_stop_dashboard.html` - Self-contained HTML dashboard generated from `one_stop_output.json`
+- `data/outputs/archetype_analysis_results.txt` - Property characteristics summary
+- `data/outputs/scenario_modeling_results.txt` - Scenario cost-benefit analysis
+- `data/outputs/validation_report.txt` - Data quality report
+- `data/outputs/reports/executive_summary.txt` - Executive summary
+- `data/outputs/reports/executive_summary_datapoints.xlsx` - Excel workbook of datapoints used in the executive summary report
+- `data/outputs/comparisons/hn_vs_hp_comparison.csv` - Per-home HP vs HN comparison stats (mean/median/p10/p90/min/max)
+- `data/outputs/comparisons/hn_vs_hp_report_snippet.md` - Markdown summary including sign conventions and tariff/COP/HN connection notes
+- `data/outputs/comparisons/hn_cost_sensitivity.csv` - Optional HN connection-cost sensitivity table (created when `--run-hn-sensitivity` is used)
+
+### Visualizations
+
+- `data/outputs/figures/epc_band_distribution.png` - Current EPC ratings
+- `data/outputs/figures/sap_score_distribution.png` - SAP score histogram
+- `data/outputs/figures/scenario_comparison.png` - Scenario comparison charts
+- `data/outputs/figures/subsidy_sensitivity.png` - Subsidy sensitivity (static chart; dashboard provides the full interactive view)
+- `data/outputs/figures/heat_network_tiers.png` - Tier distribution
+- `data/outputs/figures/hn_vs_hp_comparison.png` - Mean capex/bill/CO₂ savings for HP vs HN pathways
+- `data/outputs/maps/heat_network_tiers.html` - Interactive map
+
+When `reporting.one_stop_only: true` is enabled in `config/config.yaml`, the pipeline focuses on producing the single
+`one_stop_output.json` plus a small set of supporting CSVs and key figures used in reporting (including the fabric tipping
+point and EPC lodgement charts). Set `one_stop_only: false` to generate the full suite of dashboard assets, maps, and
+additional reporting artefacts.
+
+Example CSV header and row:
+
+```
+pathway_id,pathway_name,n_homes,capex_mean,bill_saving_mean,co2_saving_mean,payback_median
+fabric_plus_hp_only,Fabric + Heat Pump,10000,21000,450,1.8,24.0
+```
+
+## Decarbonization Scenarios
+
+The project models five scenarios:
+
+| Scenario | Measures | Typical Cost | CO₂ Savings |
+|----------|----------|--------------|-------------|
+| **Baseline** | No intervention | £0 | 0% |
+| **Fabric Only** | Loft, wall, glazing | £8,000-15,000 | 30-40% |
+| **Heat Pump** | Fabric + ASHP + emitters | £20,000-30,000 | 60-80% |
+| **Heat Network** | Modest fabric + DH connection | £7,000-12,000 | 50-70% |
+| **Hybrid** | Heat network where viable, ASHP elsewhere | Varies | 60-75% |
+
+### Targeting and shared-package assumptions
+
+- Hybrid heat-network targeting consumes the run-scoped spatial enrichment joined by `CERTIFICATE_NUMBER`: tiers 1–3 receive heat-network assignments and remaining homes receive ASHP assignments. Mixed cohorts must contain both technologies or semantic QA prevents publication.
+- Fabric packages are shared across scenarios by design. If you want differentiated fabric measures (e.g., lighter fabric for heat networks vs deeper fabric for heat pumps), add explicit branching logic before the packages are applied.
+
+## Heat Network Tier Classification
+
+HeatStreet’s heat network tiering is a **screening tool** that combines (a) evidence of nearby network infrastructure / planned zones and (b) EPC-derived local heat density.
+
+Properties are classified into five tiers:
+
+| Tier | Definition (screening) | Main evidence input | Recommended Pathway |
+|------|------------|---------------------|
+| **Tier 1** | Within 250m of existing heat network | HNPD (Operational / Under Construction) | District heating connection |
+| **Tier 2** | Near planned heat network (proxy) | HNPD planned schemes (planning granted) buffered by the configured distance; polygon zone layer used if available | District heating (planned) |
+| **Tier 3** | High local heat density (default ≥20 GWh/km²) | EPC-derived heat density (postcode centroids) | District heating (extension potentially viable) |
+| **Tier 4** | Moderate density (default 5–20 GWh/km²) | EPC-derived heat density | Heat pump (network marginal) |
+| **Tier 5** | Low density (default <5 GWh/km²) | EPC-derived heat density | Heat pump (network not viable) |
+
+Thresholds are configured in `config/config.yaml` (see `eligibility.heat_network_tiers` and `heat_network.readiness`).
+
+### Spatial Analysis Method: Grid-Based Aggregation
+
+The spatial analysis uses a **memory-efficient grid aggregation method** to calculate neighborhood heat densities. This method is designed to handle large datasets (100k+ properties) without running out of memory.
+
+#### How It Works
+
+1. **Grid Assignment**: Properties are assigned to grid cells (default: 125m × 125m) in British National Grid coordinates (EPSG:27700)
+2. **Cell Aggregation**: Energy consumption is aggregated at the cell level rather than per-property
+3. **Neighborhood Calculation**: For each cell, neighborhood totals are computed by summing all cells within the specified radius (default: 250m)
+4. **Tier Classification**: Properties are classified based on their cell's neighborhood heat density (GWh/km²)
+
+#### Configuration Options
+
+You can customize the spatial analysis method in `config/config.yaml`:
+
+```yaml
+spatial:
+  # Choose method: "grid" (recommended) or "buffer" (legacy, memory-intensive)
+  method: "grid"
+
+  # Disable spatial analysis entirely if needed
+  disable: false
+
+  # Grid parameters
+  grid:
+    cell_size_m: 125          # Grid cell size in meters
+    buffer_radius_m: 250      # Neighborhood radius in meters
+    use_circular_mask: true   # Use circular vs square neighborhood
+```
+
+#### Memory-Safe Configuration for Large Datasets
+
+For processing ~700k properties on a laptop (≈16 GB RAM), use these **environment variables** to prevent OOM kills:
+
+```bash
+# Recommended settings for 16 GB laptop
+export HEATSTREET_WORKERS=1           # Number of parallel workers (default: CPU count)
+export HEATSTREET_CHUNK_SIZE=50000    # Properties per chunk (default: 50,000)
+export HEATSTREET_PROFILE=1           # Enable memory profiling logs (optional)
+
+# Run the analysis
+python run_analysis.py
+```
+
+**Parameter Guide**:
+
+| Parameter | Purpose | Laptop (16 GB) | Workstation (32+ GB) |
+|-----------|---------|----------------|----------------------|
+| `HEATSTREET_WORKERS` | Parallel processes for scenario modeling | `1` | `2-4` |
+| `HEATSTREET_CHUNK_SIZE` | Properties processed per batch | `50000` | `100000` |
+| `HEATSTREET_PROFILE` | Log RSS memory at checkpoints | `1` | `0` (optional) |
+
+**Why these settings matter**:
+- **Workers**: Each worker process loads the full cost database and configuration into memory. Using `WORKERS=1` runs sequentially and avoids multiprocessing memory overhead.
+- **Chunk Size**: Scenario modeling converts DataFrames to dictionaries in chunks. Smaller chunks reduce peak memory usage during this conversion.
+- **Profiling**: When enabled, logs show RSS memory (MB) at critical checkpoints, helping diagnose memory spikes.
+
+**What's been optimized** (v2.0+):
+- ✅ GeoDataFrame construction now uses explicit `geometry=` parameter (no more "Assigning CRS to GeoDataFrame without geometry" errors)
+- ✅ Removed unnecessary `DataFrame.copy()` operations (~3-5 GB savings)
+- ✅ Vectorized coordinate extraction (`.geometry.x` instead of list comprehension)
+- ✅ Bounding box pre-filtering for spatial joins (50-80% reduction in join workload)
+- ✅ Vectorized distance calculations (replaced `.apply(lambda)` with `.distance()`)
+- ✅ Memory profiling at all critical sections
+
+**Memory usage profile** (700k properties, laptop mode):
+- Geocoding expansion: ~4-5 GB
+- Spatial tier classification: ~6-8 GB (peak during Tier 2 join)
+- Grid aggregation: ~7-9 GB
+- Scenario modeling: ~9-11 GB (peak during dict conversion)
+- Subsidy sensitivity: ~10-12 GB (final phase)
+
+With these optimizations, the **full pipeline completes reliably on a 16 GB laptop** without OOM kills.
+
+#### Performance Comparison
+
+| Method | Memory Usage | Scalability | Accuracy |
+|--------|--------------|-------------|----------|
+| **Grid** (default) | Low | 100k+ properties | ~95% match to buffer method |
+| **Buffer** (legacy) | High | <10k properties | Reference standard |
+
+**Recommendation**: Use the grid method (default) for all analyses. The buffer method is provided for backward compatibility only.
+
+#### Method Details
+
+The grid method approximates the 250m circular buffer around each property by:
+- Dividing the study area into regular grid cells
+- Computing cell-to-cell neighborhoods using pre-calculated offsets
+- Using a circular mask to include only cells within the radius
+
+This approach:
+- ✅ Reduces memory usage by ~95% compared to buffer method
+- ✅ Scales to 1M+ properties on standard laptops
+- ✅ Produces comparable results to the buffer method
+- ✅ Runs 2-5x faster on large datasets
+
+For more details, see `src/spatial/heat_network_analysis.py::_classify_heat_density_tiers_grid`
+
+## Analysis Methodology
+
+### Data Quality Validation
+
+Based on Hardy & Glew (2019) findings:
+- Duplicate removal (by UPRN/address, keep most recent)
+- Floor area validation (25-400 m²)
+- Built form consistency checks
+- Construction date verification
+- Insulation logic validation (e.g., no cavity fill in solid walls)
+
+### Archetype Characterization
+
+Summary statistics for:
+- EPC band distribution
+- SAP score (mean, median, percentiles)
+- Wall construction and insulation status
+- Loft insulation thickness categories
+- Floor insulation presence
+- Window glazing types
+- Heating systems and fuel types
+- Current energy consumption (kWh/m²/year)
+- CO₂ emissions (kg/m²/year)
+
+### Scenario Modeling
+
+For each property:
+1. Calculate intervention costs based on property characteristics
+2. Estimate energy savings (using simplified RdSAP methodology)
+3. Calculate CO₂ reductions
+4. Compute bill savings (current and projected energy prices)
+5. Determine payback period
+6. Estimate new EPC band
+
+Aggregate to stock level:
+- Total capital costs
+- Annual energy/CO₂ savings
+- Payback distribution
+- EPC band shift analysis
+
+### Subsidy Sensitivity
+
+Model subsidy levels (default): 0%, 25%, 50%, 75%, 100%
+
+Run for multiple pathways (e.g., `heat_pump`, `hybrid`, `heat_network`).
+
+For each level and pathway:
+- Applies the subsidy to modeled capital cost
+- Recalculates simple payback (capex / annual bill savings)
+- Maps payback to an illustrative uptake rate using a smooth logistic adoption curve (rather than step-change thresholds)
+- Estimates upgraded properties, total public expenditure, and implied public cost per tonne CO2 abated (over the analysis horizon)
+
+Primary outputs:
+- `data/outputs/subsidy_sensitivity_analysis.csv` (may be archived to `data/outputs/bin/run_<timestamp>/` in one-stop-only mode)
+- Embedded results in `data/outputs/one_stop_output.json` (Section 9), visualised in the "Subsidy Sensitivity" tab of `data/outputs/one_stop_dashboard.html`
+
+## Deliverables Mapping
+
+This project delivers all contract requirements:
+
+| Contract Element | Output Location |
+|------------------|-----------------|
+| Insulation levels analysis | `archetype_analysis_results.txt` |
+| Heating systems analysis | `archetype_analysis_results.txt` |
+| Energy consumption estimates | `archetype_analysis_results.txt` |
+| EPC ratings and scores | `archetype_analysis_results.txt` |
+| Carbon impact | `archetype_analysis_results.txt` |
+| Energy efficiency options | `scenario_modeling_results.txt` |
+| Scenario diagnostics by property | `scenario_results_by_property.parquet` |
+| Scenario summary metrics | `scenario_results_summary.csv` |
+| Costed decarbonization pathways | `scenario_modeling_results.txt` |
+| District heating analysis | `pathway_suitability_by_tier.csv` |
+| Heat pump pathway analysis | `scenario_modeling_results.txt` |
+| Subsidy sensitivity (multi-pathway) | `subsidy_sensitivity_analysis.csv` (and Section 9 in `one_stop_output.json`) |
+| Policy implications | `executive_summary.txt` |
+
+## Timeline & Milestones
+
+- **Phase 1 (Data Acquisition)**: Complete by 3 Dec
+- **Phase 2 (Data Cleaning)**: Complete by 5 Dec
+- **Phase 3 (Archetype Analysis)**: Complete by 7 Dec
+- **Phase 4 (Spatial Overlay)**: Complete by 8 Dec
+- **Phase 5 (Scenario Modeling)**: Complete by 11 Dec
+- **Phase 6 (Subsidy Analysis)**: Complete by 13 Dec
+- **Phase 7 (Final Reporting)**: Complete by 15 Dec
+
+## Testing
+
+Run unit tests:
+```bash
+pytest tests/
+```
+
+Run with coverage:
+```bash
+pytest --cov=src tests/
+```
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/new-analysis`)
+3. Commit changes (`git commit -am 'Add new analysis module'`)
+4. Push to branch (`git push origin feature/new-analysis`)
+5. Create Pull Request
+
+## References
+
+- Hardy, A., & Glew, D. (2019). An analysis of errors in the Energy Performance certificate database. *Energy Policy*, 129, 1168-1178.
+- Energy Certificate Data API: https://get-energy-performance-data.communities.gov.uk/
+- RdSAP Methodology: https://www.bre.co.uk/sap/
+
+## License
+
+This project is licensed under the MIT License - see LICENSE file for details.
+
+## Contact
+
+For questions or issues:
+- Open an issue on GitHub
+- Contact: [project lead email]
+
+## Acknowledgments
+
+- UK Government EPC Register for open data access
+- Hardy & Glew for EPC quality assurance methodology
+- Case street residents (Shakespeare Crescent) for local calibration data
+
+---
+
+**Version**: 1.0.0
+**Last Updated**: December 2025
+**Status**: Active Development

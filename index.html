@@ -85,6 +85,20 @@
             margin-top: 4px;
         }
 
+        .project-documentation-link {
+            display: inline-block;
+            margin-top: 10px;
+            color: #60a5fa;
+            font-size: 14px;
+            font-weight: 600;
+        }
+
+        .project-documentation-link:hover,
+        .project-documentation-link:focus {
+            color: #93c5fd;
+            text-decoration: underline;
+        }
+
         .header-right {
             text-align: right;
         }
@@ -180,20 +194,6 @@
         .card-subtitle {
             color: var(--text-muted);
             font-size: 14px;
-        }
-
-        .lodgement-documentation-link {
-            display: inline-block;
-            margin-top: 10px;
-            color: #3b82f6;
-            font-size: 13px;
-            font-weight: 600;
-        }
-
-        .lodgement-documentation-link:hover,
-        .lodgement-documentation-link:focus {
-            color: #60a5fa;
-            text-decoration: underline;
         }
 
         /* Stats Grid */
@@ -763,6 +763,7 @@
                     <h1>Heat Street</h1>
                 </div>
                 <p class="header-subtitle">Low-Carbon Heating Potential for London's Edwardian Terraced Housing</p>
+                <a class="project-documentation-link" href="https://github.com/ADEData-Lab/HeatStreet/blob/main/README.md" target="_blank" rel="noopener">Read the project documentation on GitHub</a>
             </div>
             <div class="header-right">
                 <p class="label">Analysis Date</p>
@@ -966,7 +967,6 @@
                 <div class="card-header">
                     <h2 class="card-title">EPC lodgement mix over time</h2>
                     <p class="card-subtitle">Within-year share, stacked by EPC band</p>
-                    <a class="lodgement-documentation-link" href="data/outputs/figures/epc_lodgement_year_band_stacked_share_calculation.md" target="_blank" rel="noopener">View the EPC lodgement share calculation note</a>
                 </div>
                 <div class="narrative">
                     <p>
