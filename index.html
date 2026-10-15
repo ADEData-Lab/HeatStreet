@@ -433,10 +433,6 @@
             font-weight: 500;
         }
 
-        .data-table tr.selected {
-            background: rgba(59, 130, 246, 0.1);
-        }
-
         .badge {
             display: inline-block;
             padding: 4px 12px;
@@ -453,38 +449,6 @@
         .badge.blue {
             background: rgba(59, 130, 246, 0.2);
             color: var(--accent-blue);
-        }
-
-        /* Scenario Selector */
-        .scenario-selector {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 12px;
-            margin-top: 16px;
-        }
-
-        .scenario-btn {
-            background: rgba(15, 23, 42, 0.6);
-            color: var(--text-secondary);
-            border: 1px solid rgba(148, 163, 184, 0.2);
-            border-radius: 10px;
-            padding: 12px 20px;
-            font-size: 14px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: all 0.2s ease;
-            font-family: inherit;
-        }
-
-        .scenario-btn:hover {
-            background: rgba(59, 130, 246, 0.15);
-            border-color: var(--accent-blue);
-        }
-
-        .scenario-btn.active {
-            background: linear-gradient(135deg, #3b82f6, #2563eb);
-            color: white;
-            border: none;
         }
 
         /* Subsidy Selector */
@@ -517,115 +481,6 @@
             background: linear-gradient(135deg, #3b82f6, #2563eb);
             color: white;
             border: none;
-        }
-
-        /* Scenario Metrics */
-        .scenario-metrics {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 20px;
-            margin-bottom: 32px;
-        }
-
-        @media (max-width: 900px) {
-            .scenario-metrics {
-                grid-template-columns: repeat(2, 1fr);
-            }
-        }
-
-        .metric-card {
-            border-radius: 12px;
-            padding: 20px;
-            border-left: 3px solid var(--metric-color);
-        }
-
-        .metric-card.blue { background: rgba(59, 130, 246, 0.1); --metric-color: var(--accent-blue); }
-        .metric-card.green { background: rgba(34, 197, 94, 0.1); --metric-color: var(--accent-green); }
-        .metric-card.orange { background: rgba(249, 115, 22, 0.1); --metric-color: var(--accent-orange); }
-        .metric-card.purple { background: rgba(168, 85, 247, 0.1); --metric-color: var(--accent-purple); }
-
-        .metric-label {
-            color: var(--text-muted);
-            font-size: 12px;
-            margin-bottom: 8px;
-        }
-
-        .metric-value {
-            color: var(--text-primary);
-            font-size: 24px;
-            font-weight: 700;
-        }
-
-        .metric-sub {
-            color: var(--metric-color);
-            font-size: 14px;
-            margin-top: 4px;
-        }
-
-        /* EPC Progress */
-        .epc-progress {
-            background: rgba(15, 23, 42, 0.5);
-            border-radius: 12px;
-            padding: 20px;
-        }
-
-        .epc-progress-title {
-            color: var(--text-secondary);
-            font-size: 14px;
-            margin-bottom: 16px;
-        }
-
-        .epc-comparison {
-            display: flex;
-            align-items: center;
-            gap: 24px;
-        }
-
-        .epc-bar-container {
-            flex: 1;
-        }
-
-        .epc-bar-header {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 8px;
-        }
-
-        .epc-bar-label {
-            color: var(--text-muted);
-            font-size: 13px;
-        }
-
-        .epc-bar-value {
-            color: var(--text-primary);
-            font-weight: 600;
-        }
-
-        .epc-bar {
-            height: 8px;
-            background: rgba(148, 163, 184, 0.2);
-            border-radius: 4px;
-            overflow: hidden;
-        }
-
-        .epc-bar-fill {
-            height: 100%;
-            border-radius: 4px;
-            transition: width 0.5s ease;
-        }
-
-        .epc-bar-fill.before {
-            background: var(--accent-red);
-        }
-
-        .epc-bar-fill.after {
-            background: var(--accent-green);
-        }
-
-        .epc-arrow {
-            color: var(--accent-green);
-            font-size: 24px;
-            padding: 0 12px;
         }
 
         /* Glazing Grid */
@@ -1110,9 +965,8 @@
                         capital investment, annual bill impacts, and annual CO&#8322; reductions at the stock level.
                     </p>
                     <p>
-                        Fabric scenarios apply sequential upgrade measures (e.g., loft, draught-proofing, insulation, glazing). The
-                        &ldquo;Fabric Tipping&rdquo; option stops when additional measures deliver sharply lower energy savings per pound
-                        invested. Heat pump and heat network scenarios then layer in low-carbon heating routes; the Hybrid pathway uses
+                        Fabric scenarios apply sequential upgrade measures (e.g., loft, draught-proofing, insulation, glazing).
+                        Heat pump and heat network scenarios then layer in low-carbon heating routes; the Hybrid pathway uses
                         readiness and heat network suitability tiers to allocate homes to the most plausible option under the study assumptions.
                     </p>
                     <p>
@@ -1126,94 +980,18 @@
 
             <div class="card">
                 <div class="card-header">
-                    <h2 class="card-title">Select Scenario</h2>
-                    <p class="card-subtitle">Compare different decarbonisation pathways</p>
-                </div>
-                <div class="scenario-selector">
-                    <button class="scenario-btn" data-scenario="fabric_only">Fabric Only</button>
-                    <button class="scenario-btn" data-scenario="fabric_to_tipping_point">Fabric Tipping</button>
-                    <button class="scenario-btn" data-scenario="minimum_fabric_hp_ready">Min Fabric+HP</button>
-                    <button class="scenario-btn" data-scenario="heat_pump">Heat Pump</button>
-                    <button class="scenario-btn" data-scenario="heat_network">Heat Network</button>
-                    <button class="scenario-btn active" data-scenario="hybrid">Hybrid</button>
-                </div>
-            </div>
-
-            <div class="card" id="scenarioDetails">
-                <div class="card-header">
-                    <h2 class="card-title" id="scenarioTitle">Hybrid (HP + HN)</h2>
-                    <p class="card-subtitle">Detailed scenario metrics</p>
-                </div>
-
-                <div class="scenario-metrics">
-                    <div class="metric-card blue">
-                        <p class="metric-label">Total Capital Cost</p>
-                        <p class="metric-value" id="metricCapital">—</p>
-                        <p class="metric-sub" id="metricCapitalPer">—</p>
-                    </div>
-                    <div class="metric-card green">
-                        <p class="metric-label">Annual CO₂ Reduction</p>
-                        <p class="metric-value" id="metricCO2">—</p>
-                        <p class="metric-sub">per year</p>
-                    </div>
-                    <div class="metric-card orange">
-                        <p class="metric-label">Annual Bill Savings</p>
-                        <p class="metric-value" id="metricBills">—</p>
-                        <p class="metric-sub">per year</p>
-                    </div>
-                    <div class="metric-card purple">
-                        <p class="metric-label">Simple Payback</p>
-                        <p class="metric-value" id="metricPayback">—</p>
-                        <p class="metric-sub">average</p>
-                    </div>
-                </div>
-
-                <div class="epc-progress">
-                    <p class="epc-progress-title">EPC Band C+ Improvement</p>
-                    <div class="epc-comparison">
-                        <div class="epc-bar-container">
-                            <div class="epc-bar-header">
-                                <span class="epc-bar-label">Before</span>
-                                <span class="epc-bar-value" id="epcBefore">—</span>
-                            </div>
-                            <div class="epc-bar">
-                                <div class="epc-bar-fill before" id="epcBarBefore" style="width: 0%"></div>
-                            </div>
-                        </div>
-                        <span class="epc-arrow">→</span>
-                        <div class="epc-bar-container">
-                            <div class="epc-bar-header">
-                                <span class="epc-bar-label">After</span>
-                                <span class="epc-bar-value" id="epcAfter">—</span>
-                            </div>
-                            <div class="epc-bar">
-                                <div class="epc-bar-fill after" id="epcBarAfter" style="width: 0%"></div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="card">
-                <div class="card-header">
-                    <h2 class="card-title">Fabric investment tipping point</h2>
-                    <p class="card-subtitle">Diminishing returns from sequential retrofit measures</p>
+                    <h2 class="card-title">Scenario trade-offs</h2>
+                    <p class="card-subtitle">All stock-wide scenarios in one view</p>
                 </div>
                 <div class="narrative">
                     <p>
-                        The bars show the <strong>marginal efficiency</strong> of each additional fabric measure: how many kWh of annual heat-demand
-                        reduction are delivered per &pound;1,000 invested (higher is better). The line shows <strong>cumulative</strong> investment as measures
-                        are added sequentially.
-                    </p>
-                    <p>
-                        This is a practical way to explain why some measures are prioritised early (high savings per pound) and why later measures can
-                        be harder to justify on cost-effectiveness alone (lower marginal returns), even if they still contribute to deeper demand reduction.
+                        Each bubble is a scenario. Moving right means a higher capital cost per property; moving up means more annual CO&#8322;
+                        reduction; bubble area shows annual bill savings. Hover a bubble for exact costs, savings, carbon reduction and simple payback.
                     </p>
                 </div>
                 <div class="chart-container chart-container-lg" style="margin-top: 14px;">
-                    <canvas id="tippingPointChart"></canvas>
+                    <canvas id="scenarioTradeoffChart" role="img" aria-label="Scenario trade-off chart comparing capital cost per property, annual carbon reduction, annual bill savings and simple payback"></canvas>
                 </div>
-                <div class="narrative" id="tippingPointFallback" style="display:none; margin-top: 12px;"></div>
             </div>
 
             <div class="card">
@@ -1524,69 +1302,16 @@
     </script>
 
     <script>
-        // Scenario Data (overwritten after loading one_stop_output.json)
-        let scenarioData = {
-            fabric_only: {
-                name: 'Fabric Improvements Only',
-                capitalTotal: '£15.6bn',
-                capitalPer: '£22,100/property',
-                co2: '0.89 Mt',
-                bills: '£381m',
-                payback: '41 years',
-                epcBefore: 32.3,
-                epcAfter: 88.1
-            },
-            fabric_to_tipping_point: {
-                name: 'Fabric to Tipping Point',
-                capitalTotal: '£3.0bn',
-                capitalPer: '£4,193/property',
-                co2: '0.32 Mt',
-                bills: '£141m',
-                payback: '21 years',
-                epcBefore: 32.3,
-                epcAfter: 84.8
-            },
-            minimum_fabric_hp_ready: {
-                name: 'Minimum Fabric + ASHP',
-                capitalTotal: '£14.1bn',
-                capitalPer: '£19,958/property',
-                co2: '1.27 Mt',
-                bills: '£362m',
-                payback: '39 years',
-                epcBefore: 32.3,
-                epcAfter: 84.8
-            },
-            heat_pump: {
-                name: 'Heat Pump (Full Deployment)',
-                capitalTotal: '£18.7bn',
-                capitalPer: '£26,394/property',
-                co2: '1.37 Mt',
-                bills: '£401m',
-                payback: '47 years',
-                epcBefore: 32.3,
-                epcAfter: 84.8
-            },
-            heat_network: {
-                name: 'Heat Network (Full Deployment)',
-                capitalTotal: '£14.4bn',
-                capitalPer: '£20,326/property',
-                co2: '1.77 Mt',
-                bills: '£197m',
-                payback: '73 years',
-                epcBefore: 32.3,
-                epcAfter: 84.8
-            },
-            hybrid: {
-                name: 'Hybrid (HP + HN)',
-                capitalTotal: '£14.4bn',
-                capitalPer: '£20,409/property',
-                co2: '1.54 Mt',
-                bills: '£276m',
-                payback: '52 years',
-                epcBefore: 32.3,
-                epcAfter: 84.8
-            }
-        };
+        // Scenario data is derived only from the embedded one-stop output.
+        let scenarioData = {};
+        const SCENARIO_ORDER = [
+            'fabric_only',
+            'minimum_fabric_hp_ready',
+            'heat_pump',
+            'heat_network',
+            'hybrid'
+        ];
+        const SCENARIO_COLOURS = ['#3b82f6', '#8b5cf6', '#22c55e', '#f97316', '#06b6d4'];
 
         const STATE = {
             oneStop: null,
@@ -2091,140 +1816,6 @@
             });
         }
 
-        function renderTippingPointChart(oneStop) {
-            const canvas = document.getElementById('tippingPointChart');
-            const fallback = document.getElementById('tippingPointFallback');
-            if (!canvas || !fallback) return;
-
-            const rows = oneStop?.sections?.section_8?.tables?.[0]?.data || [];
-            const steps = rows.filter(r => Number(r?.step || 0) > 0);
-            if (!steps.length) {
-                const sectionStatus = getDatapointMap(oneStop?.sections?.section_8).tipping_point_analysis_status;
-                canvas.style.display = 'none';
-                fallback.style.display = 'block';
-                fallback.innerHTML = `<p><strong>Tipping-point analysis unavailable.</strong> ${escapeHtml(sectionStatus || 'No curve data was included in this run.')}</p>`;
-                return;
-            }
-
-            canvas.style.display = 'block';
-            fallback.style.display = 'none';
-            fallback.innerHTML = '';
-
-            const labels = steps.map(r => r.measure_name || r.measure_id || `Step ${r.step}`);
-            const marginalCapex = steps.map(r => Number(r.marginal_capex || 0));
-            const marginalKwh = steps.map(r => Number(r.marginal_kwh_saved || 0));
-            const cumulativeCapex = steps.map(r => Number(r.cumulative_capex || 0));
-
-            const efficiency = marginalCapex.map((capex, i) => {
-                const kwh = marginalKwh[i];
-                if (!capex || !kwh) return 0;
-                return kwh / (capex / 1000);
-            });
-
-            const COST_EFFECTIVE = 2500;
-            const MODERATE = 1000;
-            const threshold = labels.map(() => COST_EFFECTIVE);
-
-            const barColors = efficiency.map(v => (v > COST_EFFECTIVE ? '#22c55e' : (v >= MODERATE ? '#f97316' : '#ef4444')));
-
-            STATE.charts.tippingPointChart = new Chart(canvas, {
-                type: 'bar',
-                data: {
-                    labels,
-                    datasets: [
-                        {
-                            type: 'bar',
-                            label: 'Marginal efficiency (kWh saved per £1,000 invested)',
-                            data: efficiency,
-                            backgroundColor: barColors,
-                            borderRadius: 6,
-                            borderSkipped: false,
-                            yAxisID: 'y'
-                        },
-                        {
-                            type: 'line',
-                            label: 'Cumulative investment (£)',
-                            data: cumulativeCapex,
-                            yAxisID: 'y1',
-                            borderColor: '#a16207',
-                            backgroundColor: 'rgba(161, 98, 7, 0.15)',
-                            tension: 0.25,
-                            pointRadius: 3,
-                            pointHoverRadius: 5
-                        },
-                        {
-                            type: 'line',
-                            label: 'Cost-effective threshold (2,500 kWh/£1k)',
-                            data: threshold,
-                            yAxisID: 'y',
-                            borderColor: '#3b82f6',
-                            borderDash: [6, 6],
-                            pointRadius: 0,
-                            borderWidth: 2
-                        }
-                    ]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        datalabels: { display: false },
-                        legend: {
-                            position: 'top',
-                            labels: { padding: 18, usePointStyle: true, pointStyle: 'rectRounded' }
-                        },
-                        tooltip: {
-                            ...tooltipStyle,
-                            callbacks: {
-                                label: (ctx) => {
-                                    const i = ctx.dataIndex;
-                                    if (ctx.dataset.type === 'bar') {
-                                        const eff = efficiency[i] || 0;
-                                        const cap = marginalCapex[i] || 0;
-                                        const kwh = marginalKwh[i] || 0;
-                                        return [
-                                            `Marginal efficiency: ${Math.round(eff).toLocaleString()} kWh/£1k`,
-                                            `Marginal capex: £${Math.round(cap).toLocaleString()}`,
-                                            `Marginal kWh saved: ${Math.round(kwh).toLocaleString()} kWh`
-                                        ];
-                                    }
-                                    if (ctx.dataset.yAxisID === 'y1') {
-                                        const cap = cumulativeCapex[i] || 0;
-                                        return `Cumulative investment: £${Math.round(cap).toLocaleString()}`;
-                                    }
-                                    return ctx.dataset.label + ': ' + ctx.raw;
-                                }
-                            }
-                        }
-                    },
-                    scales: {
-                        x: {
-                            grid: { display: false },
-                            ticks: { maxRotation: 35, minRotation: 35 }
-                        },
-                        y: {
-                            position: 'left',
-                            title: { display: true, text: 'kWh saved per £1,000 invested', color: '#94a3b8' },
-                            grid: { color: 'rgba(148, 163, 184, 0.1)' },
-                            ticks: { callback: v => Math.round(v).toLocaleString() }
-                        },
-                        y1: {
-                            position: 'right',
-                            title: { display: true, text: 'Cumulative investment (£)', color: '#94a3b8' },
-                            grid: { display: false },
-                            ticks: {
-                                callback: v => {
-                                    const n = Number(v) || 0;
-                                    if (n >= 1000) return '£' + Math.round(n / 1000).toLocaleString() + 'k';
-                                    return '£' + Math.round(n).toLocaleString();
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-        }
-
         function renderLodgementYearBandChart(oneStop) {
             const canvas = document.getElementById('lodgementYearBandChart');
             const fallback = document.getElementById('lodgementYearBandFallback');
@@ -2645,7 +2236,6 @@
             const rows = scenarioTable?.data || [];
             const shortLabels = {
                 fabric_only: 'Fabric Only',
-                fabric_to_tipping_point: 'Fabric Tipping',
                 minimum_fabric_hp_ready: 'Min Fabric+HP',
                 heat_pump: 'Heat Pump',
                 heat_network: 'Heat Network',
@@ -2683,6 +2273,80 @@
             return out;
         }
 
+        function renderScenarioTradeoffChart() {
+            const canvas = document.getElementById('scenarioTradeoffChart');
+            if (!canvas) return;
+
+            const scenarios = SCENARIO_ORDER
+                .map(id => scenarioData[id])
+                .filter(s => s
+                    && Number.isFinite(Number(s.capitalCostPerPropertyValue))
+                    && Number.isFinite(Number(s.annualCo2ReductionKgValue))
+                    && Number.isFinite(Number(s.annualBillSavingsValue))
+                );
+            if (!scenarios.length) return;
+
+            const maxBillSavings = Math.max(1, ...scenarios.map(s => Number(s.annualBillSavingsValue)));
+            const bubbleRadius = value => 10 + 14 * Number(value) / maxBillSavings;
+
+            STATE.charts.scenarioTradeoffChart = new Chart(canvas, {
+                type: 'bubble',
+                data: {
+                    datasets: scenarios.map((scenario, index) => ({
+                        label: scenario.shortLabel,
+                        scenario,
+                        data: [{
+                            x: Number(scenario.capitalCostPerPropertyValue) / 1000,
+                            y: Number(scenario.annualCo2ReductionKgValue) / 1e9,
+                            r: bubbleRadius(scenario.annualBillSavingsValue)
+                        }],
+                        backgroundColor: `${SCENARIO_COLOURS[index % SCENARIO_COLOURS.length]}99`,
+                        borderColor: SCENARIO_COLOURS[index % SCENARIO_COLOURS.length],
+                        borderWidth: 2,
+                        hoverBorderWidth: 3
+                    }))
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: { padding: 18, usePointStyle: true, pointStyle: 'circle' }
+                        },
+                        tooltip: {
+                            ...tooltipStyle,
+                            callbacks: {
+                                title: items => items[0].dataset.label,
+                                label: context => {
+                                    const scenario = context.dataset.scenario;
+                                    return [
+                                        `Capital cost: ${formatGbp(scenario.capitalCostPerPropertyValue, 0)} per property`,
+                                        `Annual CO₂ reduction: ${formatMtFromKg(scenario.annualCo2ReductionKgValue)}`,
+                                        `Annual bill savings: ${formatGbpCompact(scenario.annualBillSavingsValue)}`,
+                                        `Simple payback: ${formatYears(scenario.paybackYearsValue)}`
+                                    ];
+                                }
+                            }
+                        }
+                    },
+                    scales: {
+                        x: {
+                            title: { display: true, text: 'Capital cost (£k per property)', color: '#94a3b8' },
+                            ticks: { callback: value => `£${value}k` },
+                            grid: { color: 'rgba(148, 163, 184, 0.1)' },
+                            grace: '10%'
+                        },
+                        y: {
+                            title: { display: true, text: 'Annual CO₂ reduction (Mt)', color: '#94a3b8' },
+                            grid: { color: 'rgba(148, 163, 184, 0.1)' },
+                            grace: '15%'
+                        }
+                    }
+                }
+            });
+        }
+
         function formatMaybePercent(v, decimals = 1) {
             if (typeof v === 'string' && v.trim().endsWith('%')) return v.trim();
             return formatPercent(v, decimals);
@@ -2715,23 +2379,11 @@
             const tbody = document.querySelector('#scenarioTable tbody');
             tbody.innerHTML = '';
 
-            const order = [
-                'fabric_only',
-                'fabric_to_tipping_point',
-                'minimum_fabric_hp_ready',
-                'heat_pump',
-                'heat_network',
-                'hybrid'
-            ];
-
-            order.forEach(id => {
+            SCENARIO_ORDER.forEach(id => {
                 const s = scenarioData[id];
                 if (!s) return;
 
                 const tr = document.createElement('tr');
-                tr.dataset.row = id;
-                if (id === 'hybrid') tr.classList.add('selected');
-
                 tr.innerHTML = `\n                    <td>${s.shortLabel}</td>\n                    <td>${formatGbpCompact(s.capitalCostTotalValue)}</td>\n                    <td>${formatGbp(s.capitalCostPerPropertyValue, 0)}</td>\n                    <td class=\"text-green\">${formatMtFromKg(s.annualCo2ReductionKgValue)}</td>\n                    <td class=\"text-orange\">${formatGbpCompact(s.annualBillSavingsValue)}</td>\n                    <td class=\"text-purple\">${formatYears(s.paybackYearsValue)}</td>\n                `;
                 tbody.appendChild(tr);
             });
@@ -2877,29 +2529,6 @@
             }
         }
 
-        function selectScenario(scenarioId) {
-            const data = scenarioData[scenarioId];
-            if (!data) return;
-
-            document.querySelectorAll('.scenario-btn').forEach(b => b.classList.toggle('active', b.dataset.scenario === scenarioId));
-
-            document.querySelectorAll('#scenarioTable tbody tr').forEach(row => {
-                row.classList.toggle('selected', row.dataset.row === scenarioId);
-            });
-
-            document.getElementById('scenarioTitle').textContent = data.name;
-            document.getElementById('metricCapital').textContent = data.capitalTotal;
-            document.getElementById('metricCapitalPer').textContent = data.capitalPer;
-            document.getElementById('metricCO2').textContent = data.co2;
-            document.getElementById('metricBills').textContent = data.bills;
-            document.getElementById('metricPayback').textContent = data.payback;
-
-            document.getElementById('epcBefore').textContent = formatPercent(data.epcBefore, 1);
-            document.getElementById('epcAfter').textContent = formatPercent(data.epcAfter, 1);
-            document.getElementById('epcBarBefore').style.width = `${Math.max(0, Math.min(100, Number(data.epcBefore || 0)))}%`;
-            document.getElementById('epcBarAfter').style.width = `${Math.max(0, Math.min(100, Number(data.epcAfter || 0)))}%`;
-        }
-
         function renderDashboard(oneStop) {
             STATE.oneStop = oneStop;
             STATE.source = oneStop.__source || 'one_stop_output.json';
@@ -2964,9 +2593,6 @@
             document.getElementById('hpTier5Count').textContent = formatInt(sec4.tier_5_count) + ' properties';
 
             scenarioData = buildScenarioDataFromOneStop(oneStop);
-            document.querySelectorAll('.scenario-btn').forEach(btn => {
-                btn.hidden = !scenarioData[btn.dataset.scenario];
-            });
             renderScenarioTable();
             renderHnVsHpComparisonTable(oneStop);
             renderHeatNetworkTierTable(oneStop);
@@ -2990,17 +2616,9 @@
             };
             const epcColors = epcEntries.map((entry, index) => epcColorMap[entry.key] || categoryColours(epcEntries.length)[index]);
 
-            const scenarioOrder = [
-                'fabric_only',
-                'fabric_to_tipping_point',
-                'minimum_fabric_hp_ready',
-                'heat_pump',
-                'heat_network',
-                'hybrid'
-            ];
-            const scenarioLabels = scenarioOrder.map(id => scenarioData[id]).filter(Boolean).map(s => s.shortLabel);
-            const scenarioCostK = scenarioOrder.map(id => scenarioData[id]).filter(Boolean).map(s => Number(s.capitalCostPerPropertyValue || 0) / 1000);
-            const scenarioCo2Mt = scenarioOrder.map(id => scenarioData[id]).filter(Boolean).map(s => Number(s.annualCo2ReductionKgValue || 0) / 1e9);
+            const scenarioLabels = SCENARIO_ORDER.map(id => scenarioData[id]).filter(Boolean).map(s => s.shortLabel);
+            const scenarioCostK = SCENARIO_ORDER.map(id => scenarioData[id]).filter(Boolean).map(s => Number(s.capitalCostPerPropertyValue || 0) / 1000);
+            const scenarioCo2Mt = SCENARIO_ORDER.map(id => scenarioData[id]).filter(Boolean).map(s => Number(s.annualCo2ReductionKgValue || 0) / 1e9);
 
             const wallEntries = orderedDistribution(sec3.wall_type_distribution || {}, [
                 { key: 'solid_brick', label: 'Solid Brick' },
@@ -3056,10 +2674,9 @@
                 readinessCounts
             });
 
-            renderTippingPointChart(oneStop);
+            renderScenarioTradeoffChart();
             renderLodgementYearBandChart(oneStop);
             renderSubsidyTab(oneStop);
-            selectScenario('hybrid');
         }
 
         // Tab Navigation
@@ -3074,13 +2691,6 @@
                 requestAnimationFrame(() => {
                     Object.values(STATE.charts).forEach(ch => { try { ch.resize(); } catch (_) {} });
                 });
-            });
-        });
-
-        // Scenario Selection
-        document.querySelectorAll('.scenario-btn').forEach(btn => {
-            btn.addEventListener('click', function() {
-                selectScenario(this.dataset.scenario);
             });
         });
 
