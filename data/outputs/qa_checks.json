@@ -1,0 +1,285 @@
+{
+  "schema_version": "1.2",
+  "run_id": "20261014T112524095003Z-bd8937ef01e1",
+  "dataset_fingerprint": "7babad33ba48d57c9b10ee8045d2ebf977ba274fd888124907abff876b14fe63",
+  "authoritative_cohort": 168046,
+  "generated_at": "2026-10-15T09:44:53.896746+00:00",
+  "status": "pass",
+  "critical_failure_count": 0,
+  "tolerances": {
+    "percentage_reconciliation_pp": 0.1,
+    "cost_absolute_gbp": 1.0,
+    "cost_relative": 1e-09,
+    "payback_absolute": 1e-10,
+    "payback_relative": 1e-10
+  },
+  "checks": [
+    {
+      "name": "utc_timing_chronology",
+      "status": "pass",
+      "critical": true,
+      "detail": "within 2 second tolerance"
+    },
+    {
+      "name": "manifest_current_run",
+      "status": "pass",
+      "critical": true,
+      "detail": "20261014T112524095003Z-bd8937ef01e1"
+    },
+    {
+      "name": "required_artifact_provenance",
+      "status": "pass",
+      "critical": true,
+      "detail": 35
+    },
+    {
+      "name": "authoritative_unique_key",
+      "status": "pass",
+      "critical": true,
+      "detail": 168046
+    },
+    {
+      "name": "spatial_tier_consistency",
+      "status": "pass",
+      "critical": true,
+      "detail": 65694
+    },
+    {
+      "name": "authoritative_cohort",
+      "status": "pass",
+      "critical": true,
+      "detail": 168046
+    },
+    {
+      "name": "scenario_property_cohorts",
+      "status": "pass",
+      "critical": true,
+      "detail": {
+        "fabric_only": 168046,
+        "fabric_to_tipping_point": 168046,
+        "heat_network": 168046,
+        "heat_pump": 168046,
+        "hybrid": 168046,
+        "minimum_fabric_hp_ready": 168046
+      }
+    },
+    {
+      "name": "diagnostic_property_cohorts",
+      "status": "pass",
+      "critical": true,
+      "detail": {
+        "baseline": 168046,
+        "fabric_only": 168046,
+        "fabric_plus_hn_only": 168046,
+        "fabric_plus_hp_only": 168046,
+        "fabric_plus_hp_plus_hn": 168046
+      }
+    },
+    {
+      "name": "epc_band_distribution_reconciliation",
+      "status": "pass",
+      "critical": true,
+      "detail": {
+        "count": 168046,
+        "percentage": 100.0
+      }
+    },
+    {
+      "name": "readiness_tier_distribution_reconciliation",
+      "status": "pass",
+      "critical": true,
+      "detail": {
+        "count": 168046,
+        "percentage": 100.0
+      }
+    },
+    {
+      "name": "spatial_tier_distribution_reconciliation",
+      "status": "pass",
+      "critical": true,
+      "detail": {
+        "count": 168046,
+        "percentage": 100.0
+      }
+    },
+    {
+      "name": "percentage_distribution_reconciliation",
+      "status": "pass",
+      "critical": true,
+      "detail": 13
+    },
+    {
+      "name": "hybrid_assignment_exclusivity",
+      "status": "pass",
+      "critical": true,
+      "detail": {
+        "heat_network": 65694,
+        "ashp": 102352
+      }
+    },
+    {
+      "name": "full_deployment_technology_contract",
+      "status": "pass",
+      "critical": true,
+      "detail": {
+        "heat_pump": {
+          "properties": 168046,
+          "ashp_installations": 168046,
+          "emitter_upgrades": 168046,
+          "heat_pumps_removed": 0
+        },
+        "minimum_fabric_hp_ready": {
+          "properties": 168046,
+          "ashp_installations": 168046,
+          "emitter_upgrades": 168046,
+          "heat_pumps_removed": 0
+        },
+        "hybrid": {
+          "properties": 168046,
+          "ashp_assignments": 102352,
+          "heat_network_assignments": 65694,
+          "heat_pumps_removed": 0
+        }
+      }
+    },
+    {
+      "name": "scenario_readiness_reconciliation",
+      "status": "pass",
+      "critical": true,
+      "detail": {
+        "minimum_fabric_hp_ready": {
+          "ashp_installed": 168046,
+          "ready_before": 37895,
+          "ready_after": 63358,
+          "residual_gap": 104688,
+          "ready_after_pct": 37.702771860085925,
+          "zero_baseline": 3,
+          "positive_demand": 168043,
+          "positive_electricity": 168043,
+          "removed": 0
+        },
+        "heat_pump": {
+          "ashp_installed": 168046,
+          "ready_before": 37895,
+          "ready_after": 105560,
+          "residual_gap": 62486,
+          "ready_after_pct": 62.816133677683496,
+          "zero_baseline": 3,
+          "positive_demand": 168043,
+          "positive_electricity": 168043,
+          "removed": 0
+        },
+        "hybrid": {
+          "ashp_installed": 102352,
+          "ready_before": 22821,
+          "ready_after": 36537,
+          "residual_gap": 65815,
+          "ready_after_pct": 35.697397217445676,
+          "zero_baseline": 3,
+          "positive_demand": 102349,
+          "positive_electricity": 102349,
+          "removed": 0
+        }
+      }
+    },
+    {
+      "name": "tenure_category_reconciliation",
+      "status": "pass",
+      "critical": true,
+      "detail": {
+        "categories": [
+          "owner_occupied",
+          "private_rented_sector",
+          "social_affordable",
+          "unknown"
+        ],
+        "property_count": 168046,
+        "share_pct": 100.0
+      }
+    },
+    {
+      "name": "hybrid_pathway_distinction",
+      "status": "pass",
+      "critical": true,
+      "detail": "hybrid differs from both pure pathways"
+    },
+    {
+      "name": "model_family_scope",
+      "status": "pass",
+      "critical": true,
+      "detail": "public and internal model scopes separated"
+    },
+    {
+      "name": "scenario_cost_reconciliation",
+      "status": "pass",
+      "critical": true,
+      "detail": 5
+    },
+    {
+      "name": "readiness_cost_reconciliation",
+      "status": "pass",
+      "critical": true,
+      "detail": {
+        "canonical_full_ashp_total_gbp": 4273489756.0,
+        "hybrid_ashp_sensitivity_total_gbp": 3761474356.0
+      }
+    },
+    {
+      "name": "payback_contract",
+      "status": "pass",
+      "critical": true,
+      "detail": 23
+    },
+    {
+      "name": "aggregate_payback_arithmetic",
+      "status": "pass",
+      "critical": true,
+      "detail": 5
+    },
+    {
+      "name": "zero_subsidy_payback_reconciliation",
+      "status": "pass",
+      "critical": true,
+      "detail": 3
+    },
+    {
+      "name": "payback_exclusion_reconciliation",
+      "status": "pass",
+      "critical": true,
+      "detail": 5
+    },
+    {
+      "name": "one_stop_json_integrity",
+      "status": "pass",
+      "critical": true,
+      "detail": {
+        "sections": 13,
+        "datapoints": 774
+      }
+    },
+    {
+      "name": "energy_price_profile_consistency",
+      "status": "pass",
+      "critical": true,
+      "detail": "january_client_report_provisional"
+    },
+    {
+      "name": "window_source_traceability",
+      "status": "pass",
+      "critical": true,
+      "detail": 2
+    },
+    {
+      "name": "removed_step_subsidy_artifact",
+      "status": "pass",
+      "critical": true,
+      "detail": "absent"
+    },
+    {
+      "name": "diagnostic_excluded_from_public_comparison",
+      "status": "pass",
+      "critical": true,
+      "detail": 3
+    }
+  ]
+}
